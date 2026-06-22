@@ -48,22 +48,3 @@ docker compose up --build
 curl http://127.0.0.1:8000/health
 ```
 
-## Agent tooling for work with the repository
-
-`Graphify` is initialized for **agent/developer work with the repo**, not as part of the application runtime contract.
-
-Current state:
-- project-scoped Codex integration installed into `.codex/` and `AGENTS.md`;
-- git hooks installed via `graphify hook install`;
-- initial code graph generated into `graphify-out/` from `app/`;
-- `graphify query`, `graphify path`, and `graphify explain` can already be used against `graphify-out/graph.json`.
-
-Useful commands:
-```bash
-graphify query "routing service" --graph graphify-out/graph.json
-graphify path "RoutingService" "HermesBackendService" --graph graphify-out/graph.json
-graphify update app
-```
-
-See also:
-- `docs/developer/agent-tooling.md`
