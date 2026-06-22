@@ -47,3 +47,4 @@ services:
 
 volumes:
   postgres_data:
+    name: ${COMPOSE_PROJECT_NAME:-support-agent}_postgres_data
