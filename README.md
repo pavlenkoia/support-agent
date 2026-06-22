@@ -20,20 +20,13 @@ Application-first skeleton for the **Агент поддержки** project.
 
 The support knowledge base is intentionally stored **outside** this repository.
 
-Current local development path:
-- `/home/tian/support-agent-kb`
-
-The application points to it through:
-- `KNOWLEDGE_BACKEND=filesystem`
-- `KNOWLEDGE_ROOT=/home/tian/support-agent-kb`
-
-This keeps the application repo separate from the durable support KB and keeps the KB available to Hermes/backend flows as an external knowledge layer.
+This repository only defines the application-side contract to an external knowledge source.
+Deployment-specific paths and environment values must be provided locally and are **not** documented here with machine-specific absolute paths.
 
 ## Quick start
 
 ### Local test run
 ```bash
-cd /home/tian/support-agent
 uv run pytest -q
 ```
 
