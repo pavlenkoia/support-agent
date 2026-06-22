@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+*.egg-info/
+
+# Environment
+.env
+deploy/env/app.env
+
+# Runtime
+logs/
+postgres_data/
+
+# Graphify derived artifacts
+graphify-out/
+app/graphify-out/
+
+# Tooling artifacts
+.codex/
+
+# Editors / OS
+.DS_Store
+.idea/
+.vscode/

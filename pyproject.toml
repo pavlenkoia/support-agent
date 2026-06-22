@@ -1,0 +1,29 @@
+[project]
+name = "support-agent"
+version = "0.1.0"
+description = "Application-first support agent skeleton"
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.116.0",
+  "uvicorn[standard]>=0.35.0",
+  "pydantic-settings>=2.10.0",
+  "sqlalchemy>=2.0.41",
+  "psycopg[binary]>=3.2.9",
+]
+
+[dependency-groups]
+dev = [
+  "pytest>=8.4.1",
+  "httpx>=0.28.1",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.setuptools]
+packages = ["app"]
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
