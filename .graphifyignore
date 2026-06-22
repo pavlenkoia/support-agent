@@ -1,8 +1,0 @@
-.git/
-.venv/
-venv/
-__pycache__/
-.pytest_cache/
-logs/
-graphify-out/
-postgres_data/

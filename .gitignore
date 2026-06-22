@@ -14,13 +14,9 @@ venv/
 .env
 deploy/env/app.env
 
-# Runtime
+# Runtime artifacts
 logs/
 postgres_data/
-
-# Graphify derived artifacts
-graphify-out/
-app/graphify-out/
 
 # Tooling artifacts
 .codex/
