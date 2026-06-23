@@ -38,6 +38,34 @@ class TelegramGatewayService:
                 "chat_id": chat_id,
             }
 
+        if text == "/new":
+            inbound = InboundMessage(
+                channel="telegram",
+                external_user_id=user_id,
+                external_chat_id=chat_id,
+                text=text,
+            )
+            reset_result = self.routing.reset_session(inbound)
+            reply_text = "Сессию сбросил. Начинаем заново — можете отправить новый запрос."
+            delivery = self.sender.send_message(chat_id, reply_text)
+            sent = delivery.get("sent")
+            if sent is None:
+                sent = bool(delivery.get("ok"))
+            return {
+                "ok": True,
+                "ignored": False,
+                "update_id": update.get("update_id"),
+                "reply_text": reply_text,
+                "delivery": {
+                    "sent": bool(sent),
+                    "result": delivery,
+                },
+                "app_result": {
+                    "command": "/new",
+                    "reset": reset_result,
+                },
+            }
+
         inbound = InboundMessage(
             channel="telegram",
             external_user_id=user_id,

@@ -22,6 +22,14 @@ class StubRouting:
             },
         }
 
+    def reset_session(self, payload) -> dict:
+        return {
+            "conversation_id": 99,
+            "case_id": 100,
+            "closed_case_ids": [88],
+            "closed_case_count": 1,
+        }
+
 
 def test_telegram_gateway_sends_human_fallback_reply() -> None:
     sender = RecordingSender()
@@ -64,3 +72,25 @@ def test_telegram_gateway_rejects_chat_not_in_allowlist() -> None:
         "chat_id": "99999",
     }
     assert sender.calls == []
+
+
+def test_telegram_gateway_handles_new_command() -> None:
+    sender = RecordingSender()
+    service = TelegramGatewayService(routing=StubRouting(), sender=sender)
+
+    result = service.handle_update({
+        "update_id": 3,
+        "message": {
+            "message_id": 12,
+            "text": "/new",
+            "chat": {"id": 12345},
+            "from": {"id": 777},
+        },
+    })
+
+    assert result["ok"] is True
+    assert result["ignored"] is False
+    assert result["reply_text"] == "Сессию сбросил. Начинаем заново — можете отправить новый запрос."
+    assert result["app_result"]["command"] == "/new"
+    assert result["app_result"]["reset"]["case_id"] == 100
+    assert sender.calls == [("12345", "Сессию сбросил. Начинаем заново — можете отправить новый запрос.")]

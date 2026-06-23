@@ -41,6 +41,14 @@ class StubRouting:
             },
         }
 
+    def reset_session(self, payload) -> dict:
+        return {
+            "conversation_id": 99,
+            "case_id": 100,
+            "closed_case_ids": [88],
+            "closed_case_count": 1,
+        }
+
 
 def test_process_once_polls_update_routes_and_acks_offset() -> None:
     sender = RecordingSender()

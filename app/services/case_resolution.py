@@ -10,8 +10,7 @@ from app.models.user import User
 from app.schemas.message import InboundMessage
 
 
-
-def resolve_case(session: Session, payload: InboundMessage) -> dict:
+def _ensure_entities(session: Session, payload: InboundMessage) -> tuple[User, ChannelAccount, Conversation]:
     user_external_id = f"{payload.channel}:{payload.external_user_id}"
     conversation_external_id = f"{payload.channel}:{payload.external_chat_id}"
 
@@ -43,6 +42,46 @@ def resolve_case(session: Session, payload: InboundMessage) -> dict:
         conversation = Conversation(external_id=conversation_external_id)
         session.add(conversation)
         session.flush()
+
+    return user, channel_account, conversation
+
+
+def reset_conversation_session(session: Session, payload: InboundMessage) -> dict:
+    user, channel_account, conversation = _ensure_entities(session, payload)
+    open_cases = session.scalars(
+        select(SupportCase)
+        .where(
+            SupportCase.conversation_id == conversation.id,
+            SupportCase.status.in_(["open", "waiting_human", "waiting_hermes"]),
+        )
+        .order_by(SupportCase.id.desc())
+    ).all()
+
+    closed_case_ids: list[int] = []
+    for support_case in open_cases:
+        support_case.status = "resolved"
+        support_case.route_mode = "session_reset"
+        closed_case_ids.append(support_case.id)
+
+    new_case = SupportCase(conversation_id=conversation.id, status="open", route_mode="session_reset")
+    session.add(new_case)
+    session.flush()
+    return {
+        "user_id": user.id,
+        "channel_account_id": channel_account.id,
+        "conversation_id": conversation.id,
+        "case_id": new_case.id,
+        "case_status": new_case.status,
+        "closed_case_ids": closed_case_ids,
+        "closed_case_count": len(closed_case_ids),
+        "channel": payload.channel,
+        "external_user_id": payload.external_user_id,
+        "external_chat_id": payload.external_chat_id,
+    }
+
+
+def resolve_case(session: Session, payload: InboundMessage) -> dict:
+    user, channel_account, conversation = _ensure_entities(session, payload)
 
     support_case = session.scalar(
         select(SupportCase)

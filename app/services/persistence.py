@@ -16,12 +16,19 @@ def persist_inbound_message(session: Session, case_id: int, payload: InboundMess
 
 
 
-def persist_workflow_event(session: Session, case_id: int, audit: dict) -> WorkflowEvent:
+def persist_workflow_event(
+    session: Session,
+    case_id: int,
+    payload: dict,
+    *,
+    event_type: str = "inbound_processed",
+    actor: str = "system:routing",
+) -> WorkflowEvent:
     event = WorkflowEvent(
         case_id=case_id,
-        event_type="inbound_processed",
-        actor="system:routing",
-        payload=audit,
+        event_type=event_type,
+        actor=actor,
+        payload=payload,
     )
     session.add(event)
     session.flush()

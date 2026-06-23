@@ -7,7 +7,7 @@ from app.core.db import SessionLocal
 from app.models.case import SupportCase
 from app.schemas.message import InboundMessage
 from app.services.audit import build_audit_event
-from app.services.case_resolution import resolve_case
+from app.services.case_resolution import reset_conversation_session, resolve_case
 from app.services.context_builder import build_context
 from app.services.direct_llm import DirectLLMService
 from app.services.outcome import OutcomeService
@@ -57,17 +57,68 @@ class RoutingService:
             "route_confidence": direct["confidence"],
         }
 
+    def reset_session(self, payload: InboundMessage) -> dict:
+        with self.session_factory() as session:
+            reset_result = reset_conversation_session(session, payload)
+            persist_workflow_event(
+                session,
+                reset_result["case_id"],
+                {
+                    "command": "/new",
+                    "conversation_id": reset_result["conversation_id"],
+                    "new_case_id": reset_result["case_id"],
+                    "closed_case_ids": reset_result["closed_case_ids"],
+                    "closed_case_count": reset_result["closed_case_count"],
+                    "channel": reset_result["channel"],
+                    "external_user_id": reset_result["external_user_id"],
+                    "external_chat_id": reset_result["external_chat_id"],
+                },
+                event_type="session_reset",
+                actor="user:telegram_command",
+            )
+            session.commit()
+            return reset_result
+
     def handle_inbound(self, payload: InboundMessage) -> dict:
         with self.session_factory() as session:
             case = resolve_case(session, payload)
             persist_inbound_message(session, case["case_id"], payload)
             context = build_context(session, payload, case, summary_service=self.summary_service)
-            retrieval = self.retrieval.retrieve(
-                payload.text,
-                self.knowledge_backend,
-                self.knowledge_root,
+
+            turn_classification = self.direct_llm.classify_turn(payload.text)
+            if turn_classification["turn_type"] == "social_turn":
+                retrieval = {
+                    "kb_status": "skipped_social_turn",
+                    "kb_skip_reason": "model_classified_social_turn",
+                    "kb_snippets": [],
+                }
+                direct = self.direct_llm.answer(payload.text, [], allow_general_without_kb=True)
+                response_strategy = {
+                    "classifier_path": "llm_turn_classifier",
+                    "response_path": "social_responder_without_kb",
+                    "knowledge_path": "kb_skipped",
+                }
+            else:
+                retrieval = self.retrieval.retrieve(
+                    payload.text,
+                    self.knowledge_backend,
+                    self.knowledge_root,
+                )
+                direct = self.direct_llm.answer(payload.text, retrieval["kb_snippets"])
+                response_strategy = {
+                    "classifier_path": "llm_turn_classifier",
+                    "response_path": "kb_grounded_direct_llm",
+                    "knowledge_path": "kb_retrieval",
+                }
+
+            persist_workflow_event(
+                session,
+                case["case_id"],
+                turn_classification,
+                event_type="turn_classified",
+                actor="system:llm_turn_classifier",
             )
-            direct = self.direct_llm.answer(payload.text, retrieval["kb_snippets"])
+
             route = self.decide_route(direct)
             outcome = self.outcome.execute(route, case, context, retrieval, payload.text)
 
@@ -77,8 +128,33 @@ class RoutingService:
                 support_case.route_mode = route["route"]
                 session.flush()
 
-            audit = build_audit_event(case, route, retrieval, outcome)
-            persist_workflow_event(session, case["case_id"], audit)
+            audit = build_audit_event(
+                case,
+                route,
+                retrieval,
+                outcome,
+                turn_classification,
+                response_strategy,
+            )
+            persist_workflow_event(
+                session,
+                case["case_id"],
+                {
+                    "response_strategy": response_strategy,
+                    "kb_status": retrieval["kb_status"],
+                    "kb_skip_reason": retrieval.get("kb_skip_reason"),
+                    "kb_snippet_count": len(retrieval.get("kb_snippets", [])),
+                },
+                event_type="response_strategy_selected",
+                actor="system:routing",
+            )
+            persist_workflow_event(
+                session,
+                case["case_id"],
+                audit,
+                event_type="inbound_processed",
+                actor="system:routing",
+            )
             session.commit()
 
             return {
