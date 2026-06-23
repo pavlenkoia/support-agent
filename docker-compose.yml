@@ -11,7 +11,7 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - ./kb:/app/kb:ro
+      - ${SUPPORT_AGENT_PROFILE_ROOT_HOST:-/home/tian/support-agent-profiles/parachute}:/data/profile:ro
       - ./logs:/app/logs
     command: ["uv", "run", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
 
@@ -25,7 +25,7 @@ services:
       db:
         condition: service_healthy
     volumes:
-      - ./kb:/app/kb:ro
+      - ${SUPPORT_AGENT_PROFILE_ROOT_HOST:-/home/tian/support-agent-profiles/parachute}:/data/profile:ro
       - ./logs:/app/logs
     command: ["uv", "run", "python", "-m", "app.workers.main"]
 

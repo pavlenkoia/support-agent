@@ -14,5 +14,4 @@ COPY app ./app
 COPY migrations ./migrations
 RUN uv sync --no-dev
 
-COPY kb ./kb
 COPY docs ./docs

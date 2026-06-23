@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -15,18 +17,42 @@ class Settings(BaseSettings):
     app_host: str = "0.0.0.0"
     app_port: int = 8000
     database_url: str = "postgresql+psycopg://support_agent:support_agent@db:5432/support_agent"
+
     direct_llm_provider: str = "stub"
+    direct_llm_base_url: str | None = None
+    direct_llm_api_key: str | None = None
     direct_llm_model: str = "stub"
+    direct_llm_temperature: float = 0.0
+    direct_llm_timeout_seconds: int = 30
+
+    summary_llm_provider: str = "stub"
+    summary_llm_base_url: str | None = None
+    summary_llm_api_key: str | None = None
+    summary_llm_model: str = "stub"
+    summary_llm_temperature: float = 0.0
+    summary_llm_timeout_seconds: int = 30
+
     hermes_backend_enabled: bool = False
     hermes_backend_mode: str = "stub"
+    support_agent_profile_root: str = "/data/profile"
     knowledge_backend: str = "filesystem"
-    knowledge_root: str = "/data/support-agent-kb"
+    knowledge_root: str | None = None
     telegram_bot_token: str | None = None
     telegram_allowed_chats: str = ""
     telegram_poll_timeout_seconds: int = 30
     telegram_poll_interval_seconds: int = 3
     telegram_poll_offset_file: str = "/app/logs/telegram-update-offset.txt"
     log_level: str = "INFO"
+
+    def model_post_init(self, __context) -> None:
+        if not self.knowledge_root:
+            self.knowledge_root = str(Path(self.support_agent_profile_root) / "kb")
+
+        if not self.direct_llm_base_url and self.direct_llm_provider == "mistral":
+            self.direct_llm_base_url = "https://api.mistral.ai/v1"
+
+        if not self.summary_llm_base_url and self.summary_llm_provider == "mistral":
+            self.summary_llm_base_url = "https://api.mistral.ai/v1"
 
 
 settings = Settings()

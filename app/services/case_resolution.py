@@ -1,14 +1,69 @@
+from __future__ import annotations
+
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from app.models.case import SupportCase
+from app.models.channel import ChannelAccount
+from app.models.conversation import Conversation
+from app.models.user import User
 from app.schemas.message import InboundMessage
 
 
-def resolve_case(payload: InboundMessage) -> dict:
-    channel_user = f"{payload.channel}:{payload.external_user_id}"
-    channel_chat = f"{payload.channel}:{payload.external_chat_id}"
+
+def resolve_case(session: Session, payload: InboundMessage) -> dict:
+    user_external_id = f"{payload.channel}:{payload.external_user_id}"
+    conversation_external_id = f"{payload.channel}:{payload.external_chat_id}"
+
+    user = session.scalar(select(User).where(User.external_id == user_external_id))
+    if user is None:
+        user = User(external_id=user_external_id)
+        session.add(user)
+        session.flush()
+
+    channel_account = session.scalar(
+        select(ChannelAccount).where(
+            ChannelAccount.channel == payload.channel,
+            ChannelAccount.external_user_id == payload.external_user_id,
+            ChannelAccount.external_chat_id == payload.external_chat_id,
+        )
+    )
+    if channel_account is None:
+        channel_account = ChannelAccount(
+            user_id=user.id,
+            channel=payload.channel,
+            external_user_id=payload.external_user_id,
+            external_chat_id=payload.external_chat_id,
+        )
+        session.add(channel_account)
+        session.flush()
+
+    conversation = session.scalar(select(Conversation).where(Conversation.external_id == conversation_external_id))
+    if conversation is None:
+        conversation = Conversation(external_id=conversation_external_id)
+        session.add(conversation)
+        session.flush()
+
+    support_case = session.scalar(
+        select(SupportCase)
+        .where(
+            SupportCase.conversation_id == conversation.id,
+            SupportCase.status.in_(["open", "waiting_human", "waiting_hermes"]),
+        )
+        .order_by(SupportCase.id.desc())
+    )
+    if support_case is None:
+        support_case = SupportCase(conversation_id=conversation.id)
+        session.add(support_case)
+        session.flush()
 
     return {
-        "user_id": channel_user,
-        "channel_account_id": channel_chat,
-        "conversation_id": channel_chat,
-        "case_id": f"{channel_chat}:{payload.external_user_id}",
-        "case_status": "open",
+        "user_id": user.id,
+        "channel_account_id": channel_account.id,
+        "conversation_id": conversation.id,
+        "case_id": support_case.id,
+        "case_status": support_case.status,
+        "channel": payload.channel,
+        "external_user_id": payload.external_user_id,
+        "external_chat_id": payload.external_chat_id,
     }
