@@ -6,8 +6,13 @@ from pathlib import Path
 
 
 TOKEN_RE = re.compile(r"[a-zA-Zа-яА-ЯёЁ0-9]{3,}")
+WIKILINK_RE = re.compile(r"\[\[([^\]]+)\]\]")
 PAGE_DIRS = ("concepts", "entities", "comparisons", "queries")
 MAX_SNIPPET_CHARS = 900
+SMALL_WIKI_MAX_TOTAL_CHARS = 25_000
+SMALL_WIKI_MAX_PAGES = 16
+INDEX_MAX_CHARS = 4_000
+SUMMARY_MAX_CHARS = 700
 
 
 @dataclass
@@ -36,9 +41,14 @@ class RetrievalService:
         if not query_terms:
             return {"kb_status": "not_found", "kb_snippets": []}
 
+        page_texts = {page: page.read_text(encoding="utf-8") for page in pages}
+        total_chars = sum(len(text) for text in page_texts.values())
+
+        if self._should_use_llm_wiki_catalog(total_chars=total_chars, page_count=len(pages)):
+            return self._build_llm_wiki_catalog(index_path=index_path, page_texts=page_texts, total_chars=total_chars)
+
         hits: list[PageHit] = []
-        for page in pages:
-            text = page.read_text(encoding="utf-8")
+        for page, text in page_texts.items():
             score = self._score_page(text, query_terms)
             if score <= 0:
                 continue
@@ -59,7 +69,7 @@ class RetrievalService:
             }
             for hit in hits[:5]
         ]
-        return {"kb_status": "found", "kb_snippets": snippets}
+        return {"kb_status": "found", "kb_snippets": snippets, "kb_mode": "lexical_page_match"}
 
     def _discover_pages(self, wiki_root: Path) -> list[Path]:
         pages: list[Path] = []
@@ -69,6 +79,99 @@ class RetrievalService:
                 continue
             pages.extend(sorted(page_dir.rglob("*.md")))
         return pages
+
+    def _should_use_llm_wiki_catalog(self, *, total_chars: int, page_count: int) -> bool:
+        return page_count <= SMALL_WIKI_MAX_PAGES and total_chars <= SMALL_WIKI_MAX_TOTAL_CHARS
+
+    def _build_llm_wiki_catalog(self, *, index_path: Path, page_texts: dict[Path, str], total_chars: int) -> dict:
+        snippets: list[dict] = [
+            {
+                "text": self._format_index(index_path.read_text(encoding="utf-8")),
+                "source_type": "wiki_index",
+                "source_ref": str(index_path),
+                "retrieval_notes": "llm-wiki catalog index for page navigation across a small compiled wiki",
+                "retrieval_mode": "llm_wiki_catalog",
+            }
+        ]
+
+        for page in sorted(page_texts):
+            text = page_texts[page]
+            title = self._extract_title(page, text)
+            summary = self._extract_summary(self._strip_frontmatter(text))
+            preview = self._extract_preview(self._strip_frontmatter(text))
+            linked_pages = self._extract_wikilinks(text)
+            snippets.append(
+                {
+                    "text": self._format_page_card(title=title, summary=summary, preview=preview, linked_pages=linked_pages),
+                    "source_type": "wiki_page_card",
+                    "source_ref": str(page),
+                    "retrieval_notes": "llm-wiki page card for LLM page selection before selective full-page reading",
+                    "retrieval_mode": "llm_wiki_catalog",
+                    "page_title": title,
+                    "linked_pages": linked_pages,
+                    "page_summary": summary,
+                    "page_preview": preview,
+                }
+            )
+
+        return {
+            "kb_status": "found",
+            "kb_snippets": snippets,
+            "kb_mode": "llm_wiki_catalog",
+            "kb_total_pages": len(page_texts),
+            "kb_total_chars": total_chars,
+        }
+
+    def _format_index(self, text: str) -> str:
+        cleaned = self._strip_frontmatter(text).strip()
+        return cleaned[:INDEX_MAX_CHARS]
+
+    def _format_page_card(self, *, title: str, summary: str, preview: str, linked_pages: list[str]) -> str:
+        lines = [f"# {title}"]
+        if summary:
+            lines.append("## Summary")
+            lines.append(summary[:SUMMARY_MAX_CHARS])
+        if preview:
+            lines.append("## Key facts")
+            lines.append(preview)
+        if linked_pages:
+            lines.append("## Related pages")
+            lines.append(", ".join(f"[[{page}]]" for page in linked_pages))
+        return "\n\n".join(lines)
+
+    def _strip_frontmatter(self, text: str) -> str:
+        if not text.startswith("---\n"):
+            return text
+        parts = text.split("\n---\n", 1)
+        if len(parts) == 2:
+            return parts[1]
+        return text
+
+    def _extract_summary(self, body: str) -> str:
+        match = re.search(r"^## Summary\n(.+?)(?:\n## |\Z)", body, flags=re.MULTILINE | re.DOTALL)
+        if not match:
+            return ""
+        return match.group(1).strip()
+
+    def _extract_preview(self, body: str) -> str:
+        lines: list[str] = []
+        for raw_line in body.splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if line.lower().startswith("title:"):
+                continue
+            lines.append(line)
+        preview_lines = lines[:6]
+        return "\n".join(preview_lines)[:SUMMARY_MAX_CHARS]
+
+    def _extract_wikilinks(self, text: str) -> list[str]:
+        links = [match.strip() for match in WIKILINK_RE.findall(text)]
+        unique_links: list[str] = []
+        for link in links:
+            if link not in unique_links:
+                unique_links.append(link)
+        return unique_links
 
     def _tokenize(self, text: str) -> set[str]:
         return {token.lower() for token in TOKEN_RE.findall(text.lower())}
@@ -80,7 +183,7 @@ class RetrievalService:
             count = lowered.count(term)
             if count:
                 score += min(count, 6)
-        if "## summary" in lowered or "## краткий вывод" in lowered or "## summary" in lowered:
+        if "## summary" in lowered or "## краткий вывод" in lowered:
             score += 1
         return score
 

@@ -72,6 +72,7 @@ class TelegramGatewayService:
             external_chat_id=chat_id,
             text=text,
         )
+        typing = self.sender.send_chat_action(chat_id, "typing")
         result = self.routing.handle_inbound(inbound)
         reply_text = self._build_reply_text(result)
         delivery = self.sender.send_message(chat_id, reply_text)
@@ -87,6 +88,7 @@ class TelegramGatewayService:
                 "sent": bool(sent),
                 "result": delivery,
             },
+            "typing": typing,
             "app_result": result,
         }
 

@@ -3,10 +3,14 @@ from app.services.telegram_gateway import TelegramGatewayService
 
 class RecordingSender:
     def __init__(self) -> None:
-        self.calls: list[tuple[str, str]] = []
+        self.calls: list[tuple[str, str, str]] = []
+
+    def send_chat_action(self, chat_id: str, action: str = "typing") -> dict:
+        self.calls.append(("action", chat_id, action))
+        return {"ok": True, "sent": True, "action": action}
 
     def send_message(self, chat_id: str, text: str) -> dict:
-        self.calls.append((chat_id, text))
+        self.calls.append(("message", chat_id, text))
         return {"ok": True, "result": {"chat_id": chat_id, "text": text}}
 
 
@@ -47,7 +51,11 @@ def test_telegram_gateway_sends_human_fallback_reply() -> None:
 
     assert result["ok"] is True
     assert result["delivery"]["sent"] is True
-    assert sender.calls == [("12345", "Передал запрос оператору. Скоро вернёмся с ответом.")]
+    assert result["typing"]["ok"] is True
+    assert sender.calls == [
+        ("action", "12345", "typing"),
+        ("message", "12345", "Передал запрос оператору. Скоро вернёмся с ответом."),
+    ]
     assert result["reply_text"] == "Передал запрос оператору. Скоро вернёмся с ответом."
 
 
@@ -93,4 +101,4 @@ def test_telegram_gateway_handles_new_command() -> None:
     assert result["reply_text"] == "Сессию сбросил. Начинаем заново — можете отправить новый запрос."
     assert result["app_result"]["command"] == "/new"
     assert result["app_result"]["reset"]["case_id"] == 100
-    assert sender.calls == [("12345", "Сессию сбросил. Начинаем заново — можете отправить новый запрос.")]
+    assert sender.calls == [("message", "12345", "Сессию сбросил. Начинаем заново — можете отправить новый запрос.")]

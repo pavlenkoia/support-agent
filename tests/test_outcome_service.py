@@ -29,7 +29,14 @@ class RecordingOutcomeService:
 
 
 class FakeDirectLLMService:
-    def answer(self, text: str, kb_hits: list[dict]) -> dict:
+    def classify_turn(self, text: str) -> dict:
+        return {
+            "turn_type": "knowledge_request",
+            "confidence": 0.0,
+            "reason": "test_default",
+        }
+
+    def answer(self, text: str, kb_hits: list[dict], *, allow_general_without_kb: bool = False) -> dict:
         return {
             "direct_status": "insufficient_confidence",
             "response_text": f"Stub direct answer for: {text}",

@@ -38,6 +38,17 @@ class TelegramBotClient:
             **({"reason": result.get("reason")} if result.get("reason") else {}),
         }
 
+    def send_chat_action(self, chat_id: str, action: str = "typing") -> dict:
+        result = self._api_call("sendChatAction", {"chat_id": chat_id, "action": action})
+        return {
+            "ok": bool(result.get("ok")),
+            "sent": bool(result.get("ok")),
+            "telegram_response": result,
+            "chat_id": chat_id,
+            "action": action,
+            **({"reason": result.get("reason")} if result.get("reason") else {}),
+        }
+
     def get_updates(self, offset: int | None = None, timeout: int = 30) -> dict:
         payload = {"timeout": timeout}
         if offset is not None:

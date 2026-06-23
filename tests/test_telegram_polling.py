@@ -24,8 +24,12 @@ class RecordingSender:
     def __init__(self):
         self.calls = []
 
+    def send_chat_action(self, chat_id: str, action: str = "typing") -> dict:
+        self.calls.append(("action", chat_id, action))
+        return {"ok": True, "sent": True, "action": action}
+
     def send_message(self, chat_id: str, text: str) -> dict:
-        self.calls.append((chat_id, text))
+        self.calls.append(("message", chat_id, text))
         return {"ok": True, "sent": True}
 
 
@@ -69,7 +73,10 @@ def test_process_once_polls_update_routes_and_acks_offset() -> None:
     result = process_once(gateway=gateway, poller=poller, acker=acker, offset=100)
 
     assert result["next_offset"] == 102
-    assert sender.calls == [("12345", "Передал запрос оператору. Скоро вернёмся с ответом.")]
+    assert sender.calls == [
+        ("action", "12345", "typing"),
+        ("message", "12345", "Передал запрос оператору. Скоро вернёмся с ответом."),
+    ]
     assert acker.offsets == [102]
     assert poller.offsets == [100]
 
