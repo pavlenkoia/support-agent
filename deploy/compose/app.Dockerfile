@@ -9,12 +9,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certifi
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 ENV PATH="/root/.local/bin:${PATH}"
 
-COPY pyproject.toml README.md ./
+COPY pyproject.toml README.md alembic.ini ./
+COPY app ./app
+COPY migrations ./migrations
 RUN uv sync --no-dev
 
-COPY app ./app
 COPY kb ./kb
 COPY docs ./docs
-COPY migrations ./migrations
 
 EXPOSE 8000

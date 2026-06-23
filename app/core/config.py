@@ -1,6 +1,12 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+def parse_csv_set(value: str | None) -> set[str]:
+    if not value:
+        return set()
+    return {item.strip() for item in value.split(',') if item.strip()}
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file="deploy/env/app.env", extra="ignore")
 
@@ -15,6 +21,11 @@ class Settings(BaseSettings):
     hermes_backend_mode: str = "stub"
     knowledge_backend: str = "filesystem"
     knowledge_root: str = "/home/tian/support-agent-kb"
+    telegram_bot_token: str | None = None
+    telegram_allowed_chats: str = ""
+    telegram_poll_timeout_seconds: int = 30
+    telegram_poll_interval_seconds: int = 3
+    telegram_poll_offset_file: str = "/app/logs/telegram-update-offset.txt"
     log_level: str = "INFO"
 
 

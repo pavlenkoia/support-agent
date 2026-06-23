@@ -1,0 +1,77 @@
+from app.services.telegram_gateway import TelegramGatewayService
+from app.workers.main import process_once
+
+
+class RecordingPoller:
+    def __init__(self, updates):
+        self.updates = updates
+        self.offsets = []
+
+    def get_updates(self, offset=None, timeout=30):
+        self.offsets.append(offset)
+        return {"ok": True, "result": self.updates}
+
+
+class RecordingAcker:
+    def __init__(self):
+        self.offsets = []
+
+    def ack(self, offset):
+        self.offsets.append(offset)
+
+
+class RecordingSender:
+    def __init__(self):
+        self.calls = []
+
+    def send_message(self, chat_id: str, text: str) -> dict:
+        self.calls.append((chat_id, text))
+        return {"ok": True, "sent": True}
+
+
+class StubRouting:
+    def handle_inbound(self, payload) -> dict:
+        return {
+            "case": {"case_status": "waiting_human"},
+            "route": {"route": "human_escalation"},
+            "outcome": {
+                "outcome_type": "human_escalation",
+                "outcome_status": "waiting_human",
+                "outcome_payload": {"handoff_status": "queued"},
+            },
+        }
+
+
+def test_process_once_polls_update_routes_and_acks_offset() -> None:
+    sender = RecordingSender()
+    gateway = TelegramGatewayService(routing=StubRouting(), sender=sender)
+    poller = RecordingPoller([
+        {
+            "update_id": 101,
+            "message": {
+                "message_id": 10,
+                "text": "Где мой заказ?",
+                "chat": {"id": 12345},
+                "from": {"id": 777},
+            },
+        }
+    ])
+    acker = RecordingAcker()
+
+    result = process_once(gateway=gateway, poller=poller, acker=acker, offset=100)
+
+    assert result["next_offset"] == 102
+    assert sender.calls == [("12345", "Передал запрос оператору. Скоро вернёмся с ответом.")]
+    assert acker.offsets == [102]
+    assert poller.offsets == [100]
+
+
+def test_process_once_no_updates_keeps_offset() -> None:
+    gateway = TelegramGatewayService(routing=StubRouting(), sender=RecordingSender())
+    poller = RecordingPoller([])
+    acker = RecordingAcker()
+
+    result = process_once(gateway=gateway, poller=poller, acker=acker, offset=55)
+
+    assert result["next_offset"] == 55
+    assert acker.offsets == []

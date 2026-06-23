@@ -20,6 +20,10 @@ postgres_data/
 
 # Tooling artifacts
 .codex/
+graphify-out/
+
+# Local knowledge-base artifacts
+kb/
 
 # Editors / OS
 .DS_Store
