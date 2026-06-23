@@ -20,7 +20,7 @@ class Settings(BaseSettings):
     hermes_backend_enabled: bool = False
     hermes_backend_mode: str = "stub"
     knowledge_backend: str = "filesystem"
-    knowledge_root: str = "/home/tian/support-agent-kb"
+    knowledge_root: str = "/data/support-agent-kb"
     telegram_bot_token: str | None = None
     telegram_allowed_chats: str = ""
     telegram_poll_timeout_seconds: int = 30

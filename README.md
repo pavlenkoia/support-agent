@@ -3,9 +3,9 @@
 Application-first skeleton for the **Агент поддержки** project.
 
 ## Included baseline
-- FastAPI app with `/health` and inbound message stub
+- FastAPI app with `/health`, inbound message flow, and Telegram gateway slice
 - PostgreSQL service in Docker Compose
-- background worker placeholder
+- polling worker for Telegram updates
 - external knowledge-layer contract
 - pytest smoke tests
 
@@ -33,6 +33,9 @@ uv run pytest -q
 ### Start with Docker Compose
 ```bash
 cp deploy/env/app.env.example deploy/env/app.env
+# then edit deploy/env/app.env locally:
+# - set KNOWLEDGE_ROOT to your external KB path
+# - set TELEGRAM_BOT_TOKEN if you want live Telegram polling
 docker compose up --build
 ```
 
