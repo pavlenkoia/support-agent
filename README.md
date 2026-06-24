@@ -7,7 +7,9 @@ Application-first skeleton for the **Агент поддержки** project.
 - PostgreSQL service in Docker Compose
 - polling worker for Telegram updates
 - external knowledge-layer contract
-- bounded support-agent loop with KB + tool gathering
+- bounded support-agent loop with planner -> tool/KB gathering -> finalize
+- separate KB agent for Karpathy-style wiki navigation and selective page reading
+- external hot-editable prompt files for the customer-facing agent and the KB agent
 - provider-aware LLM client with bounded retries/backoff for transient failures
 - grounded fallback answers when KB is present but the final LLM answer step fails
 - pytest smoke tests
@@ -25,6 +27,12 @@ The support knowledge base is intentionally stored **outside** this repository.
 
 This repository only defines the application-side contract to an external knowledge source.
 Deployment-specific paths and environment values must be provided locally and are **not** documented here with machine-specific absolute paths.
+
+Current runtime shape:
+- external `SYSTEM_PROMPT.md` for the customer-facing support agent
+- external `KB_AGENT_PROMPT.md` for the wiki-reading KB agent
+- compiled external KB pages used as the factual source of truth
+- optional runtime tools (for example weekday/date checks) before final answer generation
 
 ## Quick start
 
@@ -49,7 +57,9 @@ curl http://127.0.0.1:8000/health
 
 ## Reliability notes
 
-- Direct-answer and summary LLM clients use configurable timeout / retry settings for transient provider failures.
+- Direct-answer, KB-agent, and summary LLM clients use configurable timeout / retry settings for transient provider failures.
+- The stronger model should be allocated to the KB agent / wiki-reading step; the cheaper model can be used for the final customer-facing answer step.
 - If KB facts were already gathered and the final answer-generation call fails, the runtime degrades to a short grounded answer synthesized from the retrieved KB instead of a template refusal.
 - Broad but clearly in-domain openers (for example `Подскажите пожалуйста по прыжкам`) should prefer a short KB overview before asking clarification.
+- Date/tool paths must not loop on repeated `use_tool` after the tool result is already present; the next step must advance to KB or answer generation.
 

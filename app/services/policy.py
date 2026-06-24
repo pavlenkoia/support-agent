@@ -6,11 +6,13 @@ from typing import Any
 import yaml
 
 from app.core.config import settings
+from app.services.system_prompt import SystemPromptService
 
 
 class PolicyService:
-    def __init__(self, profile_root: str | None = None) -> None:
+    def __init__(self, profile_root: str | None = None, prompt_service: SystemPromptService | None = None) -> None:
         self.profile_root = Path(profile_root or settings.support_agent_profile_root)
+        self.prompt_service = prompt_service or SystemPromptService()
 
     def load_profile(self) -> dict[str, Any]:
         profile_path = self.profile_root / "profile.yaml"
@@ -23,6 +25,10 @@ class PolicyService:
         return data if isinstance(data, dict) else {}
 
     def render_cannot_answer(self) -> str:
+        prompt_fallback = self.prompt_service.render_cannot_answer()
+        if prompt_fallback:
+            return prompt_fallback
+
         profile = self.load_profile()
         templates = profile.get("response_templates", {}) if isinstance(profile, dict) else {}
         message = templates.get("cannot_answer") if isinstance(templates, dict) else None

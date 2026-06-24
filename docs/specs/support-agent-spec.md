@@ -10,23 +10,26 @@ It is not a ticket router and not an escalation-first bot.
 
 1. The agent must stay within an explicit domain scope from the external profile.
 2. The agent must prefer grounded answers from KB and runtime tools.
-3. The agent must not fabricate facts when KB/tool evidence is missing.
-4. If the answer cannot be grounded, the final outcome must be `cannot_answer`.
-5. If the request is outside the domain, the final outcome must be `out_of_scope`.
-6. If a critical ambiguity blocks a safe answer, the final outcome must be `clarification_requested`.
-7. The main runtime flow must not silently switch into human or Hermes escalation.
-8. A transient LLM-provider failure must not discard already gathered KB facts when a short grounded fallback answer is still possible.
-9. Broad but clearly in-domain openers should prefer a safe overview answer over unnecessary clarification.
+3. Substantive KB reasoning must pass through a dedicated KB agent that reads the compiled wiki selectively rather than treating lexical snippets as the final reasoning surface.
+4. The customer-facing support agent and the KB agent must use separate external prompt files.
+5. The agent must not fabricate facts when KB/tool evidence is missing.
+6. If the answer cannot be grounded, the final outcome must be `cannot_answer`.
+7. If the request is outside the domain, the final outcome must be `out_of_scope`.
+8. If a critical ambiguity blocks a safe answer, the final outcome must be `clarification_requested`.
+9. The main runtime flow must not silently switch into human or Hermes escalation.
+10. A transient LLM-provider failure must not discard already gathered KB facts when a short grounded fallback answer is still possible.
+11. Broad but clearly in-domain openers should prefer a safe overview answer over unnecessary clarification.
 
 ## Decision loop
 
 Per inbound turn:
 1. classify social vs substantive turn
 2. for substantive turns, assess the next action
-3. optionally gather KB facts
-4. optionally gather tool observations
-5. re-assess
-6. finalize with one of the allowed outcomes
+3. optionally gather runtime tool observations
+4. optionally gather KB facts
+5. run the dedicated KB agent over the compiled wiki material already gathered
+6. re-assess / finalize
+7. emit one of the allowed outcomes
 
 ## Tool-aware reasoning
 
@@ -36,13 +39,21 @@ Example class of task:
 - user asks about a calendar date
 - KB contains a rule such as weekend-only availability
 - tool computes the weekday for the relevant date using the current year if the year is omitted
+- once the tool result exists, the loop must advance to KB / answer generation instead of repeating `use_tool`
 - final answer combines KB rule + tool result
 
 ## Provider failure handling
 
 - LLM clients must support bounded timeout / retry / backoff settings for transient network or upstream-provider failures.
+- The KB agent is the stronger reasoning step and should be allowed to use the stronger model tier than the final answering step.
 - If the planner or final answer step fails after KB retrieval succeeded, the runtime should prefer a grounded degradation path over a template refusal whenever the retrieved KB still supports a safe short answer.
 - Deterministic degradations must be based on retrieved facts generically, not on one-off question-specific hardcodes.
+
+## External prompt contract
+
+The runtime contract depends on hot-editable external prompt files:
+- `SYSTEM_PROMPT.md` — customer-facing support agent behavior, tool obligations, and output format rules
+- `KB_AGENT_PROMPT.md` — KB wiki-reader behavior, page-selection logic, and grounded fact extraction rules
 
 ## Outcome semantics
 

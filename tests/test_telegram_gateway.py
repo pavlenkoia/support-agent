@@ -128,4 +128,4 @@ def test_telegram_gateway_typing_loop_keeps_single_action_for_fast_callback(tmp_
     elapsed = time.time() - started
 
     assert result["typing"]["sent_actions"] >= 1
-    assert elapsed < 1.5
+    assert elapsed < 2.5

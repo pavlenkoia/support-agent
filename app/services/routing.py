@@ -10,6 +10,7 @@ from app.services.audit import build_audit_event
 from app.services.case_resolution import reset_conversation_session, resolve_case
 from app.services.context_builder import build_context
 from app.services.direct_llm import DirectLLMService
+from app.services.kb_agent import KBAgentService
 from app.services.orchestrator import OrchestratorService
 from app.services.outcome import OutcomeService
 from app.services.persistence import persist_inbound_message, persist_outbound_message, persist_workflow_event
@@ -26,6 +27,7 @@ class RoutingService:
         knowledge_backend: str | None = None,
         knowledge_root: str | None = None,
         retrieval: RetrievalService | None = None,
+        kb_agent: KBAgentService | None = None,
         direct_llm: DirectLLMService | None = None,
         outcome: OutcomeService | None = None,
         summary_service: SummaryService | None = None,
@@ -37,6 +39,7 @@ class RoutingService:
         self.knowledge_backend = knowledge_backend or settings.knowledge_backend
         self.knowledge_root = knowledge_root or settings.knowledge_root
         self.retrieval = retrieval or RetrievalService()
+        self.kb_agent = kb_agent or KBAgentService()
         self.direct_llm = direct_llm or DirectLLMService()
         self.outcome = outcome or OutcomeService()
         self.summary_service = summary_service or SummaryService()
@@ -44,6 +47,7 @@ class RoutingService:
         self.tool_runtime = tool_runtime or ToolRuntimeService()
         self.orchestrator = orchestrator or OrchestratorService(
             retrieval=self.retrieval,
+            kb_agent=self.kb_agent,
             direct_llm=self.direct_llm,
             policy=self.policy,
             tool_runtime=self.tool_runtime,
@@ -77,17 +81,20 @@ class RoutingService:
             persist_inbound_message(session, case["case_id"], payload)
             context = build_context(session, payload, case, summary_service=self.summary_service)
             knowledge_query = self._build_knowledge_query(context)
-
-            turn_classification = self.direct_llm.classify_turn(payload.text, conversation_context=context)
+            turn_classification = {
+                "turn_type": "prompt_driven_dialogue",
+                "confidence": 1.0,
+                "reason": "external_system_prompt_with_tools",
+            }
             orchestrated = self.orchestrator.run(
                 text=payload.text,
                 context=context,
                 knowledge_backend=self.knowledge_backend,
                 knowledge_root=self.knowledge_root,
-                turn_classification=turn_classification,
                 knowledge_query=knowledge_query,
             )
             retrieval = orchestrated["retrieval"]
+            kb_result = orchestrated.get("kb_result", {})
             route = orchestrated["route"]
             response_strategy = orchestrated["response_strategy"]
             if orchestrated.get("loop_trace"):
@@ -123,6 +130,8 @@ class RoutingService:
                 {
                     "response_strategy": response_strategy,
                     "kb_status": retrieval["kb_status"],
+                    "kb_grounding_status": kb_result.get("grounding_status"),
+                    "kb_mode": kb_result.get("kb_mode"),
                     "kb_skip_reason": retrieval.get("kb_skip_reason"),
                     "kb_snippet_count": len(retrieval.get("kb_snippets", [])),
                 },
@@ -142,6 +151,7 @@ class RoutingService:
                 "case": case,
                 "context": context,
                 "retrieval": retrieval,
+                "kb_result": kb_result,
                 "route": {
                     key: value
                     for key, value in route.items()

@@ -25,6 +25,7 @@ TEXT_DATE_RE = re.compile(
     r"(?<!\d)(?P<day>\d{1,2})\s+(?P<month_name>января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)(?:\s+(?P<year>\d{4}))?(?!\d)",
     flags=re.IGNORECASE,
 )
+DAY_ONLY_RE = re.compile(r"(?<!\d)(?P<day>\d{1,2})(?:-?го|\s*числа)?(?!\d)", flags=re.IGNORECASE)
 
 
 class ToolRuntimeService:
@@ -87,7 +88,8 @@ class ToolRuntimeService:
         }
 
     def _extract_date(self, text: str) -> date | None:
-        now_year = datetime.now(UTC).year
+        now = datetime.now(UTC).date()
+        now_year = now.year
 
         match = NUMERIC_DATE_RE.search(text)
         if match:
@@ -103,6 +105,21 @@ class ToolRuntimeService:
             year = int(match.group("year") or now_year)
             return self._safe_date(year, month, day)
 
+        match = DAY_ONLY_RE.search(text)
+        if match:
+            day = int(match.group("day"))
+            return self._nearest_day_only_date(now, day)
+
+        return None
+
+    @staticmethod
+    def _nearest_day_only_date(current_date: date, day: int) -> date | None:
+        for month_offset in range(0, 13):
+            year = current_date.year + ((current_date.month - 1 + month_offset) // 12)
+            month = ((current_date.month - 1 + month_offset) % 12) + 1
+            candidate = ToolRuntimeService._safe_date(year, month, day)
+            if candidate and candidate >= current_date:
+                return candidate
         return None
 
     @staticmethod

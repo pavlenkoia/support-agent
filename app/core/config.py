@@ -27,6 +27,15 @@ class Settings(BaseSettings):
     direct_llm_max_retries: int = 2
     direct_llm_retry_backoff_seconds: float = 1.0
 
+    kb_agent_provider: str | None = None
+    kb_agent_base_url: str | None = None
+    kb_agent_api_key: str | None = None
+    kb_agent_model: str | None = None
+    kb_agent_temperature: float = 0.0
+    kb_agent_timeout_seconds: int | None = None
+    kb_agent_max_retries: int | None = None
+    kb_agent_retry_backoff_seconds: float | None = None
+
     summary_llm_provider: str = "stub"
     summary_llm_base_url: str | None = None
     summary_llm_api_key: str | None = None
@@ -39,6 +48,8 @@ class Settings(BaseSettings):
     hermes_backend_enabled: bool = False
     hermes_backend_mode: str = "stub"
     support_agent_profile_root: str = "/data/profile"
+    support_agent_system_prompt_path: str | None = None
+    kb_agent_system_prompt_path: str | None = None
     knowledge_backend: str = "filesystem"
     knowledge_root: str | None = None
     telegram_bot_token: str | None = None
@@ -49,11 +60,35 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
 
     def model_post_init(self, __context) -> None:
+        if not self.support_agent_system_prompt_path:
+            self.support_agent_system_prompt_path = str(Path(self.support_agent_profile_root) / "SYSTEM_PROMPT.md")
+
+        if not self.kb_agent_system_prompt_path:
+            self.kb_agent_system_prompt_path = str(Path(self.support_agent_profile_root) / "KB_AGENT_PROMPT.md")
+
         if not self.knowledge_root:
             self.knowledge_root = str(Path(self.support_agent_profile_root) / "kb")
 
+        if not self.kb_agent_provider:
+            self.kb_agent_provider = self.direct_llm_provider
+        if not self.kb_agent_base_url:
+            self.kb_agent_base_url = self.direct_llm_base_url
+        if not self.kb_agent_api_key:
+            self.kb_agent_api_key = self.direct_llm_api_key
+        if not self.kb_agent_model:
+            self.kb_agent_model = self.direct_llm_model
+        if self.kb_agent_timeout_seconds is None:
+            self.kb_agent_timeout_seconds = self.direct_llm_timeout_seconds
+        if self.kb_agent_max_retries is None:
+            self.kb_agent_max_retries = self.direct_llm_max_retries
+        if self.kb_agent_retry_backoff_seconds is None:
+            self.kb_agent_retry_backoff_seconds = self.direct_llm_retry_backoff_seconds
+
         if not self.direct_llm_base_url and self.direct_llm_provider == "mistral":
             self.direct_llm_base_url = "https://api.mistral.ai/v1"
+
+        if not self.kb_agent_base_url and self.kb_agent_provider == "mistral":
+            self.kb_agent_base_url = "https://api.mistral.ai/v1"
 
         if not self.summary_llm_base_url and self.summary_llm_provider == "mistral":
             self.summary_llm_base_url = "https://api.mistral.ai/v1"

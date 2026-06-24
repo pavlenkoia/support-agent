@@ -10,6 +10,7 @@ import yaml
 from app.core.config import settings
 from app.integrations.llm.base import BaseLLMClient
 from app.integrations.llm.factory import get_llm_client
+from app.services.system_prompt import SystemPromptService
 
 
 MAX_CATALOG_SELECTION = 3
@@ -18,7 +19,7 @@ MAX_SELECTED_WIKI_PAGES = 5
 
 
 class DirectLLMService:
-    def __init__(self, client: BaseLLMClient | None = None) -> None:
+    def __init__(self, client: BaseLLMClient | None = None, prompt_service: SystemPromptService | None = None) -> None:
         self.client = client or get_llm_client(
             provider=settings.direct_llm_provider,
             base_url=settings.direct_llm_base_url,
@@ -29,6 +30,156 @@ class DirectLLMService:
             retry_backoff_seconds=settings.direct_llm_retry_backoff_seconds,
         )
         self.temperature = settings.direct_llm_temperature
+        self.prompt_service = prompt_service or SystemPromptService()
+
+    def respond(
+        self,
+        text: str,
+        kb_result: dict[str, Any] | list[dict],
+        *,
+        conversation_context: dict | None = None,
+        tool_observations: list[dict] | None = None,
+        first_reply_in_dialogue: bool = False,
+    ) -> dict:
+        tool_observations = tool_observations or []
+        fallback_text = self.prompt_service.render_cannot_answer()
+        system_prompt = self.prompt_service.load_system_prompt()
+        kb_packet = self._coerce_kb_result(kb_result)
+
+        if settings.direct_llm_provider == "stub":
+            return self._respond_stub(
+                text,
+                kb_packet,
+                conversation_context=conversation_context,
+                tool_observations=tool_observations,
+                first_reply_in_dialogue=first_reply_in_dialogue,
+                fallback_text=fallback_text,
+            )
+
+        user_prompt = json.dumps(
+            {
+                "task": "Сформируй итоговый ответ клиенту строго по системному промпту, истории, данным KB agent и результатам инструментов.",
+                "required_json_schema": {
+                    "route": "answer|cannot_answer|out_of_scope|clarification_requested",
+                    "response_text": "string",
+                    "confidence": "number 0..1",
+                    "reason": "short string",
+                },
+                "user_message": text,
+                "first_reply_in_dialogue": first_reply_in_dialogue,
+                "conversation_context": conversation_context or {},
+                "tool_results": tool_observations,
+                "kb_agent_result": kb_packet,
+                "output_rules": [
+                    "Верни только JSON-объект по указанной схеме.",
+                    "response_text должен быть готовым текстом для клиента без служебных пояснений.",
+                    "Используй только facts и answer_basis из KB agent result плюс правила системного промпта.",
+                    "Если информации недостаточно, используй обязательный ответ из системного промпта.",
+                ],
+            },
+            ensure_ascii=False,
+        )
+
+        try:
+            raw = self.client.generate(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                temperature=self.temperature,
+                response_format={"type": "json_object"},
+            )
+            parsed: dict[str, Any] = json.loads(raw)
+        except Exception as exc:
+            return {
+                "route": "cannot_answer",
+                "response_text": fallback_text,
+                "confidence": 0.0,
+                "reason": f"prompt_runtime_error:{type(exc).__name__}",
+            }
+
+        return self._normalize_prompt_reply(parsed, fallback_text=fallback_text)
+
+    def _normalize_prompt_reply(self, parsed: dict[str, Any], *, fallback_text: str) -> dict:
+        route = str(parsed.get("route") or "cannot_answer").strip()
+        if route not in {"answer", "cannot_answer", "out_of_scope", "clarification_requested"}:
+            route = "cannot_answer"
+
+        response_text = self._sanitize_customer_text(str(parsed.get("response_text") or ""))
+        if not response_text:
+            route = "cannot_answer"
+            response_text = fallback_text
+
+        if self._contains_forbidden_output(response_text):
+            route = "cannot_answer"
+            response_text = fallback_text
+
+        return {
+            "route": route,
+            "response_text": response_text,
+            "confidence": float(parsed.get("confidence", 0.0)),
+            "reason": str(parsed.get("reason") or "prompt_runtime"),
+        }
+
+    def _sanitize_customer_text(self, text: str) -> str:
+        cleaned = re.sub(r"\s+", " ", text).strip()
+        cleaned = cleaned.replace("**", "").replace("__", "")
+        return cleaned[:1000]
+
+    def _contains_forbidden_output(self, text: str) -> bool:
+        lowered = text.lower()
+        forbidden_tokens = (
+            "knowledgebase",
+            "datetime",
+            "tool",
+            "result",
+            "input",
+            "output",
+            "json",
+            "kb_snippets",
+            "tool_results",
+        )
+        return any(token in lowered for token in forbidden_tokens) or any(ch in text for ch in "[]{}")
+
+    def _coerce_kb_result(self, kb_result: dict[str, Any] | list[dict]) -> dict[str, Any]:
+        if isinstance(kb_result, dict):
+            packet = dict(kb_result)
+            packet.setdefault("answer_context", packet.get("kb_snippets", []))
+            packet.setdefault("grounded_facts", [])
+            packet.setdefault("answer_basis", "")
+            packet.setdefault("source_refs", self._extract_source_refs(packet.get("answer_context", [])))
+            return packet
+        answer_context = kb_result if isinstance(kb_result, list) else []
+        return {
+            "kb_status": "found" if answer_context else "not_found",
+            "kb_mode": "legacy_snippets",
+            "grounding_status": "ready" if answer_context else "not_found",
+            "answer_context": answer_context,
+            "grounded_facts": [],
+            "answer_basis": "",
+            "source_refs": self._extract_source_refs(answer_context),
+        }
+
+    def _respond_stub(
+        self,
+        text: str,
+        kb_packet: dict[str, Any],
+        *,
+        conversation_context: dict | None,
+        tool_observations: list[dict],
+        first_reply_in_dialogue: bool,
+        fallback_text: str,
+    ) -> dict:
+        lowered = text.lower()
+        if any(token in lowered for token in ("цен", "стоим")):
+            reply = "Здравствуйте! Все цены доступны по ссылке https://vk.cc/cYzS5j." if first_reply_in_dialogue else "Все цены доступны по ссылке https://vk.cc/cYzS5j."
+            return {"route": "answer", "response_text": reply, "confidence": 0.9, "reason": "stub_pricing_rule"}
+        if any(token in lowered for token in ("суп", "рецепт", "марс", "погод")):
+            return {"route": "out_of_scope", "response_text": "Я помогаю только по вопросам прыжков, сертификатов и связанных услуг в Челябинске.", "confidence": 0.9, "reason": "stub_out_of_scope"}
+        grounded = self._compose_grounded_fallback_answer(text, kb_packet.get("answer_context", []), conversation_context=conversation_context)
+        if grounded:
+            if first_reply_in_dialogue and not grounded.lower().startswith(("здравств", "добрый")):
+                grounded = f"Здравствуйте! {grounded}"
+            return {"route": "answer", "response_text": grounded, "confidence": 0.75, "reason": "stub_grounded"}
+        return {"route": "cannot_answer", "response_text": fallback_text, "confidence": 0.0, "reason": "stub_cannot_answer"}
 
     def classify_turn(self, text: str, *, conversation_context: dict | None = None) -> dict:
         profile = self._load_profile_context()
@@ -184,6 +335,9 @@ class DirectLLMService:
 
         if action == "read_kb" and kb_status == "found":
             action = "answer_from_kb" if kb_hits else "cannot_answer"
+
+        if action == "use_tool" and tool_observations:
+            action = "answer_from_kb" if kb_status == "found" else "read_kb"
 
         if action == "ask_clarification" and kb_status == "not_started" and self._should_try_kb_before_clarifying(text, conversation_context, profile):
             action = "read_kb"

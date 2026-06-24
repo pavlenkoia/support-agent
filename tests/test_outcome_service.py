@@ -174,27 +174,15 @@ def test_outcome_service_builds_cannot_answer_outcome() -> None:
     assert context["case_state"]["case_status"] == "resolved"
 
 
-def test_routing_service_reads_kb_before_answer_from_kb_when_planner_skips_read_step(tmp_path: Path) -> None:
+def test_routing_service_performs_mandatory_kb_read_before_answer(tmp_path: Path) -> None:
     routing = make_test_routing_service(tmp_path)
-    calls = []
-
-    def assess_request(text, *, conversation_context=None, retrieval=None, tool_observations=None):
-        calls.append(retrieval or {})
-        return {
-            "action": "answer_from_kb",
-            "scope_status": "in_scope",
-            "confidence": 0.93,
-            "reason": "planner_skipped_read_kb",
-        }
-
-    routing.direct_llm.assess_request = assess_request
     routing.direct_llm.answer = lambda text, kb_hits, *, allow_general_without_kb=False, conversation_context=None: {
         "direct_status": "ready",
         "response_text": "Подготовка обязательна.",
         "used_kb_sources": [hit["source_ref"] for hit in kb_hits],
         "confidence": 0.91,
         "decision": "answer",
-        "reason": "grounded_after_late_read",
+        "reason": "grounded_after_mandatory_kb_read",
     }
 
     result = routing.handle_inbound(InboundMessage(
@@ -204,7 +192,7 @@ def test_routing_service_reads_kb_before_answer_from_kb_when_planner_skips_read_
         text="Нужна ли подготовка?",
     ))
 
-    assert calls[0]["kb_status"] == "not_started"
     assert result["retrieval"]["kb_status"] == "found"
+    assert result["audit"]["response_strategy"]["steps"][0] == "read_kb"
     assert result["route"]["route"] == "answer"
     assert result["outcome"]["outcome_payload"]["response_text"] == "Подготовка обязательна."

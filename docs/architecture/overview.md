@@ -9,7 +9,9 @@ Runtime layers:
 - **Telegram gateway + polling worker** for chat delivery
 - **PostgreSQL** as system of record for cases, messages, and workflow events
 - **Bounded orchestrator loop** for per-turn decision making
+- **Separate KB agent** for Karpathy-style wiki navigation, selective page reads, and grounded fact extraction
 - **External compiled knowledge base** outside the repository
+- **External prompt files** (`SYSTEM_PROMPT.md`, `KB_AGENT_PROMPT.md`) outside the repository
 - **Optional runtime tools** for current-date / calculation / environment-aware checks
 - **Provider-aware LLM client layer** with bounded retry / timeout handling for transient failures
 
@@ -34,6 +36,9 @@ Allowed actions inside the loop:
 - `cannot_answer`
 - `social_reply`
 
+Operational rule:
+- once `tool_observations` already contains the needed runtime fact, the planner must advance to `read_kb` or `answer_from_kb` instead of repeating `use_tool`
+
 Hard limits:
 - max 3 loop iterations per turn
 - max 1 tool-gather step per iteration
@@ -48,9 +53,15 @@ Chooses the next action and stops the loop within bounded limits.
 ### 2. Knowledge + tool layer
 Provides grounded facts from:
 - compiled KB pages
+- a dedicated KB agent that plans wiki navigation, selectively reads full pages, and returns grounded facts / answer basis
 - runtime tools (for example calendar/day-of-week checks)
 
-### 3. Policy layer
+### 3. Prompt layer
+Behavior is controlled by external hot-editable prompt files:
+- `SYSTEM_PROMPT.md` for the customer-facing support agent
+- `KB_AGENT_PROMPT.md` for the KB wiki-reader agent
+
+### 4. Policy layer
 Renders final user-facing fallback wording without hard-coding domain-specific channels into core state names.
 
 Examples:
@@ -77,8 +88,10 @@ The application-level outcomes are now:
 2. **Planner over-clarification is constrained**:
    - if KB has not been read yet and the opener is broad but clearly in-domain, prefer `read_kb`
    - if KB is already found and a short safe overview is possible, prefer `answer_from_kb`
-3. **Final-answer LLM failure does not erase grounded knowledge**. If KB facts were already gathered and the final answer-generation step fails, the runtime must return a short grounded fallback answer synthesized from the retrieved facts.
-4. **Deterministic fallbacks must stay generic**. The core must not hardcode one business question as the only fallback path; the degradation path must work across in-domain topics such as certificates, schedules, and rules.
+3. **The KB agent is the heavy reasoning step**. The stronger model should be allocated to page selection / selective reading / coverage review, while the final customer-facing answer step can use a lighter model.
+4. **Final-answer LLM failure does not erase grounded knowledge**. If KB facts were already gathered and the final answer-generation step fails, the runtime must return a short grounded fallback answer synthesized from the retrieved facts.
+5. **Deterministic fallbacks must stay generic**. The core must not hardcode one business question as the only fallback path; the degradation path must work across in-domain topics such as certificates, schedules, and rules.
+6. **Date/tool paths must advance after the tool result is gathered**. A live runtime must not repeat `use_tool` for the same turn once the relevant tool result is already present.
 
 ## History and context
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.services.direct_llm import DirectLLMService
+from app.services.kb_agent import KBAgentService
 from app.services.policy import PolicyService
 from app.services.retrieval import RetrievalService
 from app.services.tool_runtime import ToolRuntimeService
@@ -13,12 +14,14 @@ class OrchestratorService:
         self,
         *,
         retrieval: RetrievalService,
+        kb_agent: KBAgentService,
         direct_llm: DirectLLMService,
         policy: PolicyService,
         tool_runtime: ToolRuntimeService,
         max_iterations: int = 3,
     ) -> None:
         self.retrieval = retrieval
+        self.kb_agent = kb_agent
         self.direct_llm = direct_llm
         self.policy = policy
         self.tool_runtime = tool_runtime
@@ -31,221 +34,286 @@ class OrchestratorService:
         context: dict,
         knowledge_backend: str,
         knowledge_root: str,
-        turn_classification: dict,
         knowledge_query: str,
     ) -> dict[str, Any]:
         loop_trace: list[dict[str, Any]] = []
-
-        if turn_classification.get("turn_type") == "social_turn":
-            direct = self.direct_llm.answer(
-                text,
-                [],
-                allow_general_without_kb=True,
-                conversation_context=context,
-            )
-            response_strategy = {
-                "loop_mode": "bounded_agent_loop",
-                "classifier_path": "llm_turn_classifier",
-                "final_action": "social_reply",
-                "knowledge_path": "kb_skipped",
-                "steps": ["social_turn"],
-            }
-            return {
-                "retrieval": {
-                    "kb_status": "skipped_social_turn",
-                    "kb_skip_reason": "model_classified_social_turn",
-                    "kb_snippets": [],
-                },
-                "route": {
-                    "route": "answer",
-                    "route_reason": "social_turn",
-                    "route_confidence": float(direct.get("confidence", turn_classification.get("confidence", 0.0))),
-                    "reply": direct,
-                },
-                "response_strategy": response_strategy,
-                "loop_trace": loop_trace,
-            }
-
-        retrieval: dict[str, Any] = {"kb_status": "not_started", "kb_snippets": []}
         tool_observations: list[dict[str, Any]] = []
         tool_trace: list[dict[str, Any]] = []
-        planning_text = knowledge_query or text
+        retrieval: dict[str, Any] = {"kb_status": "not_started", "kb_snippets": [], "kb_skip_reason": None}
+        kb_result: dict[str, Any] = {}
+        planner_trace: list[dict[str, Any]] = []
+        final_reply: dict[str, Any] | None = None
 
         for iteration in range(1, self.max_iterations + 1):
-            plan = self.direct_llm.assess_request(
-                planning_text,
-                conversation_context=context,
-                retrieval=retrieval,
-                tool_observations=tool_observations,
-            )
-            loop_trace.append(
-                {
-                    "iteration": iteration,
-                    "action": plan.get("action"),
-                    "reason": plan.get("reason"),
-                    "scope_status": plan.get("scope_status"),
-                    "confidence": plan.get("confidence"),
-                }
-            )
-            action = str(plan.get("action") or "cannot_answer")
+            planner = self._plan_next_action(text, context, retrieval, tool_observations)
+            planner_action = str(planner.get("action") or "cannot_answer")
+            planner_trace.append({"iteration": iteration, **planner})
 
-            if action == "read_kb":
-                retrieval = self.retrieval.retrieve(
-                    knowledge_query,
-                    knowledge_backend,
-                    knowledge_root,
+            if retrieval.get("kb_status") != "found" and planner_action not in {"read_kb", "use_tool"}:
+                planner_action = "read_kb"
+                loop_trace.append(
+                    {
+                        "iteration": iteration,
+                        "action": "planner_override",
+                        "reason": "mandatory_kb_before_customer_reply",
+                        "requested_action": planner.get("action"),
+                        "effective_action": planner_action,
+                    }
                 )
-                continue
 
-            if action == "use_tool":
+            if planner_action == "use_tool":
                 tool_batch = self.tool_runtime.collect(
                     text=text,
                     kb_hits=retrieval.get("kb_snippets", []),
                     conversation_context=context,
                 )
-                tool_observations.extend(tool_batch.get("tool_results", []))
-                tool_trace.extend(tool_batch.get("tool_trace", []))
+                if tool_batch.get("tool_status") == "used":
+                    self._merge_tool_results(tool_observations, tool_trace, tool_batch)
+                    loop_trace.append(
+                        {
+                            "iteration": iteration,
+                            "action": "use_tool",
+                            "reason": planner.get("reason", "planner_use_tool"),
+                        }
+                    )
+                else:
+                    loop_trace.append(
+                        {
+                            "iteration": iteration,
+                            "action": "use_tool_skipped",
+                            "reason": "planner_requested_but_no_tool_match",
+                        }
+                    )
                 continue
 
-            if action == "ask_clarification":
-                clarification_text = self.policy.render_clarification(plan.get("clarification_question"))
-                response_strategy = {
-                    "loop_mode": "bounded_agent_loop",
-                    "classifier_path": "llm_turn_classifier",
-                    "final_action": "ask_clarification",
-                    "knowledge_path": retrieval.get("kb_status", "not_started"),
-                    "tool_trace": tool_trace,
-                    "steps": [item["action"] for item in loop_trace],
-                }
-                return {
-                    "retrieval": retrieval,
-                    "route": {
-                        "route": "clarification_requested",
-                        "route_reason": str(plan.get("reason") or "clarification_required"),
-                        "route_confidence": float(plan.get("confidence", 0.0)),
-                        "reply": {
-                            "response_text": clarification_text,
-                            "reason": str(plan.get("reason") or "clarification_required"),
-                            "tool_observations": tool_observations,
-                        },
-                    },
-                    "response_strategy": response_strategy,
-                    "loop_trace": loop_trace,
-                }
-
-            if action == "out_of_scope":
-                response_strategy = {
-                    "loop_mode": "bounded_agent_loop",
-                    "classifier_path": "llm_turn_classifier",
-                    "final_action": "out_of_scope",
-                    "knowledge_path": retrieval.get("kb_status", "not_started"),
-                    "tool_trace": tool_trace,
-                    "steps": [item["action"] for item in loop_trace],
-                }
-                return {
-                    "retrieval": retrieval,
-                    "route": {
-                        "route": "out_of_scope",
-                        "route_reason": str(plan.get("reason") or "out_of_scope"),
-                        "route_confidence": float(plan.get("confidence", 0.0)),
-                        "reply": {
-                            "response_text": self.policy.render_out_of_scope(),
-                            "reason": str(plan.get("reason") or "out_of_scope"),
-                            "tool_observations": tool_observations,
-                        },
-                    },
-                    "response_strategy": response_strategy,
-                    "loop_trace": loop_trace,
-                }
-
-            if action == "answer_from_kb":
-                if retrieval.get("kb_status") == "not_started":
-                    retrieval = self.retrieval.retrieve(
-                        knowledge_query,
-                        knowledge_backend,
-                        knowledge_root,
-                    )
-                answer_text = knowledge_query
-                if tool_observations:
-                    answer_text += "\n\nRuntime observations:\n" + "\n".join(
-                        f"- {item.get('summary', '')}" for item in tool_observations if item.get("summary")
-                    )
-                direct = self.direct_llm.answer(
-                    answer_text,
-                    retrieval.get("kb_snippets", []),
-                    conversation_context={**context, "tool_observations": tool_observations},
+            if planner_action == "read_kb":
+                retrieval_query = self._augment_query_with_tool_results(knowledge_query or text, tool_observations)
+                retrieval = self.retrieval.retrieve(retrieval_query, knowledge_backend, knowledge_root)
+                loop_trace.append(
+                    {
+                        "iteration": iteration,
+                        "action": "read_kb",
+                        "reason": planner.get("reason", "mandatory_kb_lookup"),
+                        "kb_status": retrieval.get("kb_status"),
+                    }
                 )
-                if direct.get("decision") == "answer" and str(direct.get("response_text") or "").strip():
-                    direct["tool_observations"] = tool_observations
-                    response_strategy = {
-                        "loop_mode": "bounded_agent_loop",
-                        "classifier_path": "llm_turn_classifier",
-                        "final_action": "answer_from_kb",
-                        "knowledge_path": retrieval.get("kb_status", "not_started"),
-                        "tool_trace": tool_trace,
-                        "steps": [item["action"] for item in loop_trace],
-                        "knowledge_query": knowledge_query,
-                    }
-                    return {
-                        "retrieval": retrieval,
-                        "route": {
-                            "route": "answer",
-                            "route_reason": str(direct.get("reason") or plan.get("reason") or "answer_from_kb"),
-                            "route_confidence": float(direct.get("confidence", plan.get("confidence", 0.0))),
-                            "reply": direct,
-                        },
-                        "response_strategy": response_strategy,
-                        "loop_trace": loop_trace,
-                    }
-                plan = {**plan, "reason": str(direct.get("reason") or plan.get("reason") or "cannot_answer")}
-                action = "cannot_answer"
 
-            if action == "cannot_answer":
-                response_strategy = {
-                    "loop_mode": "bounded_agent_loop",
-                    "classifier_path": "llm_turn_classifier",
-                    "final_action": "cannot_answer",
-                    "knowledge_path": retrieval.get("kb_status", "not_started"),
-                    "tool_trace": tool_trace,
-                    "steps": [item["action"] for item in loop_trace],
+                post_kb_tools = self.tool_runtime.collect(
+                    text=text,
+                    kb_hits=retrieval.get("kb_snippets", []),
+                    conversation_context=context,
+                )
+                if post_kb_tools.get("tool_status") == "used":
+                    self._merge_tool_results(tool_observations, tool_trace, post_kb_tools)
+                    loop_trace.append(
+                        {
+                            "iteration": iteration,
+                            "action": "use_tool",
+                            "reason": "post_kb_tool_check",
+                        }
+                    )
+                continue
+
+            if planner_action == "ask_clarification":
+                final_reply = {
+                    "route": "clarification_requested",
+                    "response_text": str(planner.get("clarification_question") or self.policy.render_cannot_answer()),
+                    "confidence": float(planner.get("confidence", 0.0)),
+                    "reason": str(planner.get("reason") or "planner_clarification"),
                 }
-                return {
-                    "retrieval": retrieval,
-                    "route": {
-                        "route": "cannot_answer",
-                        "route_reason": str(plan.get("reason") or "cannot_answer"),
-                        "route_confidence": float(plan.get("confidence", 0.0)),
-                        "reply": {
-                            "response_text": self.policy.render_cannot_answer(),
-                            "reason": str(plan.get("reason") or "cannot_answer"),
-                            "tool_observations": tool_observations,
-                        },
-                    },
-                    "response_strategy": response_strategy,
-                    "loop_trace": loop_trace,
+                loop_trace.append(
+                    {
+                        "iteration": iteration,
+                        "action": "clarification_requested",
+                        "reason": final_reply["reason"],
+                    }
+                )
+                break
+
+            kb_result = self._ensure_kb_result(text, context, retrieval, tool_observations, kb_result, loop_trace, iteration)
+            final_reply = self._finalize_reply(
+                text=text,
+                context=context,
+                retrieval=retrieval,
+                kb_result=kb_result,
+                tool_observations=tool_observations,
+                planner_action=planner_action,
+                planner_reason=str(planner.get("reason") or ""),
+            )
+            loop_trace.append(
+                {
+                    "iteration": iteration,
+                    "action": final_reply.get("route", "cannot_answer"),
+                    "reason": final_reply.get("reason", "prompt_runtime"),
+                    "planner_action": planner_action,
                 }
+            )
+            break
+
+        if final_reply is None:
+            kb_result = self._ensure_kb_result(text, context, retrieval, tool_observations, kb_result, loop_trace, self.max_iterations)
+            final_reply = self._finalize_reply(
+                text=text,
+                context=context,
+                retrieval=retrieval,
+                kb_result=kb_result,
+                tool_observations=tool_observations,
+                planner_action="max_iterations_fallback",
+                planner_reason="max_iterations_fallback",
+            )
+            loop_trace.append(
+                {
+                    "iteration": self.max_iterations,
+                    "action": final_reply.get("route", "cannot_answer"),
+                    "reason": final_reply.get("reason", "prompt_runtime"),
+                    "planner_action": "max_iterations_fallback",
+                }
+            )
+
+        route = {
+            "route": str(final_reply.get("route") or "cannot_answer"),
+            "route_reason": str(final_reply.get("reason") or "prompt_runtime"),
+            "route_confidence": float(final_reply.get("confidence", 0.0)),
+            "reply": {
+                "response_text": str(final_reply.get("response_text") or self.policy.render_cannot_answer()),
+                "reason": str(final_reply.get("reason") or "prompt_runtime"),
+                "tool_observations": tool_observations,
+            },
+        }
 
         response_strategy = {
-            "loop_mode": "bounded_agent_loop",
-            "classifier_path": "llm_turn_classifier",
-            "final_action": "cannot_answer",
-            "knowledge_path": retrieval.get("kb_status", "not_started"),
+            "loop_mode": "agentic_bounded_loop_with_kb_agent",
+            "final_action": route["route"],
+            "knowledge_path": retrieval.get("kb_status", "not_found"),
+            "kb_agent_mode": kb_result.get("kb_mode", "unknown"),
+            "kb_agent_grounding_status": kb_result.get("grounding_status", "not_found"),
+            "kb_agent_trace": kb_result.get("trace", {}),
+            "planner_trace": planner_trace,
             "tool_trace": tool_trace,
             "steps": [item["action"] for item in loop_trace],
-            "stop_reason": "iteration_limit_reached",
+            "knowledge_query": self._augment_query_with_tool_results(knowledge_query or text, tool_observations),
         }
         return {
             "retrieval": retrieval,
-            "route": {
-                "route": "cannot_answer",
-                "route_reason": "iteration_limit_reached",
-                "route_confidence": 0.0,
-                "reply": {
-                    "response_text": self.policy.render_cannot_answer(),
-                    "reason": "iteration_limit_reached",
-                    "tool_observations": tool_observations,
-                },
-            },
+            "kb_result": kb_result,
+            "route": route,
             "response_strategy": response_strategy,
             "loop_trace": loop_trace,
         }
+
+    def _plan_next_action(
+        self,
+        text: str,
+        context: dict,
+        retrieval: dict[str, Any],
+        tool_observations: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        if hasattr(self.direct_llm, "assess_request"):
+            return self.direct_llm.assess_request(
+                text,
+                conversation_context={**context, "tool_observations": tool_observations},
+                retrieval=retrieval,
+                tool_observations=tool_observations,
+            )
+        if retrieval.get("kb_status") != "found":
+            if self.tool_runtime.collect(text=text, kb_hits=retrieval.get("kb_snippets", []), conversation_context=context).get("tool_status") == "used" and not tool_observations:
+                return {"action": "use_tool", "scope_status": "in_scope", "confidence": 0.5, "reason": "fallback_date_tool_first", "clarification_question": ""}
+            return {"action": "read_kb", "scope_status": "in_scope", "confidence": 0.5, "reason": "fallback_mandatory_kb", "clarification_question": ""}
+        return {"action": "answer_from_kb", "scope_status": "in_scope", "confidence": 0.5, "reason": "fallback_answer_from_kb", "clarification_question": ""}
+
+    def _finalize_reply(
+        self,
+        *,
+        text: str,
+        context: dict,
+        retrieval: dict[str, Any],
+        kb_result: dict[str, Any],
+        tool_observations: list[dict[str, Any]],
+        planner_action: str,
+        planner_reason: str,
+    ) -> dict[str, Any]:
+        if hasattr(self.direct_llm, "respond"):
+            return self.direct_llm.respond(
+                text,
+                kb_result,
+                conversation_context={
+                    **context,
+                    "tool_observations": tool_observations,
+                    "planner_action": planner_action,
+                    "planner_reason": planner_reason,
+                },
+                tool_observations=tool_observations,
+                first_reply_in_dialogue=self._is_first_reply(context),
+            )
+        legacy = self.direct_llm.answer(
+            text,
+            kb_result.get("answer_context", retrieval.get("kb_snippets", [])),
+            allow_general_without_kb=False,
+            conversation_context={
+                **context,
+                "tool_observations": tool_observations,
+                "planner_action": planner_action,
+                "planner_reason": planner_reason,
+            },
+        )
+        return {
+            "route": "answer" if legacy.get("decision") == "answer" else "cannot_answer",
+            "response_text": str(legacy.get("response_text") or ""),
+            "confidence": float(legacy.get("confidence", 0.0)),
+            "reason": str(legacy.get("reason") or "legacy_answer"),
+        }
+
+    def _ensure_kb_result(
+        self,
+        text: str,
+        context: dict,
+        retrieval: dict[str, Any],
+        tool_observations: list[dict[str, Any]],
+        kb_result: dict[str, Any],
+        loop_trace: list[dict[str, Any]],
+        iteration: int,
+    ) -> dict[str, Any]:
+        if kb_result:
+            return kb_result
+        kb_result = self.kb_agent.read(
+            text,
+            retrieval.get("kb_snippets", []),
+            conversation_context={**context, "tool_observations": tool_observations},
+        )
+        loop_trace.append(
+            {
+                "iteration": iteration,
+                "action": "kb_agent_read",
+                "reason": kb_result.get("grounding_status", "not_found"),
+            }
+        )
+        return kb_result
+
+    def _is_first_reply(self, context: dict) -> bool:
+        return not any(
+            str(item.get("role") or "") == "assistant"
+            for item in context.get("recent_messages", [])
+            if isinstance(item, dict)
+        )
+
+    def _augment_query_with_tool_results(self, knowledge_query: str, tool_observations: list[dict[str, Any]]) -> str:
+        if not tool_observations:
+            return knowledge_query
+        summaries = [str(item.get("summary") or "").strip() for item in tool_observations if str(item.get("summary") or "").strip()]
+        if not summaries:
+            return knowledge_query
+        return f"{knowledge_query}\n\nTool observations:\n" + "\n".join(f"- {item}" for item in summaries)
+
+    def _merge_tool_results(
+        self,
+        tool_observations: list[dict[str, Any]],
+        tool_trace: list[dict[str, Any]],
+        tool_batch: dict[str, Any],
+    ) -> None:
+        seen = {str(item.get("kind") or "") + "|" + str(item.get("summary") or "") for item in tool_observations}
+        for item in tool_batch.get("tool_results", []):
+            key = str(item.get("kind") or "") + "|" + str(item.get("summary") or "")
+            if key not in seen:
+                tool_observations.append(item)
+                seen.add(key)
+        tool_trace.extend(tool_batch.get("tool_trace", []))
