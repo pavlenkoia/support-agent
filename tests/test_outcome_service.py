@@ -29,17 +29,47 @@ class RecordingOutcomeService:
 
 
 class FakeDirectLLMService:
-    def classify_turn(self, text: str) -> dict:
+    def classify_turn(self, text: str, *, conversation_context: dict | None = None) -> dict:
         return {
             "turn_type": "knowledge_request",
             "confidence": 0.0,
             "reason": "test_default",
         }
 
-    def answer(self, text: str, kb_hits: list[dict], *, allow_general_without_kb: bool = False) -> dict:
+    def assess_request(
+        self,
+        text: str,
+        *,
+        conversation_context: dict | None = None,
+        retrieval: dict | None = None,
+        tool_observations: list[dict] | None = None,
+    ) -> dict:
+        retrieval = retrieval or {"kb_status": "not_started", "kb_snippets": []}
+        if retrieval.get("kb_status") == "not_started":
+            return {
+                "action": "read_kb",
+                "scope_status": "uncertain",
+                "confidence": 0.6,
+                "reason": "test_read_kb_first",
+            }
+        return {
+            "action": "answer_from_kb",
+            "scope_status": "in_scope",
+            "confidence": 0.8,
+            "reason": "test_answer_from_grounding",
+        }
+
+    def answer(
+        self,
+        text: str,
+        kb_hits: list[dict],
+        *,
+        allow_general_without_kb: bool = False,
+        conversation_context: dict | None = None,
+    ) -> dict:
         return {
             "direct_status": "insufficient_confidence",
-            "response_text": f"Stub direct answer for: {text}",
+            "response_text": "",
             "used_kb_sources": [hit["source_ref"] for hit in kb_hits],
             "confidence": 0.4,
             "decision": "handoff",
@@ -53,7 +83,6 @@ class FakeSummaryService:
         if not cleaned:
             return None
         return " | ".join(cleaned[:3])
-
 
 
 def make_test_routing_service(tmp_path: Path) -> RoutingService:
@@ -78,8 +107,7 @@ def make_test_routing_service(tmp_path: Path) -> RoutingService:
     )
 
 
-
-def test_routing_service_delegates_outcome_execution_for_direct_route(tmp_path: Path) -> None:
+def test_routing_service_delegates_outcome_execution_for_answer_route(tmp_path: Path) -> None:
     routing = make_test_routing_service(tmp_path)
     payload = InboundMessage(
         channel="telegram",
@@ -88,7 +116,7 @@ def test_routing_service_delegates_outcome_execution_for_direct_route(tmp_path: 
         text="What are your business hours?",
     )
 
-    routing.direct_llm.answer = lambda text, kb_hits: {
+    routing.direct_llm.answer = lambda text, kb_hits, *, allow_general_without_kb=False, conversation_context=None: {
         "direct_status": "ready",
         "response_text": "We are open from 9 to 18.",
         "used_kb_sources": [hit["source_ref"] for hit in kb_hits],
@@ -103,7 +131,7 @@ def test_routing_service_delegates_outcome_execution_for_direct_route(tmp_path: 
 
     assert recorder.calls
     route, case, context, retrieval, user_message = recorder.calls[0]
-    assert route["route"] == "direct_answer"
+    assert route["route"] == "answer"
     assert isinstance(case["case_id"], int)
     assert context["user_message"] == "What are your business hours?"
     assert context["session_summary"] == "What are your business hours?"
@@ -112,8 +140,7 @@ def test_routing_service_delegates_outcome_execution_for_direct_route(tmp_path: 
     assert result["outcome"]["outcome_payload"]["response_text"] == "delegated"
 
 
-
-def test_outcome_service_builds_waiting_human_outcome() -> None:
+def test_outcome_service_builds_cannot_answer_outcome() -> None:
     service = OutcomeService()
     case = {
         "case_id": "case-1",
@@ -132,15 +159,52 @@ def test_outcome_service_builds_waiting_human_outcome() -> None:
         "kb_snippets": [{"text": "x", "source_type": "kb_article", "source_ref": "kb://1"}],
     }
     route = {
-        "route": "human_escalation",
-        "route_reason": "low_confidence_and_hermes_disabled",
+        "route": "cannot_answer",
+        "route_reason": "low_grounding",
         "route_confidence": 0.4,
+        "reply": {"response_text": "Сейчас не могу дать точный ответ на этот вопрос."},
     }
 
     outcome = service.execute(route, case, context, retrieval, "Need help")
 
-    assert outcome["outcome_type"] == "human_escalation"
-    assert outcome["outcome_status"] == "waiting_human"
-    assert outcome["outcome_payload"]["handoff_status"] == "queued"
-    assert case["case_status"] == "waiting_human"
-    assert context["case_state"]["case_status"] == "waiting_human"
+    assert outcome["outcome_type"] == "cannot_answer"
+    assert outcome["outcome_status"] == "completed"
+    assert outcome["outcome_payload"]["response_text"] == "Сейчас не могу дать точный ответ на этот вопрос."
+    assert case["case_status"] == "resolved"
+    assert context["case_state"]["case_status"] == "resolved"
+
+
+def test_routing_service_reads_kb_before_answer_from_kb_when_planner_skips_read_step(tmp_path: Path) -> None:
+    routing = make_test_routing_service(tmp_path)
+    calls = []
+
+    def assess_request(text, *, conversation_context=None, retrieval=None, tool_observations=None):
+        calls.append(retrieval or {})
+        return {
+            "action": "answer_from_kb",
+            "scope_status": "in_scope",
+            "confidence": 0.93,
+            "reason": "planner_skipped_read_kb",
+        }
+
+    routing.direct_llm.assess_request = assess_request
+    routing.direct_llm.answer = lambda text, kb_hits, *, allow_general_without_kb=False, conversation_context=None: {
+        "direct_status": "ready",
+        "response_text": "Подготовка обязательна.",
+        "used_kb_sources": [hit["source_ref"] for hit in kb_hits],
+        "confidence": 0.91,
+        "decision": "answer",
+        "reason": "grounded_after_late_read",
+    }
+
+    result = routing.handle_inbound(InboundMessage(
+        channel="telegram",
+        external_user_id="u-late-read",
+        external_chat_id="c-late-read",
+        text="Нужна ли подготовка?",
+    ))
+
+    assert calls[0]["kb_status"] == "not_started"
+    assert result["retrieval"]["kb_status"] == "found"
+    assert result["route"]["route"] == "answer"
+    assert result["outcome"]["outcome_payload"]["response_text"] == "Подготовка обязательна."

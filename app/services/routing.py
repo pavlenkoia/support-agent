@@ -10,9 +10,12 @@ from app.services.audit import build_audit_event
 from app.services.case_resolution import reset_conversation_session, resolve_case
 from app.services.context_builder import build_context
 from app.services.direct_llm import DirectLLMService
+from app.services.orchestrator import OrchestratorService
 from app.services.outcome import OutcomeService
-from app.services.persistence import persist_inbound_message, persist_workflow_event
+from app.services.persistence import persist_inbound_message, persist_outbound_message, persist_workflow_event
+from app.services.policy import PolicyService
 from app.services.retrieval import RetrievalService
+from app.services.tool_runtime import ToolRuntimeService
 from app.workers.summarizer import SummaryService
 
 
@@ -26,6 +29,9 @@ class RoutingService:
         direct_llm: DirectLLMService | None = None,
         outcome: OutcomeService | None = None,
         summary_service: SummaryService | None = None,
+        policy: PolicyService | None = None,
+        tool_runtime: ToolRuntimeService | None = None,
+        orchestrator: OrchestratorService | None = None,
     ) -> None:
         self.session_factory = session_factory
         self.knowledge_backend = knowledge_backend or settings.knowledge_backend
@@ -34,28 +40,14 @@ class RoutingService:
         self.direct_llm = direct_llm or DirectLLMService()
         self.outcome = outcome or OutcomeService()
         self.summary_service = summary_service or SummaryService()
-
-    def decide_route(self, direct: dict) -> dict:
-        if direct["confidence"] >= 0.7:
-            return {
-                "route": "direct_answer",
-                "route_reason": "confidence_threshold_met",
-                "route_confidence": direct["confidence"],
-                "direct_result": direct,
-            }
-
-        if settings.hermes_backend_enabled:
-            return {
-                "route": "hermes_escalation",
-                "route_reason": "low_confidence_direct_path",
-                "route_confidence": direct["confidence"],
-            }
-
-        return {
-            "route": "human_escalation",
-            "route_reason": "low_confidence_and_hermes_disabled",
-            "route_confidence": direct["confidence"],
-        }
+        self.policy = policy or PolicyService()
+        self.tool_runtime = tool_runtime or ToolRuntimeService()
+        self.orchestrator = orchestrator or OrchestratorService(
+            retrieval=self.retrieval,
+            direct_llm=self.direct_llm,
+            policy=self.policy,
+            tool_runtime=self.tool_runtime,
+        )
 
     def reset_session(self, payload: InboundMessage) -> dict:
         with self.session_factory() as session:
@@ -84,32 +76,22 @@ class RoutingService:
             case = resolve_case(session, payload)
             persist_inbound_message(session, case["case_id"], payload)
             context = build_context(session, payload, case, summary_service=self.summary_service)
+            knowledge_query = self._build_knowledge_query(context)
 
-            turn_classification = self.direct_llm.classify_turn(payload.text)
-            if turn_classification["turn_type"] == "social_turn":
-                retrieval = {
-                    "kb_status": "skipped_social_turn",
-                    "kb_skip_reason": "model_classified_social_turn",
-                    "kb_snippets": [],
-                }
-                direct = self.direct_llm.answer(payload.text, [], allow_general_without_kb=True)
-                response_strategy = {
-                    "classifier_path": "llm_turn_classifier",
-                    "response_path": "social_responder_without_kb",
-                    "knowledge_path": "kb_skipped",
-                }
-            else:
-                retrieval = self.retrieval.retrieve(
-                    payload.text,
-                    self.knowledge_backend,
-                    self.knowledge_root,
-                )
-                direct = self.direct_llm.answer(payload.text, retrieval["kb_snippets"])
-                response_strategy = {
-                    "classifier_path": "llm_turn_classifier",
-                    "response_path": "kb_grounded_direct_llm",
-                    "knowledge_path": "kb_retrieval",
-                }
+            turn_classification = self.direct_llm.classify_turn(payload.text, conversation_context=context)
+            orchestrated = self.orchestrator.run(
+                text=payload.text,
+                context=context,
+                knowledge_backend=self.knowledge_backend,
+                knowledge_root=self.knowledge_root,
+                turn_classification=turn_classification,
+                knowledge_query=knowledge_query,
+            )
+            retrieval = orchestrated["retrieval"]
+            route = orchestrated["route"]
+            response_strategy = orchestrated["response_strategy"]
+            if orchestrated.get("loop_trace"):
+                response_strategy["loop_trace"] = orchestrated["loop_trace"]
 
             persist_workflow_event(
                 session,
@@ -119,7 +101,6 @@ class RoutingService:
                 actor="system:llm_turn_classifier",
             )
 
-            route = self.decide_route(direct)
             outcome = self.outcome.execute(route, case, context, retrieval, payload.text)
 
             support_case = session.scalar(select(SupportCase).where(SupportCase.id == case["case_id"]))
@@ -164,8 +145,40 @@ class RoutingService:
                 "route": {
                     key: value
                     for key, value in route.items()
-                    if key not in {"direct_result"}
+                    if key not in {"reply"}
                 },
                 "outcome": outcome,
                 "audit": audit,
             }
+
+    def record_outbound_message(self, case_id: int, text: str) -> None:
+        cleaned = str(text or "").strip()
+        if not cleaned:
+            return
+
+        with self.session_factory() as session:
+            persist_outbound_message(session, case_id, cleaned)
+            session.commit()
+
+    def _build_knowledge_query(self, context: dict) -> str:
+        current_message = str(context.get("user_message") or "").strip()
+        recent_messages = context.get("recent_messages", [])
+        if not isinstance(recent_messages, list):
+            recent_messages = []
+        recent_messages = [item for item in recent_messages if isinstance(item, dict)]
+        if len(recent_messages) <= 1:
+            return current_message
+
+        previous_messages = recent_messages[:-1]
+        summary = str(context.get("session_summary") or "").strip()
+        parts = [f"Current user message: {current_message}"]
+        if previous_messages:
+            parts.append("Recent conversation context:")
+            for item in previous_messages[-4:]:
+                role = str(item.get("role") or "user").strip() or "user"
+                content = str(item.get("content") or "").strip()
+                if content:
+                    parts.append(f"- {role}: {content}")
+        if summary:
+            parts.append(f"Session summary: {summary}")
+        return "\n".join(parts)

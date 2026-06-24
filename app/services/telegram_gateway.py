@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+import threading
+import time
+from collections.abc import Callable
+from typing import Any
+
 from app.core.config import parse_csv_set, settings
 from app.integrations.telegram.client import TelegramBotClient
 from app.schemas.message import InboundMessage
@@ -12,10 +17,12 @@ class TelegramGatewayService:
         routing: RoutingService | None = None,
         sender: TelegramBotClient | None = None,
         allowed_chat_ids: set[str] | None = None,
+        typing_interval_seconds: float = 4.0,
     ) -> None:
         self.routing = routing or RoutingService()
         self.sender = sender or TelegramBotClient(token=settings.telegram_bot_token)
         self.allowed_chat_ids = allowed_chat_ids if allowed_chat_ids is not None else parse_csv_set(settings.telegram_allowed_chats)
+        self.typing_interval_seconds = typing_interval_seconds
 
     def handle_update(self, update: dict) -> dict:
         message = update.get("message") or update.get("edited_message") or {}
@@ -72,13 +79,16 @@ class TelegramGatewayService:
             external_chat_id=chat_id,
             text=text,
         )
-        typing = self.sender.send_chat_action(chat_id, "typing")
-        result = self.routing.handle_inbound(inbound)
+        result, typing = self._run_with_typing(chat_id, lambda: self.routing.handle_inbound(inbound))
         reply_text = self._build_reply_text(result)
         delivery = self.sender.send_message(chat_id, reply_text)
         sent = delivery.get("sent")
         if sent is None:
             sent = bool(delivery.get("ok"))
+        if sent:
+            case_id = ((result.get("case") or {}).get("case_id"))
+            if case_id is not None:
+                self.routing.record_outbound_message(case_id, reply_text)
         return {
             "ok": True,
             "ignored": False,
@@ -92,20 +102,41 @@ class TelegramGatewayService:
             "app_result": result,
         }
 
+    def _run_with_typing(self, chat_id: str, callback: Callable[[], dict]) -> tuple[dict, dict[str, Any]]:
+        typing_result = self.sender.send_chat_action(chat_id, "typing")
+        stop_event = threading.Event()
+        sent_actions = 1 if typing_result.get("ok") else 0
+        errors: list[dict[str, Any]] = []
+
+        def keepalive() -> None:
+            nonlocal sent_actions
+            while not stop_event.wait(self.typing_interval_seconds):
+                result = self.sender.send_chat_action(chat_id, "typing")
+                if result.get("ok"):
+                    sent_actions += 1
+                else:
+                    errors.append(result)
+
+        worker = threading.Thread(target=keepalive, name=f"telegram-typing-{chat_id}", daemon=True)
+        worker.start()
+        try:
+            result = callback()
+        finally:
+            stop_event.set()
+            worker.join(timeout=self.typing_interval_seconds + 0.5)
+
+        return result, {
+            "ok": bool(typing_result.get("ok")),
+            "initial": typing_result,
+            "sent_actions": sent_actions,
+            "errors": errors,
+        }
+
     @staticmethod
     def _build_reply_text(result: dict) -> str:
         outcome = result.get("outcome", {})
-        outcome_type = outcome.get("outcome_type")
         payload = outcome.get("outcome_payload", {})
-
-        if outcome_type == "direct_answer":
-            return payload.get("response_text") or "Ответ подготовлен."
-
-        if outcome_type == "human_escalation":
-            return "Передал запрос оператору. Скоро вернёмся с ответом."
-
-        if outcome_type == "hermes_escalation":
-            draft = payload.get("response_draft") if isinstance(payload, dict) else None
-            return draft or "Запрос принят в обработку. Скоро вернёмся с ответом."
-
-        return "Запрос получен. Скоро вернёмся с ответом."
+        response_text = payload.get("response_text") if isinstance(payload, dict) else None
+        if response_text:
+            return response_text
+        return "Запрос получен."

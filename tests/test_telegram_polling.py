@@ -36,14 +36,17 @@ class RecordingSender:
 class StubRouting:
     def handle_inbound(self, payload) -> dict:
         return {
-            "case": {"case_status": "waiting_human"},
-            "route": {"route": "human_escalation"},
+            "case": {"case_status": "resolved", "case_id": 1},
+            "route": {"route": "cannot_answer"},
             "outcome": {
-                "outcome_type": "human_escalation",
-                "outcome_status": "waiting_human",
-                "outcome_payload": {"handoff_status": "queued"},
+                "outcome_type": "cannot_answer",
+                "outcome_status": "completed",
+                "outcome_payload": {"response_text": "Сейчас не могу дать точный ответ на этот вопрос."},
             },
         }
+
+    def record_outbound_message(self, case_id: int, text: str) -> None:
+        self.recorded = (case_id, text)
 
     def reset_session(self, payload) -> dict:
         return {
@@ -75,7 +78,7 @@ def test_process_once_polls_update_routes_and_acks_offset() -> None:
     assert result["next_offset"] == 102
     assert sender.calls == [
         ("action", "12345", "typing"),
-        ("message", "12345", "Передал запрос оператору. Скоро вернёмся с ответом."),
+        ("message", "12345", "Сейчас не могу дать точный ответ на этот вопрос."),
     ]
     assert acker.offsets == [102]
     assert poller.offsets == [100]

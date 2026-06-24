@@ -15,6 +15,8 @@ class SummaryService:
             api_key=settings.summary_llm_api_key,
             model=settings.summary_llm_model,
             timeout_seconds=settings.summary_llm_timeout_seconds,
+            max_retries=settings.summary_llm_max_retries,
+            retry_backoff_seconds=settings.summary_llm_retry_backoff_seconds,
         )
         self.temperature = settings.summary_llm_temperature
 

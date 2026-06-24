@@ -27,7 +27,7 @@ def upgrade() -> None:
         sa.Column("id", sa.Integer(), primary_key=True),
         sa.Column("conversation_id", sa.Integer(), sa.ForeignKey("conversations.id"), nullable=False),
         sa.Column("status", sa.String(length=64), nullable=False, server_default="open"),
-        sa.Column("route_mode", sa.String(length=64), nullable=False, server_default="direct_answer"),
+        sa.Column("route_mode", sa.String(length=64), nullable=False, server_default="intake"),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
     )
     op.create_table(

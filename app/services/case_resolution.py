@@ -85,10 +85,7 @@ def resolve_case(session: Session, payload: InboundMessage) -> dict:
 
     support_case = session.scalar(
         select(SupportCase)
-        .where(
-            SupportCase.conversation_id == conversation.id,
-            SupportCase.status.in_(["open", "waiting_human", "waiting_hermes"]),
-        )
+        .where(SupportCase.conversation_id == conversation.id)
         .order_by(SupportCase.id.desc())
     )
     if support_case is None:

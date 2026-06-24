@@ -22,13 +22,22 @@ def build_context(
         .limit(10)
     ).all()
 
-    recent_turns = [message.content for message in reversed(recent_messages)]
+    ordered_messages = list(reversed(recent_messages))
+    recent_turns = [message.content for message in ordered_messages]
+    recent_messages_payload = [
+        {
+            "role": message.role,
+            "content": message.content,
+        }
+        for message in ordered_messages
+    ]
     summarizer = summary_service or SummaryService()
     session_summary = summarizer.summarize_case(recent_turns)
 
     return {
         "user_message": payload.text,
         "recent_turns": recent_turns,
+        "recent_messages": recent_messages_payload,
         "session_summary": session_summary,
         "case_state": {
             "case_id": case["case_id"],

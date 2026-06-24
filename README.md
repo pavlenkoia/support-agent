@@ -7,6 +7,9 @@ Application-first skeleton for the **Агент поддержки** project.
 - PostgreSQL service in Docker Compose
 - polling worker for Telegram updates
 - external knowledge-layer contract
+- bounded support-agent loop with KB + tool gathering
+- provider-aware LLM client with bounded retries/backoff for transient failures
+- grounded fallback answers when KB is present but the final LLM answer step fails
 - pytest smoke tests
 
 ## Project layout
@@ -43,4 +46,10 @@ docker compose up --build
 ```bash
 curl http://127.0.0.1:8000/health
 ```
+
+## Reliability notes
+
+- Direct-answer and summary LLM clients use configurable timeout / retry settings for transient provider failures.
+- If KB facts were already gathered and the final answer-generation call fails, the runtime degrades to a short grounded answer synthesized from the retrieved KB instead of a template refusal.
+- Broad but clearly in-domain openers (for example `Подскажите пожалуйста по прыжкам`) should prefer a short KB overview before asking clarification.
 

@@ -23,14 +23,18 @@ class Settings(BaseSettings):
     direct_llm_api_key: str | None = None
     direct_llm_model: str = "stub"
     direct_llm_temperature: float = 0.0
-    direct_llm_timeout_seconds: int = 30
+    direct_llm_timeout_seconds: int = 45
+    direct_llm_max_retries: int = 2
+    direct_llm_retry_backoff_seconds: float = 1.0
 
     summary_llm_provider: str = "stub"
     summary_llm_base_url: str | None = None
     summary_llm_api_key: str | None = None
     summary_llm_model: str = "stub"
     summary_llm_temperature: float = 0.0
-    summary_llm_timeout_seconds: int = 30
+    summary_llm_timeout_seconds: int = 45
+    summary_llm_max_retries: int = 2
+    summary_llm_retry_backoff_seconds: float = 1.0
 
     hermes_backend_enabled: bool = False
     hermes_backend_mode: str = "stub"

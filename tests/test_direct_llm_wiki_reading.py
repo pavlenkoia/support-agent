@@ -23,6 +23,11 @@ class SequentialClient(BaseLLMClient):
         return json.dumps(response, ensure_ascii=False)
 
 
+class AlwaysFailClient(BaseLLMClient):
+    def generate(self, *, system_prompt: str, user_prompt: str, temperature: float = 0.0, response_format=None) -> str:
+        raise RuntimeError("forced failure")
+
+
 def test_direct_llm_navigates_catalog_reviews_coverage_and_answers_from_selected_pages(tmp_path: Path) -> None:
     booking = tmp_path / "booking-and-schedule.md"
     booking.write_text("# Booking and Schedule\n\nЛучше согласовать заранее.\n", encoding="utf-8")
@@ -216,3 +221,47 @@ def test_direct_llm_keeps_legacy_five_hit_cap_for_non_catalog_snippets() -> None
     payload = json.loads(client.calls[0]["user_prompt"])
     assert payload["kb_mode"] == "retrieved_snippets"
     assert len(payload["kb_snippets"]) == 5
+
+
+def test_direct_llm_falls_back_to_grounded_jump_process_answer_on_llm_error() -> None:
+    service = DirectLLMService(client=AlwaysFailClient())
+    kb_hits = [
+        {
+            "source_ref": "kb://skydiving",
+            "source_type": "wiki_page",
+            "text": (
+                "Прыжки проходят на аэродроме Калачево по выходным. "
+                "Тандем-прыжок выполняется с высоты 2500 м после инструктажа 15–30 минут. "
+                "Самостоятельный прыжок выполняется с высоты 800–900 м после подготовки 3–4 часа."
+            ),
+        }
+    ]
+
+    result = service.answer("как проходят прыжки7", kb_hits)
+
+    assert result["decision"] == "answer"
+    assert result["reason"] == "llm_fallback:RuntimeError"
+    assert "Калачево" in result["response_text"]
+    assert "2500 м" in result["response_text"]
+    assert "800–900 м" in result["response_text"]
+
+
+def test_direct_llm_falls_back_to_grounded_certificate_answer_on_llm_error() -> None:
+    service = DirectLLMService(client=AlwaysFailClient())
+    kb_hits = [
+        {
+            "source_ref": "kb://certificate",
+            "source_type": "wiki_page",
+            "text": (
+                "Для использования сертификат нужно предъявить в распечатанном виде на аэродроме. "
+                "Срок действия сертификата — 6 месяцев с даты покупки."
+            ),
+        }
+    ]
+
+    result = service.answer("нужен ли распечатанный сертификат?", kb_hits)
+
+    assert result["decision"] == "answer"
+    assert result["reason"] == "llm_fallback:RuntimeError"
+    assert "распечатанном виде" in result["response_text"]
+    assert "6 месяцев" in result["response_text"]

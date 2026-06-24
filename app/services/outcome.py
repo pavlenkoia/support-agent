@@ -1,16 +1,4 @@
-from app.services.escalation import EscalationService
-from app.services.hermes_backend import HermesBackendService
-
-
 class OutcomeService:
-    def __init__(
-        self,
-        hermes: HermesBackendService | None = None,
-        escalation: EscalationService | None = None,
-    ) -> None:
-        self.hermes = hermes or HermesBackendService()
-        self.escalation = escalation or EscalationService()
-
     def execute(
         self,
         route: dict,
@@ -19,35 +7,44 @@ class OutcomeService:
         retrieval: dict,
         user_message: str,
     ) -> dict:
+        _ = (retrieval, user_message)
         route_name = route["route"]
+        reply = route.get("reply", {})
 
-        if route_name == "direct_answer":
+        if route_name == "answer":
             case["case_status"] = "resolved"
             context["case_state"]["case_status"] = "resolved"
             return {
-                "outcome_type": "direct_answer",
+                "outcome_type": "answer",
                 "outcome_status": "completed",
-                "outcome_payload": route["direct_result"],
+                "outcome_payload": reply,
             }
 
-        if route_name == "hermes_escalation":
-            case["case_status"] = "waiting_hermes"
-            context["case_state"]["case_status"] = "waiting_hermes"
-            hermes_result = self.hermes.analyze(user_message, context, retrieval)
+        if route_name == "cannot_answer":
+            case["case_status"] = "resolved"
+            context["case_state"]["case_status"] = "resolved"
             return {
-                "outcome_type": "hermes_escalation",
-                "outcome_status": "pending",
-                "outcome_payload": hermes_result,
+                "outcome_type": "cannot_answer",
+                "outcome_status": "completed",
+                "outcome_payload": reply,
             }
 
-        if route_name == "human_escalation":
-            case["case_status"] = "waiting_human"
-            context["case_state"]["case_status"] = "waiting_human"
-            handoff = self.escalation.to_human(route["route_reason"], case, context, retrieval)
+        if route_name == "out_of_scope":
+            case["case_status"] = "resolved"
+            context["case_state"]["case_status"] = "resolved"
             return {
-                "outcome_type": "human_escalation",
-                "outcome_status": "waiting_human",
-                "outcome_payload": handoff,
+                "outcome_type": "out_of_scope",
+                "outcome_status": "completed",
+                "outcome_payload": reply,
+            }
+
+        if route_name == "clarification_requested":
+            case["case_status"] = "waiting_user"
+            context["case_state"]["case_status"] = "waiting_user"
+            return {
+                "outcome_type": "clarification_requested",
+                "outcome_status": "waiting_user",
+                "outcome_payload": reply,
             }
 
         raise ValueError(f"Unsupported route: {route_name}")
