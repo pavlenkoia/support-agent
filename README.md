@@ -3,15 +3,18 @@
 Application-first skeleton for the **Агент поддержки** project.
 
 ## Included baseline
-- FastAPI app with `/health`, inbound message flow, and Telegram gateway slice
+- FastAPI app with `/health` and normalized inbound message flow
 - PostgreSQL service in Docker Compose
-- polling worker for Telegram updates
+- polling transport workers for Telegram and VK
+- Telegram gateway slice for bot polling delivery
+- VK gateway slice via VK Bots Long Poll API for community direct messages
 - external knowledge-layer contract
 - bounded support-agent loop with planner -> tool/KB gathering -> finalize
 - separate KB agent for Karpathy-style wiki navigation and selective page reading
 - external hot-editable prompt files for the customer-facing agent and the KB agent
 - provider-aware LLM client with bounded retries/backoff for transient failures
 - grounded fallback answers when KB is present but the final LLM answer step fails
+- transport persistence for raw events, outbound-send reconciliation, and VK human-override state
 - pytest smoke tests
 
 ## Project layout
@@ -47,6 +50,7 @@ cp deploy/env/app.env.example deploy/env/app.env
 # then edit deploy/env/app.env locally:
 # - set KNOWLEDGE_ROOT to your external KB path
 # - set TELEGRAM_BOT_TOKEN if you want live Telegram polling
+# - set VK_ENABLED=true, VK_GROUP_ID, and VK_ACCESS_TOKEN if you want live VK polling
 docker compose up --build
 ```
 
@@ -54,6 +58,25 @@ docker compose up --build
 ```bash
 curl http://127.0.0.1:8000/health
 ```
+
+## Transport notes
+
+### Supported channels in the current repository
+- `telegram` — polling worker + gateway adapter
+- `vk` — VK Bots Long Poll worker + gateway adapter for community direct messages
+
+### VK first-version scope
+- inbound customer message: `message_new`
+- outgoing community activity event: `message_reply`
+- target surface: direct messages to the VK community
+- out of scope for v1: VK chats / besedy and history backfill
+
+### VK manual-admin override rule
+- if a `message_reply` matches a recent bot send, it is reconciled as `sent_by=bot`
+- if a `message_reply` does not match a recent bot send, it is treated as a live admin reply
+- a live admin reply activates silence for 1 hour from the last such reply
+- inbound messages during that window are still stored, but the bot does not answer
+- the worker re-checks override state immediately before `messages.send` to avoid stale auto-replies racing a human admin
 
 ## Reliability notes
 

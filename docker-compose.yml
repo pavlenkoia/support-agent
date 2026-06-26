@@ -29,6 +29,20 @@ services:
       - ./logs:/app/logs
     command: ["uv", "run", "python", "-m", "app.workers.main"]
 
+  vk-worker:
+    build:
+      context: .
+      dockerfile: deploy/compose/worker.Dockerfile
+    env_file:
+      - deploy/env/app.env
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ${SUPPORT_AGENT_PROFILE_ROOT_HOST:-/home/tian/support-agent-profiles/parachute}:/data/profile:ro
+      - ./logs:/app/logs
+    command: ["uv", "run", "python", "-m", "app.workers.vk_main"]
+
   db:
     image: postgres:16
     environment:

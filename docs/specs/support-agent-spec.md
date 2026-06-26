@@ -19,6 +19,9 @@ It is not a ticket router and not an escalation-first bot.
 9. The main runtime flow must not silently switch into human or Hermes escalation.
 10. A transient LLM-provider failure must not discard already gathered KB facts when a short grounded fallback answer is still possible.
 11. Broad but clearly in-domain openers should prefer a safe overview answer over unnecessary clarification.
+12. Channel-specific transport workers must reuse the same application runtime rather than creating a second support agent.
+13. VK transport-level manual-admin intervention must silence auto-replies for 1 hour from the last unmatched `message_reply`.
+14. Transport-level override must be re-checked immediately before a VK reply is sent.
 
 ## Decision loop
 
@@ -48,6 +51,21 @@ Example class of task:
 - The KB agent is the stronger reasoning step and should be allowed to use the stronger model tier than the final answering step.
 - If the planner or final answer step fails after KB retrieval succeeded, the runtime should prefer a grounded degradation path over a template refusal whenever the retrieved KB still supports a safe short answer.
 - Deterministic degradations must be based on retrieved facts generically, not on one-off question-specific hardcodes.
+
+## Channel contract notes
+
+### Telegram
+- worker polls Bot API updates
+- gateway normalizes inbound updates into the shared runtime contract
+
+### VK
+- worker polls VK Bots Long Poll API
+- `message_new` is the inbound customer message event
+- `message_reply` is the observed outgoing community activity event
+- direct messages to the community are in scope for v1
+- group chats / besedy and history backfill are out of scope for v1
+- unmatched `message_reply` activates a 1-hour human override window
+- inbound messages during override are still persisted, but no automatic reply is sent
 
 ## External prompt contract
 

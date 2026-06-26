@@ -10,9 +10,18 @@ from app.models.user import User
 from app.schemas.message import InboundMessage
 
 
+def ensure_conversation(session: Session, *, channel: str, external_chat_id: str) -> Conversation:
+    conversation_external_id = f"{channel}:{external_chat_id}"
+    conversation = session.scalar(select(Conversation).where(Conversation.external_id == conversation_external_id))
+    if conversation is None:
+        conversation = Conversation(external_id=conversation_external_id)
+        session.add(conversation)
+        session.flush()
+    return conversation
+
+
 def _ensure_entities(session: Session, payload: InboundMessage) -> tuple[User, ChannelAccount, Conversation]:
     user_external_id = f"{payload.channel}:{payload.external_user_id}"
-    conversation_external_id = f"{payload.channel}:{payload.external_chat_id}"
 
     user = session.scalar(select(User).where(User.external_id == user_external_id))
     if user is None:
@@ -37,11 +46,7 @@ def _ensure_entities(session: Session, payload: InboundMessage) -> tuple[User, C
         session.add(channel_account)
         session.flush()
 
-    conversation = session.scalar(select(Conversation).where(Conversation.external_id == conversation_external_id))
-    if conversation is None:
-        conversation = Conversation(external_id=conversation_external_id)
-        session.add(conversation)
-        session.flush()
+    conversation = ensure_conversation(session, channel=payload.channel, external_chat_id=payload.external_chat_id)
 
     return user, channel_account, conversation
 

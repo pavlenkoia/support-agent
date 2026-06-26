@@ -57,6 +57,21 @@ class Settings(BaseSettings):
     telegram_poll_timeout_seconds: int = 30
     telegram_poll_interval_seconds: int = 3
     telegram_poll_offset_file: str = "/app/logs/telegram-update-offset.txt"
+
+    vk_enabled: bool = False
+    vk_group_id: str | None = None
+    vk_access_token: str | None = None
+    vk_api_version: str = "5.199"
+    vk_longpoll_wait_seconds: int = 25
+    vk_longpoll_mode: int | None = None
+    vk_longpoll_version: int | None = None
+    vk_poll_interval_seconds: int = 3
+    vk_poll_state_file: str = "/app/logs/vk-longpoll-state.json"
+    vk_request_timeout_seconds: int = 30
+    vk_max_retries: int = 3
+    vk_retry_backoff_seconds: float = 1.0
+    vk_override_silence_seconds: int = 3600
+
     log_level: str = "INFO"
 
     def model_post_init(self, __context) -> None:

@@ -7,7 +7,8 @@ This repository now targets a **bounded support-agent loop** rather than a linea
 Runtime layers:
 - **FastAPI app** for inbound API and health checks
 - **Telegram gateway + polling worker** for chat delivery
-- **PostgreSQL** as system of record for cases, messages, and workflow events
+- **VK gateway + VK Bots Long Poll worker** for VK community direct messages
+- **PostgreSQL** as system of record for cases, messages, workflow events, and transport state
 - **Bounded orchestrator loop** for per-turn decision making
 - **Separate KB agent** for Karpathy-style wiki navigation, selective page reads, and grounded fact extraction
 - **External compiled knowledge base** outside the repository
@@ -92,6 +93,29 @@ The application-level outcomes are now:
 4. **Final-answer LLM failure does not erase grounded knowledge**. If KB facts were already gathered and the final answer-generation step fails, the runtime must return a short grounded fallback answer synthesized from the retrieved facts.
 5. **Deterministic fallbacks must stay generic**. The core must not hardcode one business question as the only fallback path; the degradation path must work across in-domain topics such as certificates, schedules, and rules.
 6. **Date/tool paths must advance after the tool result is gathered**. A live runtime must not repeat `use_tool` for the same turn once the relevant tool result is already present.
+
+## Transport-state persistence
+
+The repository now includes transport-level persistence separate from business dialogue content:
+- `transport_events` — raw inbound/outbound transport-event journal with dedupe key and processing status
+- `outbound_transport_sends` — bot-send reconciliation records used to match later transport-side echo/activity events
+- `conversation_transport_states` — per-conversation transport state such as last bot reply, last admin reply, and active human-override window
+
+This transport layer exists around the current `RoutingService`; it does not replace the existing case/message runtime.
+
+## VK channel behavior
+
+Current VK slice boundaries:
+- inbound customer traffic enters through `message_new`
+- outgoing community activity is observed through `message_reply`
+- supported surface is VK community direct messages, not group chats / besedy
+- no history backfill is required for v1
+
+Manual-admin override rule:
+- unmatched `message_reply` is treated as a live admin reply
+- that reply activates silence for 1 hour from the last admin message
+- inbound user messages are still persisted during silence
+- before a bot reply is actually sent, the worker re-checks override state to prevent a stale race with a human admin reply
 
 ## History and context
 

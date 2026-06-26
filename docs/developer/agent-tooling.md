@@ -35,7 +35,7 @@ graphify path "RoutingService" "HermesBackendService" --graph graphify-out/graph
 
 To refresh the code graph after edits:
 ```bash
-graphify update app
+graphify update .
 ```
 
 ## Scope rule for this project

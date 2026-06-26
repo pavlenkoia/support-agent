@@ -5,6 +5,20 @@
 - `POST /api/v1/messages/inbound`
 - `POST /telegram/webhook`
 
+## Shared inbound message contract
+
+The normalized application inbound contract is transport-neutral and currently accepts these fields:
+- `channel`
+- `external_user_id`
+- `external_chat_id`
+- `text`
+- optional `external_message_id`
+- optional `external_event_type`
+- optional `external_event_id`
+- optional `received_at`
+- optional `raw_event`
+- optional `metadata`
+
 ## Inbound response envelope
 
 `POST /api/v1/messages/inbound` returns:
@@ -22,6 +36,8 @@ Current audit fields of interest:
 - `audit.response_strategy.steps` — compact step sequence such as `read_kb -> kb_agent_read -> answer`
 - `audit.response_strategy.loop_trace` — per-iteration planner/action trace
 - `audit.response_strategy.tool_trace` — structured runtime-tool trace for date/math/live-fact checks
+
+Transport workers may also keep transport-level journal state outside the API response envelope; for VK this includes raw event processing, send reconciliation, and override suppression state.
 
 ## Internal route contract
 
@@ -53,3 +69,11 @@ Additional outcome payload fields may include grounded runtime context such as:
 - `reason` preserving degraded-but-grounded lineage for internal debugging
 
 For degraded-but-grounded answers, `outcome.outcome_payload.reason` should preserve the failure lineage (for example `llm_fallback:RuntimeError`) while `response_text` remains customer-facing and free of runtime internals.
+
+## Transport persistence side-contracts
+
+These are internal persistence contracts rather than public HTTP endpoints, but they are part of the shipped repository behavior:
+- raw transport events are journaled with a dedupe key and processing status
+- outbound transport sends are stored for later reconciliation against transport-side activity events
+- VK conversation transport state stores `last_bot_reply_at`, `last_admin_reply_at`, and `human_override_until`
+- VK `message_reply` is classified as either bot-originated (reconciled) or admin-originated (override activation)
