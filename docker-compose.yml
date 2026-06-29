@@ -4,7 +4,7 @@ services:
       context: .
       dockerfile: deploy/compose/app.Dockerfile
     env_file:
-      - deploy/env/app.env
+      - ${SUPPORT_AGENT_RUNTIME_ROOT_HOST:-/home/tian/support-agent-runtime}/app.env
     depends_on:
       db:
         condition: service_healthy
@@ -12,7 +12,7 @@ services:
       - "8000:8000"
     volumes:
       - ${SUPPORT_AGENT_PROFILE_ROOT_HOST:-/home/tian/support-agent-profiles/parachute}:/data/profile:ro
-      - ./logs:/app/logs
+      - ${SUPPORT_AGENT_RUNTIME_ROOT_HOST:-/home/tian/support-agent-runtime}/logs:/app/logs
     command: ["uv", "run", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
 
   worker:
@@ -20,13 +20,13 @@ services:
       context: .
       dockerfile: deploy/compose/worker.Dockerfile
     env_file:
-      - deploy/env/app.env
+      - ${SUPPORT_AGENT_RUNTIME_ROOT_HOST:-/home/tian/support-agent-runtime}/app.env
     depends_on:
       db:
         condition: service_healthy
     volumes:
       - ${SUPPORT_AGENT_PROFILE_ROOT_HOST:-/home/tian/support-agent-profiles/parachute}:/data/profile:ro
-      - ./logs:/app/logs
+      - ${SUPPORT_AGENT_RUNTIME_ROOT_HOST:-/home/tian/support-agent-runtime}/logs:/app/logs
     command: ["uv", "run", "python", "-m", "app.workers.main"]
 
   vk-worker:
@@ -34,13 +34,13 @@ services:
       context: .
       dockerfile: deploy/compose/worker.Dockerfile
     env_file:
-      - deploy/env/app.env
+      - ${SUPPORT_AGENT_RUNTIME_ROOT_HOST:-/home/tian/support-agent-runtime}/app.env
     depends_on:
       db:
         condition: service_healthy
     volumes:
       - ${SUPPORT_AGENT_PROFILE_ROOT_HOST:-/home/tian/support-agent-profiles/parachute}:/data/profile:ro
-      - ./logs:/app/logs
+      - ${SUPPORT_AGENT_RUNTIME_ROOT_HOST:-/home/tian/support-agent-runtime}/logs:/app/logs
     command: ["uv", "run", "python", "-m", "app.workers.vk_main"]
 
   db:
