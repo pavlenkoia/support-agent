@@ -80,6 +80,19 @@ def test_vk_process_once_routes_updates_and_acks_state() -> None:
     assert acker.states[-1].ts == "777"
 
 
+def test_vk_longpoll_treats_transport_timeout_as_empty_poll() -> None:
+    client = StubVKAPIClient(poll_responses=[{"ok": False, "reason": "transport_error:The read operation timed out"}])
+    poller = VKLongPollClient(api_client=client, group_id="55")
+
+    original = VKLongPollState(server="https://lp.vk.test", key="key", ts="10")
+    state, updates = poller.poll_once(original)
+
+    assert state is original
+    assert state.ts == "10"
+    assert updates == []
+    assert client.refresh_calls == 0
+
+
 def test_vk_state_store_roundtrip(tmp_path: Path) -> None:
     store = FileLongPollStateStore(str(tmp_path / "vk-state.json"))
     state = VKLongPollState(server="https://lp.vk.test", key="abc", ts="123")
