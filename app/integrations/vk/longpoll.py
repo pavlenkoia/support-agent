@@ -30,9 +30,9 @@ class VKLongPollClient:
         self.version = settings.vk_longpoll_version if version is None else version
 
     @staticmethod
-    def _is_timeout_response(response: dict) -> bool:
+    def _is_transient_transport_error(response: dict) -> bool:
         reason = str(response.get("reason") or "").lower()
-        return reason.startswith("transport_error:") and "timed out" in reason
+        return reason.startswith("transport_error:")
 
     def refresh_state(self) -> VKLongPollState:
         response = self.api_client.get_longpoll_server(self.group_id)
@@ -54,7 +54,7 @@ class VKLongPollClient:
             version=self.version,
         )
         if not response.get("ok"):
-            if self._is_timeout_response(response):
+            if self._is_transient_transport_error(response):
                 return state, []
             raise RuntimeError(f"VK long poll request failed: {response}")
 

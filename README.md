@@ -78,9 +78,14 @@ curl http://127.0.0.1:8000/health
 - inbound messages during that window are still stored, but the bot does not answer
 - the worker re-checks override state immediately before `messages.send` to avoid stale auto-replies racing a human admin
 
+### VK worker recovery behavior
+- transient VK long-poll transport failures (`transport_error:*`, including read timeouts and `connection reset by peer`) are treated as empty polls so the worker keeps running
+- the Docker Compose `vk-worker` service uses `restart: unless-stopped` so the container auto-recovers if the process exits unexpectedly
+
 ## Reliability notes
 
 - Direct-answer, KB-agent, and summary LLM clients use configurable timeout / retry settings for transient provider failures.
+- VK long-poll transport failures that surface as transient network errors must not terminate the worker loop.
 - The stronger model should be allocated to the KB agent / wiki-reading step; the cheaper model can be used for the final customer-facing answer step.
 - If KB facts were already gathered and the final answer-generation call fails, the runtime degrades to a short grounded answer synthesized from the retrieved KB instead of a template refusal.
 - Broad but clearly in-domain openers (for example `Подскажите пожалуйста по прыжкам`) should prefer a short KB overview before asking clarification.

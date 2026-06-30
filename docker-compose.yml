@@ -33,6 +33,7 @@ services:
     build:
       context: .
       dockerfile: deploy/compose/worker.Dockerfile
+    restart: unless-stopped
     env_file:
       - ${SUPPORT_AGENT_RUNTIME_ROOT_HOST:-/home/tian/support-agent-runtime}/app.env
     depends_on:

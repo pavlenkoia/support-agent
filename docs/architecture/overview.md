@@ -117,6 +117,10 @@ Manual-admin override rule:
 - inbound user messages are still persisted during silence
 - before a bot reply is actually sent, the worker re-checks override state to prevent a stale race with a human admin reply
 
+Worker recovery rule:
+- transient long-poll transport failures returned as `transport_error:*` (including timeouts and `connection reset by peer`) are treated as empty polls, not fatal worker crashes
+- the `vk-worker` Compose service is expected to run with `restart: unless-stopped` so container-level recovery exists even if the process exits unexpectedly
+
 ## History and context
 
 Conversation context is built from persisted `messages` rows and must include:

@@ -93,6 +93,21 @@ def test_vk_longpoll_treats_transport_timeout_as_empty_poll() -> None:
     assert client.refresh_calls == 0
 
 
+def test_vk_longpoll_treats_connection_reset_as_empty_poll() -> None:
+    client = StubVKAPIClient(
+        poll_responses=[{"ok": False, "reason": "transport_error:<urlopen error [Errno 104] Connection reset by peer>"}]
+    )
+    poller = VKLongPollClient(api_client=client, group_id="55")
+
+    original = VKLongPollState(server="https://lp.vk.test", key="key", ts="10")
+    state, updates = poller.poll_once(original)
+
+    assert state is original
+    assert state.ts == "10"
+    assert updates == []
+    assert client.refresh_calls == 0
+
+
 def test_vk_state_store_roundtrip(tmp_path: Path) -> None:
     store = FileLongPollStateStore(str(tmp_path / "vk-state.json"))
     state = VKLongPollState(server="https://lp.vk.test", key="abc", ts="123")
