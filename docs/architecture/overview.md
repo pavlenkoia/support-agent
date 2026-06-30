@@ -5,9 +5,10 @@
 This repository now targets a **bounded support-agent loop** rather than a linear `classify -> KB -> escalation` pipeline.
 
 Runtime layers:
-- **FastAPI app** for inbound API and health checks
+- **FastAPI app** for inbound API, health checks, and the read-only VK dialog viewer API
 - **Telegram gateway + polling worker** for chat delivery
 - **VK gateway + VK Bots Long Poll worker** for VK community direct messages
+- **React + Tailwind viewer-web** published separately on port `3002` for read-only dialog browsing, with theme toggle and two-pane day-scoped chat inspection
 - **PostgreSQL** as system of record for cases, messages, workflow events, and transport state
 - **Bounded orchestrator loop** for per-turn decision making
 - **Separate KB agent** for Karpathy-style wiki navigation, selective page reads, and grounded fact extraction

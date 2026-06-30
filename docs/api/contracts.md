@@ -3,7 +3,23 @@
 ## Endpoints
 - `GET /health`
 - `POST /api/v1/messages/inbound`
+- `GET /api/viewer/dialogs?day=YYYY-MM-DD`
+- `GET /api/viewer/dialogs/{conversation_id}/messages?day=YYYY-MM-DD`
 - `POST /telegram/webhook`
+
+## VK viewer response contract
+
+`GET /api/viewer/dialogs?day=YYYY-MM-DD` returns a JSON array of dialog summaries with:
+- `conversation_id`
+- `display_name`
+- `external_chat_id`
+- `last_message_time`
+- `message_count`
+
+Ordering contract:
+- dialogs are sorted by the selected day's message time in ascending order (earliest first)
+
+`GET /api/viewer/dialogs/{conversation_id}/messages?day=YYYY-MM-DD` returns the selected dialog scoped to the requested day only.
 
 ## Shared inbound message contract
 

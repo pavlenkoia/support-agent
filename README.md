@@ -8,6 +8,7 @@ Application-first skeleton for the **Агент поддержки** project.
 - polling transport workers for Telegram and VK
 - Telegram gateway slice for bot polling delivery
 - VK gateway slice via VK Bots Long Poll API for community direct messages
+- read-only VK dialog viewer web UI on port `3002`
 - external knowledge-layer contract
 - bounded support-agent loop with planner -> tool/KB gathering -> finalize
 - separate KB agent for Karpathy-style wiki navigation and selective page reading
@@ -19,6 +20,7 @@ Application-first skeleton for the **Агент поддержки** project.
 
 ## Project layout
 - `app/` — application code
+- `viewer-web/` — React + Tailwind VK dialog viewer
 - `deploy/` — Dockerfiles and env templates
 - `docs/` — local repo docs and specs
 - `scripts/` — helper scripts
@@ -58,6 +60,22 @@ docker compose up --build
 ```bash
 curl http://127.0.0.1:8000/health
 ```
+
+### VK dialog viewer
+After `docker compose up -d`, open:
+- `http://127.0.0.1:3002` — React/Tailwind viewer UI
+- `GET /api/viewer/dialogs?day=YYYY-MM-DD` — VK dialog list for the selected day
+- `GET /api/viewer/dialogs/{conversation_id}/messages?day=YYYY-MM-DD` — selected dialog messages for the selected day
+
+Current UI contract:
+- light theme by default, with header-right light/dark toggle
+- theme toggle is icon-only; visible text is moved to tooltip/accessibility labels
+- fixed top header for app identity + theme toggle
+- left panel header contains the date picker only (no extra title/label/counter)
+- left panel items show only `name/id + time + message_count`, no preview text
+- dialog list is sorted by earliest message time first for the selected day
+- right panel has no separate header; it renders only the selected-day chat stream
+- left and right panels scroll independently
 
 ## Transport notes
 

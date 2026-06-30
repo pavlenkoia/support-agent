@@ -69,6 +69,29 @@ Example class of task:
 - transient long-poll transport failures reported as `transport_error:*` must not crash the worker loop; they should degrade to an empty poll / retryable condition
 - the `vk-worker` deployment must use automatic container restart (`restart: unless-stopped` or an equivalent supervisor policy)
 
+## VK dialog viewer contract
+
+The repository includes a read-only VK dialog viewer web slice.
+
+UI requirements:
+- React + Tailwind frontend served separately on port `3002`
+- fixed top header
+- header-right light/dark theme toggle
+- icon-only theme button with tooltip/accessibility text instead of visible label
+- left panel header contains the date picker only
+- no `Диалоги` heading and no `Диалогов за день N` counter block
+- left panel items show only `name/id + time + message_count`
+- no dialog preview text in the list
+- dialog list ordering is earliest-first within the selected day
+- right panel renders the selected dialog as a chat view for the selected day only
+- no separate right-panel header above the messages
+- left and right panels must scroll independently
+
+Backend requirements:
+- viewer API lives inside the existing FastAPI application
+- viewer endpoints are read-only and day-scoped
+- selected-day filtering applies both to dialog summaries and to message history
+
 ## External prompt contract
 
 The runtime contract depends on hot-editable external prompt files:
