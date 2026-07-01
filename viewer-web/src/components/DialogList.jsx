@@ -6,7 +6,7 @@ export function DialogList({ dialogs, isLoading, onDayChange, selectedConversati
   return (
     <aside
       className={[
-        'h-full min-h-0 w-full flex-col border-r md:w-[22rem] md:min-w-[22rem]',
+        'h-full min-h-0 w-full flex-col border-r',
         isDark ? 'border-slate-800 bg-slate-950' : 'border-slate-200 bg-slate-50',
         className,
       ].join(' ')}

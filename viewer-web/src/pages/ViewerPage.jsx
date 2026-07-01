@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 
+const MOBILE_MEDIA_QUERY = '(max-width: 640px)'
+
 import { fetchDialogMessages, fetchDialogs } from '../api/viewer'
 import { ChatPanel } from '../components/ChatPanel'
 import { DialogList } from '../components/DialogList'
@@ -16,6 +18,11 @@ function loadInitialTheme() {
   return window.localStorage.getItem(THEME_STORAGE_KEY) || 'light'
 }
 
+function detectMobileViewport() {
+  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return false
+  return window.matchMedia(MOBILE_MEDIA_QUERY).matches
+}
+
 export function ViewerPage() {
   const [selectedDay, setSelectedDay] = useState(formatToday)
   const [theme, setTheme] = useState(loadInitialTheme)
@@ -25,12 +32,28 @@ export function ViewerPage() {
   const [dialogsLoading, setDialogsLoading] = useState(false)
   const [messagesLoading, setMessagesLoading] = useState(false)
   const [errorText, setErrorText] = useState('')
+  const [isMobileViewport, setIsMobileViewport] = useState(detectMobileViewport)
   const [mobileDialogOpen, setMobileDialogOpen] = useState(false)
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme
     window.localStorage.setItem(THEME_STORAGE_KEY, theme)
   }, [theme])
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return undefined
+
+    const mediaQuery = window.matchMedia(MOBILE_MEDIA_QUERY)
+    const syncViewport = (event) => {
+      const matches = typeof event?.matches === 'boolean' ? event.matches : mediaQuery.matches
+      setIsMobileViewport(matches)
+      if (!matches) setMobileDialogOpen(false)
+    }
+
+    syncViewport()
+    mediaQuery.addEventListener('change', syncViewport)
+    return () => mediaQuery.removeEventListener('change', syncViewport)
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -96,6 +119,8 @@ export function ViewerPage() {
     [dialogs, selectedConversationId],
   )
 
+  const showMobileDetail = isMobileViewport && mobileDialogOpen
+
   const chatDialog = dialogMessages
     ? {
         ...activeDialog,
@@ -114,7 +139,7 @@ export function ViewerPage() {
     >
       <ViewerHeader theme={theme} onThemeToggle={() => setTheme((current) => (current === 'dark' ? 'light' : 'dark'))} />
 
-      <main className="mx-auto flex min-h-0 flex-1 max-w-[1800px] flex-col px-0 md:px-6 md:pb-6">
+      <main className="mx-auto flex min-h-0 flex-1 w-full max-w-[1800px] flex-col px-0 md:px-6 md:pb-6">
         {errorText ? (
           <div
             className={[
@@ -130,11 +155,11 @@ export function ViewerPage() {
 
         <div
           className={[
-            'min-h-0 flex-1 overflow-hidden md:mt-6 md:rounded-3xl md:border',
+            'min-h-0 w-full flex-1 overflow-hidden md:mt-6 md:rounded-3xl md:border',
             theme === 'dark' ? 'md:border-slate-800 md:bg-slate-900/20' : 'md:border-slate-200 md:bg-white',
           ].join(' ')}
         >
-          <div className="flex h-full min-h-0 flex-col overflow-hidden md:flex-row">
+          <div className={["flex h-full min-h-0 w-full overflow-hidden", isMobileViewport ? 'flex-col' : 'flex-row'].join(' ')}>
             <DialogList
               dialogs={dialogs}
               isLoading={dialogsLoading}
@@ -143,18 +168,31 @@ export function ViewerPage() {
               selectedDay={selectedDay}
               onSelect={(conversationId) => {
                 setSelectedConversationId(conversationId)
-                setMobileDialogOpen(true)
+                const openMobileDetail = typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+                  ? window.matchMedia(MOBILE_MEDIA_QUERY).matches
+                  : isMobileViewport
+                setMobileDialogOpen(openMobileDetail)
               }}
               theme={theme}
-              className={mobileDialogOpen ? 'hidden md:flex' : 'flex'}
+              className={isMobileViewport ? 'flex' : 'flex basis-[22rem] min-w-[22rem] max-w-[22rem]'}
             />
             <ChatPanel
               dialog={chatDialog}
               isLoading={messagesLoading}
               theme={theme}
-              className={mobileDialogOpen ? 'flex' : 'hidden md:flex'}
-              onBack={() => setMobileDialogOpen(false)}
+              className={isMobileViewport ? 'hidden' : 'flex min-w-0'}
             />
+            {showMobileDetail ? (
+              <div className="fixed inset-x-0 bottom-0 top-14 z-30">
+                <ChatPanel
+                  dialog={chatDialog}
+                  isLoading={messagesLoading}
+                  theme={theme}
+                  className="flex h-full"
+                  onBack={() => setMobileDialogOpen(false)}
+                />
+              </div>
+            ) : null}
           </div>
         </div>
       </main>
