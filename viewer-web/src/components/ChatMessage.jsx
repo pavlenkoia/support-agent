@@ -1,9 +1,4 @@
-function formatTime(value) {
-  return new Date(value).toLocaleTimeString('ru-RU', {
-    hour: '2-digit',
-    minute: '2-digit',
-  })
-}
+import { formatClockTime } from '../utils/time'
 
 export function ChatMessage({ message, theme }) {
   const isInbound = message.direction === 'inbound'
@@ -38,7 +33,7 @@ export function ChatMessage({ message, theme }) {
             isInbound ? (isDark ? 'text-slate-400' : 'text-slate-500') : 'text-white/70',
           ].join(' ')}
         >
-          {formatTime(message.sent_at)}
+          {formatClockTime(message.sent_at)}
         </div>
       </div>
     </div>

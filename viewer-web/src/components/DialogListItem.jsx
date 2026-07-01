@@ -1,3 +1,5 @@
+import { formatClockTime } from '../utils/time'
+
 function formatCount(count) {
   if (count % 10 === 1 && count % 100 !== 11) return `${count} сообщение`
   if ([2, 3, 4].includes(count % 10) && ![12, 13, 14].includes(count % 100)) return `${count} сообщения`
@@ -7,7 +9,7 @@ function formatCount(count) {
 export function DialogListItem({ dialog, isActive, onClick, theme }) {
   const isDark = theme === 'dark'
   const title = dialog.case_id ? `Обращение №${dialog.case_id}` : dialog.display_name || dialog.external_chat_id
-  const subtitle = `${dialog.last_message_time.slice(0, 5)} · ${formatCount(dialog.message_count)}`
+  const subtitle = `${formatClockTime(dialog.last_message_at)} · ${formatCount(dialog.message_count)}`
 
   return (
     <button

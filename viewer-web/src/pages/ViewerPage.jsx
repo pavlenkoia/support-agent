@@ -25,6 +25,7 @@ export function ViewerPage() {
   const [dialogsLoading, setDialogsLoading] = useState(false)
   const [messagesLoading, setMessagesLoading] = useState(false)
   const [errorText, setErrorText] = useState('')
+  const [mobileDialogOpen, setMobileDialogOpen] = useState(false)
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme
@@ -42,6 +43,7 @@ export function ViewerPage() {
         setDialogs(items)
         const firstConversationId = items[0]?.conversation_id ?? null
         setSelectedConversationId(firstConversationId)
+        setMobileDialogOpen(false)
         if (!firstConversationId) {
           setDialogMessages(null)
         }
@@ -51,6 +53,7 @@ export function ViewerPage() {
         setDialogs([])
         setSelectedConversationId(null)
         setDialogMessages(null)
+        setMobileDialogOpen(false)
         setErrorText('Не удалось загрузить диалоги.')
       })
       .finally(() => {
@@ -105,13 +108,13 @@ export function ViewerPage() {
   return (
     <div
       className={[
-        'h-screen overflow-hidden',
+        'flex h-[100dvh] min-h-[100dvh] flex-col overflow-hidden',
         theme === 'dark' ? 'bg-slate-950 text-slate-100' : 'bg-slate-100 text-slate-900',
       ].join(' ')}
     >
       <ViewerHeader theme={theme} onThemeToggle={() => setTheme((current) => (current === 'dark' ? 'light' : 'dark'))} />
 
-      <main className="mx-auto flex h-full max-w-[1800px] flex-col px-0 pt-20 md:px-6 md:pb-6">
+      <main className="mx-auto flex min-h-0 flex-1 max-w-[1800px] flex-col px-0 md:px-6 md:pb-6">
         {errorText ? (
           <div
             className={[
@@ -138,10 +141,20 @@ export function ViewerPage() {
               onDayChange={setSelectedDay}
               selectedConversationId={selectedConversationId}
               selectedDay={selectedDay}
-              onSelect={setSelectedConversationId}
+              onSelect={(conversationId) => {
+                setSelectedConversationId(conversationId)
+                setMobileDialogOpen(true)
+              }}
               theme={theme}
+              className={mobileDialogOpen ? 'hidden md:flex' : 'flex'}
             />
-            <ChatPanel dialog={chatDialog} isLoading={messagesLoading} theme={theme} />
+            <ChatPanel
+              dialog={chatDialog}
+              isLoading={messagesLoading}
+              theme={theme}
+              className={mobileDialogOpen ? 'flex' : 'hidden md:flex'}
+              onBack={() => setMobileDialogOpen(false)}
+            />
           </div>
         </div>
       </main>

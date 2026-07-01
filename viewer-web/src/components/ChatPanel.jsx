@@ -1,11 +1,29 @@
 import { ChatMessage } from './ChatMessage'
 
-export function ChatPanel({ dialog, isLoading, theme }) {
+export function ChatPanel({ dialog, isLoading, theme, className = '', onBack }) {
   const isDark = theme === 'dark'
 
   return (
-    <section className={["flex h-full min-h-0 flex-1 flex-col", isDark ? 'bg-slate-950' : 'bg-white'].join(' ')}>
-      <div className="flex-1 overflow-y-auto px-6 py-6">
+    <section className={[
+      'h-full min-h-0 flex-1 flex-col',
+      isDark ? 'bg-slate-950' : 'bg-white',
+      className,
+    ].join(' ')}>
+      <div className={["border-b px-4 py-3 md:hidden", isDark ? 'border-slate-800' : 'border-slate-200'].join(' ')}>
+        <button
+          className={[
+            'inline-flex items-center rounded-xl border px-3 py-2 text-sm transition',
+            isDark
+              ? 'border-slate-700 bg-slate-900 text-slate-100 hover:border-slate-600'
+              : 'border-slate-300 bg-white text-slate-900 hover:border-slate-400',
+          ].join(' ')}
+          onClick={onBack}
+          type="button"
+        >
+          ← К списку
+        </button>
+      </div>
+      <div className="min-h-0 flex-1 overflow-y-auto px-6 py-6">
         {isLoading ? (
           <div
             className={[

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, date, datetime, time, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
@@ -57,7 +57,7 @@ class ViewerService:
                 case_id=int(row.case_id) if row.case_id is not None else None,
                 display_name=row.display_name,
                 external_chat_id=self._external_chat_id_from_conversation(row.conversation_id),
-                last_message_time=self._to_utc_time(row.last_message_at),
+                last_message_at=self._normalize_dt(row.last_message_at),
                 message_count=int(row.message_count),
             )
             for row in rows
@@ -131,9 +131,6 @@ class ViewerService:
             return value.replace(tzinfo=UTC)
         return value.astimezone(UTC)
 
-    def _to_utc_time(self, value: datetime) -> time:
-        normalized = self._normalize_dt(value)
-        return normalized.time().replace(microsecond=0)
 
     @staticmethod
     def _external_chat_id_from_conversation(conversation_id: str) -> str:

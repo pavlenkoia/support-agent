@@ -81,7 +81,7 @@ def test_viewer_dialogs_lists_only_vk_dialogs_for_selected_day(tmp_path) -> None
             "case_id": 1,
             "display_name": "Иван Петров",
             "external_chat_id": "123",
-            "last_message_time": "09:16:00",
+            "last_message_at": "2026-06-30T09:16:00Z",
             "message_count": 2,
         }
     ]

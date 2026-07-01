@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, datetime, time
+from datetime import date, datetime
 
 from pydantic import BaseModel, ConfigDict
 
@@ -10,7 +10,7 @@ class ViewerDialogItem(BaseModel):
     case_id: int | None = None
     display_name: str | None
     external_chat_id: str
-    last_message_time: time
+    last_message_at: datetime
     message_count: int
 
 

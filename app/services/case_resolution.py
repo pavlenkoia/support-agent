@@ -10,18 +10,52 @@ from app.models.user import User
 from app.schemas.message import InboundMessage
 
 
-def ensure_conversation(session: Session, *, channel: str, external_chat_id: str) -> Conversation:
+PROBE_MARKER_KEYS = ("is_test", "source", "session_type", "scenario_name", "requested_by")
+
+
+def _extract_session_markers(payload: InboundMessage) -> dict:
+    metadata = payload.metadata or {}
+    return {
+        "is_test": bool(metadata.get("is_test", False)),
+        "source": metadata.get("source"),
+        "session_type": metadata.get("session_type"),
+        "scenario_name": metadata.get("scenario_name"),
+        "requested_by": metadata.get("requested_by"),
+    }
+
+
+def _apply_conversation_markers(conversation: Conversation, markers: dict) -> None:
+    conversation.is_test = bool(markers.get("is_test", False))
+    conversation.source = markers.get("source")
+    conversation.session_type = markers.get("session_type")
+    conversation.scenario_name = markers.get("scenario_name")
+    conversation.requested_by = markers.get("requested_by")
+
+
+def _apply_case_markers(support_case: SupportCase, markers: dict) -> None:
+    support_case.is_test = bool(markers.get("is_test", False))
+    support_case.source = markers.get("source")
+    support_case.session_type = markers.get("session_type")
+    support_case.scenario_name = markers.get("scenario_name")
+    support_case.requested_by = markers.get("requested_by")
+
+
+def ensure_conversation(session: Session, *, channel: str, external_chat_id: str, markers: dict | None = None) -> Conversation:
     conversation_external_id = f"{channel}:{external_chat_id}"
     conversation = session.scalar(select(Conversation).where(Conversation.external_id == conversation_external_id))
     if conversation is None:
         conversation = Conversation(external_id=conversation_external_id)
         session.add(conversation)
         session.flush()
+    if markers and any(markers.get(key) is not None for key in PROBE_MARKER_KEYS):
+        _apply_conversation_markers(conversation, markers)
+        session.flush()
     return conversation
 
 
 def _ensure_entities(session: Session, payload: InboundMessage) -> tuple[User, ChannelAccount, Conversation]:
     user_external_id = f"{payload.channel}:{payload.external_user_id}"
+    markers = _extract_session_markers(payload)
 
     user = session.scalar(select(User).where(User.external_id == user_external_id))
     if user is None:
@@ -46,13 +80,19 @@ def _ensure_entities(session: Session, payload: InboundMessage) -> tuple[User, C
         session.add(channel_account)
         session.flush()
 
-    conversation = ensure_conversation(session, channel=payload.channel, external_chat_id=payload.external_chat_id)
+    conversation = ensure_conversation(
+        session,
+        channel=payload.channel,
+        external_chat_id=payload.external_chat_id,
+        markers=markers,
+    )
 
     return user, channel_account, conversation
 
 
 def reset_conversation_session(session: Session, payload: InboundMessage) -> dict:
     user, channel_account, conversation = _ensure_entities(session, payload)
+    markers = _extract_session_markers(payload)
     open_cases = session.scalars(
         select(SupportCase)
         .where(
@@ -66,9 +106,13 @@ def reset_conversation_session(session: Session, payload: InboundMessage) -> dic
     for support_case in open_cases:
         support_case.status = "resolved"
         support_case.route_mode = "session_reset"
+        if markers and any(markers.get(key) is not None for key in PROBE_MARKER_KEYS):
+            _apply_case_markers(support_case, markers)
         closed_case_ids.append(support_case.id)
 
     new_case = SupportCase(conversation_id=conversation.id, status="open", route_mode="session_reset")
+    if markers and any(markers.get(key) is not None for key in PROBE_MARKER_KEYS):
+        _apply_case_markers(new_case, markers)
     session.add(new_case)
     session.flush()
     return {
@@ -87,6 +131,7 @@ def reset_conversation_session(session: Session, payload: InboundMessage) -> dic
 
 def resolve_case(session: Session, payload: InboundMessage) -> dict:
     user, channel_account, conversation = _ensure_entities(session, payload)
+    markers = _extract_session_markers(payload)
 
     support_case = session.scalar(
         select(SupportCase)
@@ -95,7 +140,12 @@ def resolve_case(session: Session, payload: InboundMessage) -> dict:
     )
     if support_case is None:
         support_case = SupportCase(conversation_id=conversation.id)
+        if markers and any(markers.get(key) is not None for key in PROBE_MARKER_KEYS):
+            _apply_case_markers(support_case, markers)
         session.add(support_case)
+        session.flush()
+    elif markers and any(markers.get(key) is not None for key in PROBE_MARKER_KEYS):
+        _apply_case_markers(support_case, markers)
         session.flush()
 
     return {

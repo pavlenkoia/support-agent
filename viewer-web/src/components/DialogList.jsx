@@ -1,13 +1,14 @@
 import { DialogListItem } from './DialogListItem'
 
-export function DialogList({ dialogs, isLoading, onDayChange, selectedConversationId, selectedDay, onSelect, theme }) {
+export function DialogList({ dialogs, isLoading, onDayChange, selectedConversationId, selectedDay, onSelect, theme, className = '' }) {
   const isDark = theme === 'dark'
 
   return (
     <aside
       className={[
-        'flex h-full min-h-0 w-full flex-col border-r md:w-[22rem] md:min-w-[22rem]',
+        'h-full min-h-0 w-full flex-col border-r md:w-[22rem] md:min-w-[22rem]',
         isDark ? 'border-slate-800 bg-slate-950' : 'border-slate-200 bg-slate-50',
+        className,
       ].join(' ')}
     >
       <div className={["border-b px-4 py-3", isDark ? 'border-slate-800' : 'border-slate-200'].join(' ')}>
@@ -24,7 +25,7 @@ export function DialogList({ dialogs, isLoading, onDayChange, selectedConversati
         />
       </div>
 
-      <div className="flex-1 overflow-y-auto px-4 py-4">
+      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
         {isLoading ? (
           <div
             className={[

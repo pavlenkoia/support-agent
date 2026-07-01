@@ -3,6 +3,14 @@
 ## Endpoints
 - `GET /health`
 - `POST /api/v1/messages/inbound`
+- `POST /api/internal/probe/sessions`
+- `GET /api/internal/probe/sessions`
+- `GET /api/internal/probe/sessions/{session_id}`
+- `POST /api/internal/probe/sessions/{session_id}/messages`
+- `POST /api/internal/probe/sessions/{session_id}/wait-reply`
+- `GET /api/internal/probe/sessions/{session_id}/messages`
+- `GET /api/internal/probe/sessions/{session_id}/trace`
+- `POST /api/internal/probe/sessions/{session_id}/close`
 - `GET /api/viewer/dialogs?day=YYYY-MM-DD`
 - `GET /api/viewer/dialogs/{conversation_id}/messages?day=YYYY-MM-DD`
 - `POST /telegram/webhook`
@@ -13,7 +21,7 @@
 - `conversation_id`
 - `display_name`
 - `external_chat_id`
-- `last_message_time`
+- `last_message_at`
 - `message_count`
 
 Ordering contract:
@@ -59,6 +67,10 @@ Transport workers may also keep transport-level journal state outside the API re
 
 `route` is an orchestration decision, not a human-handoff router.
 
+Internal probe query/read contract:
+- `GET /api/internal/probe/sessions` lists internal test sessions filtered by explicit DB markers (`status`, `scenario_name`, `requested_by`, `source`, `session_type`) with pagination (`limit`, `offset`)
+- `GET /api/internal/probe/sessions/{session_id}` returns the latest persisted case snapshot for a concrete probe session, including `message_count`, `last_user_message`, `last_assistant_message`, and `last_activity_at`
+
 Expected `route.route` values:
 - `answer`
 - `cannot_answer`
@@ -93,3 +105,9 @@ These are internal persistence contracts rather than public HTTP endpoints, but 
 - outbound transport sends are stored for later reconciliation against transport-side activity events
 - VK conversation transport state stores `last_bot_reply_at`, `last_admin_reply_at`, and `human_override_until`
 - VK `message_reply` is classified as either bot-originated (reconciled) or admin-originated (override activation)
+- internal probe/test sessions are marked explicitly on both `conversations` and `support_cases` with:
+  - `is_test`
+  - `source`
+  - `session_type`
+  - `scenario_name`
+  - `requested_by`
