@@ -78,6 +78,7 @@ def test_viewer_dialogs_lists_only_vk_dialogs_for_selected_day(tmp_path) -> None
     assert payload == [
         {
             "conversation_id": "vk:123",
+            "case_id": 1,
             "display_name": "Иван Петров",
             "external_chat_id": "123",
             "last_message_time": "09:16:00",

@@ -17,6 +17,7 @@ from app.schemas.viewer import ViewerDialogItem, ViewerDialogMessagesResponse, V
 @dataclass(slots=True)
 class _ViewerConversationMeta:
     conversation_id: str
+    case_id: int | None
     display_name: str | None
     external_chat_id: str
 
@@ -32,6 +33,7 @@ class ViewerService:
             stmt = (
                 select(
                     Conversation.external_id.label("conversation_id"),
+                    func.max(SupportCase.id).label("case_id"),
                     display_name_expr.label("display_name"),
                     func.max(Message.created_at).label("last_message_at"),
                     func.count(Message.id).label("message_count"),
@@ -52,6 +54,7 @@ class ViewerService:
         return [
             ViewerDialogItem(
                 conversation_id=row.conversation_id,
+                case_id=int(row.case_id) if row.case_id is not None else None,
                 display_name=row.display_name,
                 external_chat_id=self._external_chat_id_from_conversation(row.conversation_id),
                 last_message_time=self._to_utc_time(row.last_message_at),
@@ -96,19 +99,23 @@ class ViewerService:
 
     def _load_conversation_meta(self, session: Session, conversation_id: str) -> _ViewerConversationMeta:
         stmt = (
-            select(Conversation.external_id, User.display_name)
+            select(Conversation.external_id, func.max(SupportCase.id).label("case_id"), User.display_name)
+            .outerjoin(SupportCase, SupportCase.conversation_id == Conversation.id)
             .outerjoin(User, User.external_id == Conversation.external_id)
             .where(Conversation.external_id == conversation_id, Conversation.external_id.like("vk:%"))
+            .group_by(Conversation.external_id, User.display_name)
         )
         row = session.execute(stmt).one_or_none()
         if row is None:
             return _ViewerConversationMeta(
                 conversation_id=conversation_id,
+                case_id=None,
                 display_name=None,
                 external_chat_id=self._external_chat_id_from_conversation(conversation_id),
             )
         return _ViewerConversationMeta(
             conversation_id=row.external_id,
+            case_id=int(row.case_id) if row.case_id is not None else None,
             display_name=row.display_name,
             external_chat_id=self._external_chat_id_from_conversation(row.external_id),
         )

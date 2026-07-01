@@ -6,7 +6,7 @@ function formatCount(count) {
 
 export function DialogListItem({ dialog, isActive, onClick, theme }) {
   const isDark = theme === 'dark'
-  const title = dialog.display_name || dialog.external_chat_id
+  const title = dialog.case_id ? `Обращение №${dialog.case_id}` : dialog.display_name || dialog.external_chat_id
   const subtitle = `${dialog.last_message_time.slice(0, 5)} · ${formatCount(dialog.message_count)}`
 
   return (

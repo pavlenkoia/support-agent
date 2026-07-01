@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict
 
 class ViewerDialogItem(BaseModel):
     conversation_id: str
+    case_id: int | None = None
     display_name: str | None
     external_chat_id: str
     last_message_time: time
