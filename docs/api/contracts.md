@@ -19,10 +19,13 @@
 
 `GET /api/viewer/dialogs?day=YYYY-MM-DD` returns a JSON array of dialog summaries with:
 - `conversation_id`
+- `case_id`
 - `display_name`
 - `external_chat_id`
 - `last_message_at`
 - `message_count`
+
+`last_message_at` is a full timestamp (UTC in transport JSON) so the frontend can render the list in the browser's current timezone using the same formatter as the message pane.
 
 Ordering contract:
 - dialogs are sorted by the selected day's message time in ascending order (earliest first)
@@ -68,8 +71,14 @@ Transport workers may also keep transport-level journal state outside the API re
 `route` is an orchestration decision, not a human-handoff router.
 
 Internal probe query/read contract:
+- `POST /api/internal/probe/sessions` creates a new probe session and returns `session_id`, `case_id`, `created_at`, `channel=internal_test`, `is_test=true`, and optional `scenario_name` / `requested_by`
 - `GET /api/internal/probe/sessions` lists internal test sessions filtered by explicit DB markers (`status`, `scenario_name`, `requested_by`, `source`, `session_type`) with pagination (`limit`, `offset`)
 - `GET /api/internal/probe/sessions/{session_id}` returns the latest persisted case snapshot for a concrete probe session, including `message_count`, `last_user_message`, `last_assistant_message`, and `last_activity_at`
+- `POST /api/internal/probe/sessions/{session_id}/messages` runs the real inbound runtime for that probe session and returns the final answer plus route/outcome envelopes
+- `POST /api/internal/probe/sessions/{session_id}/wait-reply` returns the latest assistant reply snapshot for the probe session if available
+- `GET /api/internal/probe/sessions/{session_id}/messages` returns persisted multi-turn message history
+- `GET /api/internal/probe/sessions/{session_id}/trace` returns persisted workflow events for the case
+- `POST /api/internal/probe/sessions/{session_id}/close` resolves the probe case and records a close event
 
 Expected `route.route` values:
 - `answer`

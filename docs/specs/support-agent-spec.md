@@ -75,22 +75,35 @@ The repository includes a read-only VK dialog viewer web slice.
 
 UI requirements:
 - React + Tailwind frontend served separately on port `3002`
-- fixed top header
+- compact sticky top header
 - header-right light/dark theme toggle
 - icon-only theme button with tooltip/accessibility text instead of visible label
 - left panel header contains the date picker only
 - no `Диалоги` heading and no `Диалогов за день N` counter block
-- left panel items show only `name/id + time + message_count`
+- left panel items show only `case_id` when available, otherwise `name/id`, plus time and `message_count`
 - no dialog preview text in the list
 - dialog list ordering is earliest-first within the selected day
+- both the list time and the message time must be rendered from full timestamps in the browser's current timezone
 - right panel renders the selected dialog as a chat view for the selected day only
-- no separate right-panel header above the messages
-- left and right panels must scroll independently
+- no separate desktop right-panel header above the messages; on mobile the detail view may show only a compact back control
+- on narrow/mobile screens the viewer switches to a master-detail flow with explicit return to the list
+- left and right panels must scroll independently, and the mobile detail pane must be able to scroll to the final message without clipping
 
 Backend requirements:
 - viewer API lives inside the existing FastAPI application
 - viewer endpoints are read-only and day-scoped
 - selected-day filtering applies both to dialog summaries and to message history
+
+## Internal probe session slice
+
+The repository also ships an internal probe session slice for operator/governor-driven runtime checks.
+
+Requirements:
+- probe sessions reuse the real routing/runtime path but do not publish to customer-facing transports
+- probe sessions are persisted as explicit test sessions on both `conversations` and `support_cases`
+- marker fields include `is_test`, `source`, `session_type`, `scenario_name`, and `requested_by`
+- the shipped HTTP surface includes create/list/get/send/wait/messages/trace/close operations under `/api/internal/probe/...`
+- the normalized probe channel reported by the API is `internal_test`
 
 ## External prompt contract
 

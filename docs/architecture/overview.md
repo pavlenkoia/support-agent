@@ -5,7 +5,7 @@
 This repository now targets a **bounded support-agent loop** rather than a linear `classify -> KB -> escalation` pipeline.
 
 Runtime layers:
-- **FastAPI app** for inbound API, health checks, and the read-only VK dialog viewer API
+- **FastAPI app** for inbound API, health checks, the internal probe-session API, and the read-only VK dialog viewer API
 - **Telegram gateway + polling worker** for chat delivery
 - **VK gateway + VK Bots Long Poll worker** for VK community direct messages
 - **React + Tailwind viewer-web** published separately on port `3002` for read-only dialog browsing, with theme toggle and two-pane day-scoped chat inspection
@@ -121,6 +121,16 @@ Manual-admin override rule:
 Worker recovery rule:
 - transient long-poll transport failures returned as `transport_error:*` (including timeouts and `connection reset by peer`) are treated as empty polls, not fatal worker crashes
 - the `vk-worker` Compose service is expected to run with `restart: unless-stopped` so container-level recovery exists even if the process exits unexpectedly
+
+## Internal probe / test-session slice
+
+The repository now includes an internal probe API that exercises the real support runtime without using customer-facing transports.
+
+Architectural rules:
+- probe traffic enters through a dedicated internal channel and never publishes outbound customer-channel messages
+- probe conversations and support cases are explicitly marked with `is_test`, `source`, `session_type`, `scenario_name`, and `requested_by`
+- listing/filtering probe sessions reads those persisted markers rather than inferring test state from ad-hoc naming
+- the probe API is session-based (`start/list/get/send/wait/messages/trace/close`) so multi-turn runtime verification uses the same persisted history model as normal conversations
 
 ## History and context
 

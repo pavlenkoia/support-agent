@@ -9,6 +9,7 @@ Application-first skeleton for the **Агент поддержки** project.
 - Telegram gateway slice for bot polling delivery
 - VK gateway slice via VK Bots Long Poll API for community direct messages
 - read-only VK dialog viewer web UI on port `3002`
+- internal probe session API for governor-driven live runtime checks without customer-channel traffic
 - external knowledge-layer contract
 - bounded support-agent loop with planner -> tool/KB gathering -> finalize
 - separate KB agent for Karpathy-style wiki navigation and selective page reading
@@ -67,15 +68,28 @@ After `docker compose up -d`, open:
 - `GET /api/viewer/dialogs?day=YYYY-MM-DD` — VK dialog list for the selected day
 - `GET /api/viewer/dialogs/{conversation_id}/messages?day=YYYY-MM-DD` — selected dialog messages for the selected day
 
+### Internal probe sessions
+The repository also exposes an operator/internal-test probe slice that reuses the real support runtime without sending traffic into customer channels:
+- `POST /api/internal/probe/sessions`
+- `GET /api/internal/probe/sessions`
+- `GET /api/internal/probe/sessions/{session_id}`
+- `POST /api/internal/probe/sessions/{session_id}/messages`
+- `POST /api/internal/probe/sessions/{session_id}/wait-reply`
+- `GET /api/internal/probe/sessions/{session_id}/messages`
+- `GET /api/internal/probe/sessions/{session_id}/trace`
+- `POST /api/internal/probe/sessions/{session_id}/close`
+
 Current UI contract:
 - light theme by default, with header-right light/dark toggle
 - theme toggle is icon-only; visible text is moved to tooltip/accessibility labels
-- fixed top header for app identity + theme toggle
+- compact sticky top header for app identity + theme toggle
 - left panel header contains the date picker only (no extra title/label/counter)
-- left panel items show only `name/id + time + message_count`, no preview text
+- left panel items show `case_id` when available, otherwise `display_name/external_chat_id`
+- dialog list time and message-pane time are both rendered from full timestamps in the browser's current timezone
 - dialog list is sorted by earliest message time first for the selected day
-- right panel has no separate header; it renders only the selected-day chat stream
-- left and right panels scroll independently
+- on narrow/mobile screens the viewer switches to a master-detail flow: list -> selected chat -> `← К списку`
+- right panel has no separate desktop header above the messages; on mobile it may show only the compact back control
+- left and right panels scroll independently, and the mobile chat pane must scroll to the last message without bottom clipping
 
 ## Transport notes
 
