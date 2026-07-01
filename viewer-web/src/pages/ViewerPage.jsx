@@ -89,7 +89,11 @@ export function ViewerPage() {
   }, [selectedDay])
 
   useEffect(() => {
-    if (!selectedConversationId) return
+    if (!selectedConversationId) {
+      setDialogMessages(null)
+      setMessagesLoading(false)
+      return
+    }
 
     let cancelled = false
     setMessagesLoading(true)
