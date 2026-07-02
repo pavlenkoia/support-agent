@@ -37,6 +37,33 @@ class RecordingVKSender:
         }
 
 
+class FailingVKSender:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str]] = []
+
+    def send_message(self, *, peer_id: str, text: str) -> dict:
+        self.calls.append((peer_id, text))
+        return {
+            "ok": False,
+            "sent": False,
+            "peer_id": peer_id,
+            "text": text,
+            "random_id": "700999",
+            "external_message_id": None,
+            "sent_at": datetime.now(UTC),
+            "reason": "vk_api_error",
+            "vk_response": {
+                "ok": False,
+                "reason": "vk_api_error",
+                "error": {
+                    "error_code": 901,
+                    "error_msg": "Can't send messages for users from blacklist",
+                    "request_params": [{"key": "peer_id", "value": "2005"}],
+                },
+            },
+        }
+
+
 class StubRouting:
     def __init__(self, *, response_text: str = "Готовый ответ") -> None:
         self.response_text = response_text
@@ -192,3 +219,29 @@ def test_vk_gateway_rechecks_override_before_send_and_drops_stale_reply(tmp_path
     assert result["suppressed"] is True
     assert result["reason"] == "human_override_activated_before_send"
     assert sender.calls == []
+
+
+def test_vk_gateway_persists_structured_vk_send_error_details(tmp_path: Path) -> None:
+    sender = FailingVKSender()
+    service, session_factory = make_service(tmp_path, sender=sender)
+
+    result = service.handle_event(
+        {
+            "type": "message_new",
+            "group_id": 55,
+            "object": {"message": {"id": 104, "peer_id": 2005, "from_id": 3005, "text": "Можно купить?", "date": 1780000500}},
+        }
+    )
+
+    assert result["suppressed"] is False
+    assert result["delivery"]["sent"] is False
+
+    with session_factory() as session:
+        row = session.execute(
+            text("select status, error_text from transport_events where dedupe_key = 'vk:message_new:2005:104'")
+        ).one()
+        assert row[0] == "failed"
+        assert row[1] == (
+            "vk_api_error; error_code=901; "
+            "error_msg=Can't send messages for users from blacklist"
+        )

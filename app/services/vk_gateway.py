@@ -171,7 +171,7 @@ class VKGatewayService:
             if stored_event is not None:
                 mark_transport_event_processed(session, stored_event, status="processed" if sent else "failed")
                 if not sent:
-                    stored_event.error_text = str(delivery.get("reason") or delivery.get("vk_response") or "vk_send_failed")
+                    stored_event.error_text = self._format_delivery_error(delivery)
             if sent:
                 state = get_or_create_conversation_transport_state(session, conversation_id=conversation_id, platform="vk")
                 persist_outbound_transport_send(
@@ -265,6 +265,23 @@ class VKGatewayService:
                 "sent_by": "admin",
                 "override_until": state.human_override_until.isoformat() if state.human_override_until else None,
             }
+
+    @staticmethod
+    def _format_delivery_error(delivery: dict[str, Any]) -> str:
+        reason = str(delivery.get("reason") or "vk_send_failed")
+        response = delivery.get("vk_response")
+        error_payload = response.get("error") if isinstance(response, dict) else None
+        if not isinstance(error_payload, dict):
+            return reason
+
+        parts = [reason]
+        error_code = error_payload.get("error_code")
+        error_msg = error_payload.get("error_msg")
+        if error_code is not None:
+            parts.append(f"error_code={error_code}")
+        if error_msg:
+            parts.append(f"error_msg={error_msg}")
+        return "; ".join(parts)
 
     @staticmethod
     def _extract_message(event: dict[str, Any]) -> dict[str, Any]:
