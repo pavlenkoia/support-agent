@@ -32,6 +32,31 @@ class DirectLLMService:
         self.temperature = settings.direct_llm_temperature
         self.prompt_service = prompt_service or SystemPromptService()
 
+    def _reset_llm_trace(self) -> None:
+        self._active_llm_trace: list[dict[str, Any]] = []
+
+    def _record_llm_call(self, step: str) -> None:
+        info = self.client.get_last_call_info() if hasattr(self.client, "get_last_call_info") else {}
+        if not info:
+            return
+        usage = info.get("usage") or {}
+        self._active_llm_trace.append(
+            {
+                "role": "direct_llm",
+                "step": step,
+                "provider": info.get("provider"),
+                "model": info.get("model"),
+                "duration_ms": info.get("duration_ms"),
+                "attempts": info.get("attempts"),
+                "usage": {
+                    "prompt_tokens": usage.get("prompt_tokens"),
+                    "completion_tokens": usage.get("completion_tokens"),
+                    "total_tokens": usage.get("total_tokens"),
+                },
+                "error": info.get("error"),
+            }
+        )
+
     def respond(
         self,
         text: str,
@@ -41,6 +66,7 @@ class DirectLLMService:
         tool_observations: list[dict] | None = None,
         first_reply_in_dialogue: bool = False,
     ) -> dict:
+        self._reset_llm_trace()
         tool_observations = tool_observations or []
         fallback_text = self.prompt_service.render_cannot_answer()
         system_prompt = self.prompt_service.load_system_prompt()
@@ -87,17 +113,21 @@ class DirectLLMService:
                 temperature=self.temperature,
                 response_format={"type": "json_object"},
             )
+            self._record_llm_call("final_response")
             parsed: dict[str, Any] = json.loads(raw)
         except Exception as exc:
+            self._record_llm_call("final_response")
             return {
                 "route": "cannot_answer",
                 "response_text": fallback_text,
                 "confidence": 0.0,
                 "reason": f"prompt_runtime_error:{type(exc).__name__}",
+                "llm_trace": list(self._active_llm_trace),
             }
 
-        return self._normalize_prompt_reply(parsed, fallback_text=fallback_text)
-
+        normalized = self._normalize_prompt_reply(parsed, fallback_text=fallback_text)
+        normalized["llm_trace"] = list(self._active_llm_trace)
+        return normalized
     def _normalize_prompt_reply(self, parsed: dict[str, Any], *, fallback_text: str) -> dict:
         route = str(parsed.get("route") or "cannot_answer").strip()
         if route not in {"answer", "cannot_answer", "out_of_scope", "clarification_requested"}:
@@ -247,6 +277,7 @@ class DirectLLMService:
         retrieval: dict | None = None,
         tool_observations: list[dict] | None = None,
     ) -> dict:
+        self._reset_llm_trace()
         profile = self._load_profile_context()
         retrieval = retrieval or {"kb_status": "not_started", "kb_snippets": []}
         tool_observations = tool_observations or []
@@ -304,8 +335,10 @@ class DirectLLMService:
                 temperature=0,
                 response_format={"type": "json_object"},
             )
+            self._record_llm_call("planner_assess_request")
             parsed: dict[str, Any] = json.loads(raw)
         except Exception as exc:
+            self._record_llm_call("planner_assess_request")
             fallback = self._assess_request_stub(
                 text,
                 profile=profile,
@@ -315,6 +348,7 @@ class DirectLLMService:
                 conversation_context=conversation_context,
             )
             fallback["reason"] = f"planner_fallback:{type(exc).__name__}"
+            fallback["llm_trace"] = list(self._active_llm_trace)
             return fallback
 
         action = str(parsed.get("action") or "cannot_answer").strip()
@@ -351,6 +385,7 @@ class DirectLLMService:
             "confidence": float(parsed.get("confidence", 0.0)),
             "reason": str(parsed.get("reason") or "loop_planner"),
             "clarification_question": str(parsed.get("clarification_question") or "").strip(),
+            "llm_trace": list(self._active_llm_trace),
         }
 
     def answer(

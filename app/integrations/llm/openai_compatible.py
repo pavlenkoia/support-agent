@@ -13,6 +13,7 @@ class OpenAICompatibleClient(BaseLLMClient):
     def __init__(
         self,
         *,
+        provider: str,
         base_url: str,
         api_key: str,
         model: str,
@@ -20,6 +21,7 @@ class OpenAICompatibleClient(BaseLLMClient):
         max_retries: int = 0,
         retry_backoff_seconds: float = 0.0,
     ) -> None:
+        self.provider = provider
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
         self.model = model
@@ -35,6 +37,8 @@ class OpenAICompatibleClient(BaseLLMClient):
         temperature: float = 0.0,
         response_format: dict[str, Any] | None = None,
     ) -> str:
+        started = time.perf_counter()
+        endpoint = f"{self.base_url}/chat/completions"
         payload: dict[str, Any] = {
             "model": self.model,
             "temperature": temperature,
@@ -47,7 +51,7 @@ class OpenAICompatibleClient(BaseLLMClient):
             payload["response_format"] = response_format
 
         req = request.Request(
-            f"{self.base_url}/chat/completions",
+            endpoint,
             data=json.dumps(payload).encode("utf-8"),
             headers={
                 "Authorization": f"Bearer {self.api_key}",
@@ -60,6 +64,21 @@ class OpenAICompatibleClient(BaseLLMClient):
             try:
                 with request.urlopen(req, timeout=self.timeout_seconds) as response:
                     data = json.loads(response.read().decode("utf-8"))
+                self._set_last_call_info(
+                    {
+                        "provider": self.provider,
+                        "model": self.model,
+                        "endpoint": endpoint,
+                        "duration_ms": round((time.perf_counter() - started) * 1000, 3),
+                        "attempts": attempt + 1,
+                        "response_format": response_format.get("type") if isinstance(response_format, dict) else None,
+                        "usage": {
+                            "prompt_tokens": (data.get("usage") or {}).get("prompt_tokens"),
+                            "completion_tokens": (data.get("usage") or {}).get("completion_tokens"),
+                            "total_tokens": (data.get("usage") or {}).get("total_tokens"),
+                        },
+                    }
+                )
                 break
             except error.HTTPError as exc:  # pragma: no cover - network error path
                 detail = exc.read().decode("utf-8", errors="ignore")
@@ -68,12 +87,32 @@ class OpenAICompatibleClient(BaseLLMClient):
                     last_error = RuntimeError(f"LLM HTTP {exc.code}: {detail}")
                     time.sleep(self.retry_backoff_seconds * (2 ** attempt or 1))
                     continue
+                self._set_last_call_info(
+                    {
+                        "provider": self.provider,
+                        "model": self.model,
+                        "endpoint": endpoint,
+                        "duration_ms": round((time.perf_counter() - started) * 1000, 3),
+                        "attempts": attempt + 1,
+                        "error": f"HTTP {exc.code}",
+                    }
+                )
                 raise RuntimeError(f"LLM HTTP {exc.code}: {detail}") from exc
             except (error.URLError, TimeoutError, socket.timeout) as exc:  # pragma: no cover - network error path
                 if attempt < self.max_retries:
                     last_error = RuntimeError(f"LLM connection error: {exc}")
                     time.sleep(self.retry_backoff_seconds * (2 ** attempt or 1))
                     continue
+                self._set_last_call_info(
+                    {
+                        "provider": self.provider,
+                        "model": self.model,
+                        "endpoint": endpoint,
+                        "duration_ms": round((time.perf_counter() - started) * 1000, 3),
+                        "attempts": attempt + 1,
+                        "error": type(exc).__name__,
+                    }
+                )
                 raise RuntimeError(f"LLM connection error: {exc}") from exc
         else:  # pragma: no cover - defensive
             raise last_error or RuntimeError("LLM request failed")
@@ -85,6 +124,10 @@ class OpenAICompatibleClient(BaseLLMClient):
 
 
 class StubLLMClient(BaseLLMClient):
+    def __init__(self, *, provider: str = "stub", model: str = "stub") -> None:
+        self.provider = provider
+        self.model = model
+
     def generate(
         self,
         *,
@@ -94,4 +137,15 @@ class StubLLMClient(BaseLLMClient):
         response_format: dict[str, Any] | None = None,
     ) -> str:
         _ = (system_prompt, temperature, response_format)
+        self._set_last_call_info(
+            {
+                "provider": self.provider,
+                "model": self.model,
+                "endpoint": "stub",
+                "duration_ms": 0.0,
+                "attempts": 1,
+                "response_format": response_format.get("type") if isinstance(response_format, dict) else None,
+                "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+            }
+        )
         return user_prompt

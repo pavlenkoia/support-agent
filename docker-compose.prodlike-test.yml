@@ -5,15 +5,15 @@ services:
       dockerfile: deploy/compose/app.Dockerfile
     restart: unless-stopped
     env_file:
-      - ${SUPPORT_AGENT_RUNTIME_ROOT_HOST:-/home/tian/support-agent-runtime}/app.env
+      - /home/tian/support-agent-runtime-openrouter-test/app.env
     depends_on:
       db:
         condition: service_healthy
     ports:
-      - "8000:8000"
+      - "18000:8000"
     volumes:
-      - ${SUPPORT_AGENT_PROFILE_ROOT_HOST:-/home/tian/support-agent-profiles/parachute}:/data/profile:ro
-      - ${SUPPORT_AGENT_RUNTIME_ROOT_HOST:-/home/tian/support-agent-runtime}/logs:/app/logs
+      - /home/tian/support-agent-profiles/parachute:/data/profile:ro
+      - /home/tian/support-agent-runtime-openrouter-test/logs:/app/logs
     command: ["uv", "run", "--no-dev", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
 
   viewer-web:
@@ -25,7 +25,7 @@ services:
       app:
         condition: service_started
     ports:
-      - "3002:3000"
+      - "13002:3000"
 
   worker:
     build:
@@ -33,13 +33,13 @@ services:
       dockerfile: deploy/compose/worker.Dockerfile
     restart: unless-stopped
     env_file:
-      - ${SUPPORT_AGENT_RUNTIME_ROOT_HOST:-/home/tian/support-agent-runtime}/app.env
+      - /home/tian/support-agent-runtime-openrouter-test/app.env
     depends_on:
       db:
         condition: service_healthy
     volumes:
-      - ${SUPPORT_AGENT_PROFILE_ROOT_HOST:-/home/tian/support-agent-profiles/parachute}:/data/profile:ro
-      - ${SUPPORT_AGENT_RUNTIME_ROOT_HOST:-/home/tian/support-agent-runtime}/logs:/app/logs
+      - /home/tian/support-agent-profiles/parachute:/data/profile:ro
+      - /home/tian/support-agent-runtime-openrouter-test/logs:/app/logs
     command: ["uv", "run", "--no-dev", "python", "-m", "app.workers.main"]
 
   vk-worker:
@@ -48,13 +48,13 @@ services:
       dockerfile: deploy/compose/worker.Dockerfile
     restart: unless-stopped
     env_file:
-      - ${SUPPORT_AGENT_RUNTIME_ROOT_HOST:-/home/tian/support-agent-runtime}/app.env
+      - /home/tian/support-agent-runtime-openrouter-test/app.env
     depends_on:
       db:
         condition: service_healthy
     volumes:
-      - ${SUPPORT_AGENT_PROFILE_ROOT_HOST:-/home/tian/support-agent-profiles/parachute}:/data/profile:ro
-      - ${SUPPORT_AGENT_RUNTIME_ROOT_HOST:-/home/tian/support-agent-runtime}/logs:/app/logs
+      - /home/tian/support-agent-profiles/parachute:/data/profile:ro
+      - /home/tian/support-agent-runtime-openrouter-test/logs:/app/logs
     command: ["uv", "run", "--no-dev", "python", "-m", "app.workers.vk_main"]
 
   db:
@@ -65,7 +65,7 @@ services:
       POSTGRES_USER: support_agent
       POSTGRES_PASSWORD: support_agent
     ports:
-      - "5432:5432"
+      - "15432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U support_agent -d support_agent"]
       interval: 5s
@@ -76,4 +76,4 @@ services:
 
 volumes:
   postgres_data:
-    name: ${COMPOSE_PROJECT_NAME:-support-agent}_postgres_data
+    name: support-agent-or-test_postgres_data

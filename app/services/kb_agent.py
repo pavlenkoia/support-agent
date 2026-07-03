@@ -19,6 +19,7 @@ SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+")
 
 class KBAgentService:
     def __init__(self, client: BaseLLMClient | None = None, prompt_service: KBAgentPromptService | None = None) -> None:
+        self._client_injected = client is not None
         self.client = client or get_llm_client(
             provider=settings.kb_agent_provider,
             base_url=settings.kb_agent_base_url,
@@ -31,6 +32,29 @@ class KBAgentService:
         self.temperature = settings.kb_agent_temperature
         self.prompt_service = prompt_service or KBAgentPromptService()
 
+    def _reset_llm_trace(self) -> None:
+        self._active_llm_trace: list[dict[str, Any]] = []
+
+    def _record_llm_call(self, step: str) -> None:
+        info = self.client.get_last_call_info() if hasattr(self.client, 'get_last_call_info') else {}
+        if not info:
+            return
+        usage = info.get('usage') or {}
+        self._active_llm_trace.append({
+            'role': 'kb_agent',
+            'step': step,
+            'provider': info.get('provider'),
+            'model': info.get('model'),
+            'duration_ms': info.get('duration_ms'),
+            'attempts': info.get('attempts'),
+            'usage': {
+                'prompt_tokens': usage.get('prompt_tokens'),
+                'completion_tokens': usage.get('completion_tokens'),
+                'total_tokens': usage.get('total_tokens'),
+            },
+            'error': info.get('error'),
+        })
+
     def read(
         self,
         text: str,
@@ -38,6 +62,7 @@ class KBAgentService:
         *,
         conversation_context: dict | None = None,
     ) -> dict[str, Any]:
+        self._reset_llm_trace()
         if not kb_hits:
             return {
                 "kb_status": "not_found",
@@ -108,7 +133,7 @@ class KBAgentService:
             "answer_basis": str(extraction.get("answer_basis") or "").strip(),
             "missing_information": extraction.get("missing_information", []),
             "source_refs": source_refs,
-            "trace": trace | {"extraction": extraction},
+            "trace": trace | {"extraction": extraction, "llm_trace": list(self._active_llm_trace)},
         }
 
     def _plan_navigation(
@@ -118,7 +143,7 @@ class KBAgentService:
         *,
         conversation_context: dict | None = None,
     ) -> dict[str, Any]:
-        if settings.kb_agent_provider == "stub":
+        if settings.kb_agent_provider == "stub" and not self._client_injected:
             return {
                 "user_intent": text,
                 "information_needs": [],
@@ -155,8 +180,11 @@ class KBAgentService:
                 temperature=0,
                 response_format={"type": "json_object"},
             )
-            return json.loads(raw)
+            parsed = json.loads(raw)
+            self._record_llm_call('navigation')
+            return parsed
         except Exception as exc:
+            self._record_llm_call('navigation')
             return {
                 "user_intent": text,
                 "information_needs": [],
@@ -180,7 +208,7 @@ class KBAgentService:
                 "additional_source_refs": [],
                 "reason": "no_loaded_pages",
             }
-        if settings.kb_agent_provider == "stub":
+        if settings.kb_agent_provider == "stub" and not self._client_injected:
             return {
                 "coverage_status": "enough",
                 "missing_facts": [],
@@ -218,8 +246,11 @@ class KBAgentService:
                 temperature=0,
                 response_format={"type": "json_object"},
             )
-            return json.loads(raw)
+            parsed = json.loads(raw)
+            self._record_llm_call('coverage_review')
+            return parsed
         except Exception as exc:
+            self._record_llm_call('coverage_review')
             return {
                 "coverage_status": "enough",
                 "missing_facts": [],
@@ -244,7 +275,7 @@ class KBAgentService:
                 "cited_source_refs": [],
                 "reason": "empty_answer_context",
             }
-        if settings.kb_agent_provider == "stub":
+        if settings.kb_agent_provider == "stub" and not self._client_injected:
             return self._fallback_grounded_facts(answer_context, reason="stub_grounding")
 
         system_prompt = self.prompt_service.load_system_prompt()
@@ -281,7 +312,9 @@ class KBAgentService:
                 response_format={"type": "json_object"},
             )
             parsed = json.loads(raw)
+            self._record_llm_call('grounded_extraction')
         except Exception as exc:
+            self._record_llm_call('grounded_extraction')
             fallback = self._fallback_grounded_facts(answer_context, reason=f"grounding_error:{type(exc).__name__}")
             fallback["reason"] = f"grounding_error:{type(exc).__name__}"
             return fallback

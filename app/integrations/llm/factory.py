@@ -15,7 +15,7 @@ def get_llm_client(
 ) -> BaseLLMClient:
     normalized_provider = provider.strip().lower()
     if normalized_provider == "stub":
-        return StubLLMClient()
+        return StubLLMClient(provider=normalized_provider, model=model)
 
     if normalized_provider in {"mistral", "openai_compatible"}:
         if not base_url:
@@ -23,6 +23,7 @@ def get_llm_client(
         if not api_key:
             raise ValueError("LLM api_key is required for provider")
         return OpenAICompatibleClient(
+            provider=normalized_provider,
             base_url=base_url,
             api_key=api_key,
             model=model,

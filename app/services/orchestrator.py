@@ -181,15 +181,23 @@ class OrchestratorService:
             },
         }
 
+        direct_llm_trace = list(final_reply.get("llm_trace") or [])
+        kb_agent_trace = kb_result.get("trace", {})
+        kb_llm_trace = list(kb_agent_trace.get("llm_trace") or [])
+        aggregated_llm_trace = self._aggregate_llm_trace(planner_trace, kb_llm_trace, direct_llm_trace)
+
         response_strategy = {
             "loop_mode": "agentic_bounded_loop_with_kb_agent",
             "final_action": route["route"],
             "knowledge_path": retrieval.get("kb_status", "not_found"),
             "kb_agent_mode": kb_result.get("kb_mode", "unknown"),
             "kb_agent_grounding_status": kb_result.get("grounding_status", "not_found"),
-            "kb_agent_trace": kb_result.get("trace", {}),
+            "kb_agent_trace": kb_agent_trace,
             "planner_trace": planner_trace,
+            "direct_llm_trace": direct_llm_trace,
             "tool_trace": tool_trace,
+            "llm_trace": aggregated_llm_trace,
+            "llm_usage_summary": self._summarize_llm_trace(aggregated_llm_trace),
             "steps": [item["action"] for item in loop_trace],
             "knowledge_query": self._augment_query_with_tool_results(knowledge_query or text, tool_observations),
         }
@@ -310,10 +318,58 @@ class OrchestratorService:
         tool_trace: list[dict[str, Any]],
         tool_batch: dict[str, Any],
     ) -> None:
-        seen = {str(item.get("kind") or "") + "|" + str(item.get("summary") or "") for item in tool_observations}
         for item in tool_batch.get("tool_results", []):
-            key = str(item.get("kind") or "") + "|" + str(item.get("summary") or "")
-            if key not in seen:
+            if item not in tool_observations:
                 tool_observations.append(item)
-                seen.add(key)
         tool_trace.extend(tool_batch.get("tool_trace", []))
+
+    def _aggregate_llm_trace(
+        self,
+        planner_trace: list[dict[str, Any]],
+        kb_llm_trace: list[dict[str, Any]],
+        direct_llm_trace: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        aggregated: list[dict[str, Any]] = []
+        for planner_item in planner_trace:
+            for llm_item in planner_item.get("llm_trace", []) or []:
+                aggregated.append({"iteration": planner_item.get("iteration"), **llm_item})
+        aggregated.extend(kb_llm_trace)
+        aggregated.extend(direct_llm_trace)
+        return aggregated
+
+    def _summarize_llm_trace(self, llm_trace: list[dict[str, Any]]) -> dict[str, Any]:
+        summary: dict[str, Any] = {
+            "call_count": 0,
+            "total_duration_ms": 0.0,
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+            "missing_usage_calls": 0,
+        }
+        by_role: dict[str, dict[str, Any]] = {}
+        for item in llm_trace:
+            role = str(item.get("role") or "unknown")
+            role_bucket = by_role.setdefault(
+                role,
+                {"call_count": 0, "total_duration_ms": 0.0, "prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "missing_usage_calls": 0},
+            )
+            for bucket in (summary, role_bucket):
+                bucket["call_count"] += 1
+                bucket["total_duration_ms"] += float(item.get("duration_ms") or 0.0)
+            usage = item.get("usage") or {}
+            pt = usage.get("prompt_tokens")
+            ct = usage.get("completion_tokens")
+            tt = usage.get("total_tokens")
+            if all(value is None for value in (pt, ct, tt)):
+                summary["missing_usage_calls"] += 1
+                role_bucket["missing_usage_calls"] += 1
+                continue
+            for bucket in (summary, role_bucket):
+                bucket["prompt_tokens"] += int(pt or 0)
+                bucket["completion_tokens"] += int(ct or 0)
+                bucket["total_tokens"] += int(tt or 0)
+        summary["total_duration_ms"] = round(summary["total_duration_ms"], 3)
+        for bucket in by_role.values():
+            bucket["total_duration_ms"] = round(bucket["total_duration_ms"], 3)
+        summary["by_role"] = by_role
+        return summary

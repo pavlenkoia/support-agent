@@ -2,6 +2,13 @@ from typing import Any
 
 
 class BaseLLMClient:
+    def get_last_call_info(self) -> dict[str, Any]:
+        info = getattr(self, "_last_call_info", None)
+        return dict(info) if isinstance(info, dict) else {}
+
+    def _set_last_call_info(self, info: dict[str, Any]) -> None:
+        self._last_call_info = dict(info)
+
     def generate(
         self,
         *,
