@@ -122,4 +122,7 @@ Current UI contract:
 - If KB facts were already gathered and the final answer-generation call fails, the runtime degrades to a short grounded answer synthesized from the retrieved KB instead of a template refusal.
 - Broad but clearly in-domain openers (for example `Подскажите пожалуйста по прыжкам`) should prefer a short KB overview before asking clarification.
 - Date/tool paths must not loop on repeated `use_tool` after the tool result is already present; the next step must advance to KB or answer generation.
+- The KB agent now has an optional hardened runtime mode with deterministic navigation, optional coverage-review skip, minimal extraction schema, and tolerant JSON recovery for structured-output drift.
+
+For rollout notes and the production/test split, see `docs/architecture/kb-agent-hardening.md`.
 

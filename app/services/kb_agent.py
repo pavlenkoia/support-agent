@@ -55,6 +55,145 @@ class KBAgentService:
             'error': info.get('error'),
         })
 
+    @staticmethod
+    def _parse_json_response(raw: str) -> dict[str, Any]:
+        text = str(raw or '').strip()
+        if not text:
+            raise json.JSONDecodeError('empty response', text, 0)
+
+        try:
+            parsed = json.loads(text)
+        except json.JSONDecodeError:
+            parsed = None
+        if isinstance(parsed, dict):
+            return parsed
+
+        fenced = re.search(r"```(?:json)?\s*(\{.*?\}|\[.*?\])\s*```", text, flags=re.DOTALL | re.IGNORECASE)
+        candidates = [fenced.group(1)] if fenced else []
+
+        object_start = text.find('{')
+        object_end = text.rfind('}')
+        if object_start != -1 and object_end != -1 and object_end > object_start:
+            candidates.append(text[object_start:object_end + 1])
+
+        array_start = text.find('[')
+        array_end = text.rfind(']')
+        if array_start != -1 and array_end != -1 and array_end > array_start:
+            candidates.append(text[array_start:array_end + 1])
+
+        for candidate in candidates:
+            try:
+                parsed = json.loads(candidate)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(parsed, dict):
+                return parsed
+
+        raise json.JSONDecodeError('unable to recover JSON object', text, 0)
+
+    @staticmethod
+    def _tokenize_query(text: str) -> list[str]:
+        return [token for token in re.findall(r"[\\w\\-]+", str(text or "").lower()) if len(token) >= 3]
+
+    def _build_navigation_query(self, text: str, conversation_context: dict | None = None) -> str:
+        if not isinstance(conversation_context, dict):
+            return text
+        recent_messages = conversation_context.get("recent_messages", [])
+        if not isinstance(recent_messages, list):
+            return text
+        recent_messages = [item for item in recent_messages if isinstance(item, dict)]
+        if not recent_messages:
+            return text
+
+        parts = [str(text or "").strip()]
+        for item in recent_messages[-4:]:
+            role = str(item.get("role") or "").strip().lower()
+            content = str(item.get("content") or "").strip()
+            if not content:
+                continue
+            prefix = "assistant" if role == "assistant" else "user"
+            parts.append(f"{prefix} {content}")
+        return "\n".join(part for part in parts if part)
+
+    def _deterministic_navigation(
+        self,
+        text: str,
+        kb_context: list[dict],
+        *,
+        conversation_context: dict | None = None,
+    ) -> dict[str, Any]:
+        query = self._build_navigation_query(text, conversation_context=conversation_context)
+        current_terms = self._tokenize_query(text)
+        expanded_terms = self._tokenize_query(query)
+        context_terms = [term for term in expanded_terms if term not in current_terms]
+        lowered_query = query.lower()
+        topic_rules = [
+            (("сертифик", "подар"), ("сертифик", "подар", "офис", "сайт")),
+            (("цена", "стоим", "сколько", "прайс"), ("цен", "стоим", "прайс", "оплат")),
+            (("распис", "когда", "выход", "будн", "суббот", "воскрес", "завтра", "послезавтра", "дата"), ("распис", "запис", "выход", "будн", "суббот", "воскрес", "анонс", "дат")),
+            (("тандем", "запис", "записаться"), ("тандем", "запис", "форма", "телефон")),
+            (("огранич", "здоров", "безопас", "вес", "давлен"), ("огранич", "здоров", "безопас", "вес", "давлен", "опьян")),
+            (("ан-2", "ан2", "як-52", "полет"), ("ан-2", "ан2", "як-52", "полет", "кабин", "салон")),
+        ]
+        schedule_query = any(marker in lowered_query for marker in ("распис", "когда", "выход", "будн", "суббот", "воскрес", "завтра", "послезавтра", "дата"))
+        certificate_query = any(marker in lowered_query for marker in ("сертифик", "подар"))
+        safety_query = any(marker in lowered_query for marker in ("огранич", "здоров", "безопас", "вес", "давлен"))
+
+        scored: list[tuple[int, str]] = []
+        selected_reason = "deterministic_navigation:lexical"
+        for item in kb_context:
+            source_ref = item.get("source_ref")
+            if not source_ref or str(source_ref).endswith("index.md"):
+                continue
+            haystack = " ".join(
+                [
+                    str(item.get("page_title") or ""),
+                    str(item.get("page_summary") or ""),
+                    str(item.get("page_preview") or ""),
+                    str(item.get("text") or ""),
+                    " ".join(str(link) for link in item.get("linked_pages", []) if link),
+                ]
+            ).lower()
+            score = 0
+            score += sum(5 for term in current_terms if term in haystack)
+            score += sum(2 for term in context_terms if term in haystack)
+            for query_markers, page_markers in topic_rules:
+                if any(marker in lowered_query for marker in query_markers) and any(marker in haystack for marker in page_markers):
+                    score += 8
+            if schedule_query and "сертифик" in haystack and not certificate_query:
+                score -= 6
+            if safety_query and "сертифик" in haystack:
+                score -= 4
+            if schedule_query and "booking-and-schedule" in str(source_ref):
+                score += 12
+            if certificate_query and "certificates" in str(source_ref):
+                score += 12
+            if safety_query and "restrictions-and-safety" in str(source_ref):
+                score += 12
+            if score:
+                scored.append((score, str(source_ref)))
+
+        scored.sort(key=lambda item: (-item[0], item[1]))
+        selected_refs = [source_ref for _, source_ref in scored[:MAX_CATALOG_SELECTION]]
+        if schedule_query and not certificate_query:
+            filtered = [ref for ref in selected_refs if "certificates" not in ref]
+            if filtered:
+                selected_refs = filtered
+        if safety_query:
+            filtered = [ref for ref in selected_refs if "certificates" not in ref]
+            if filtered:
+                selected_refs = filtered
+        if not selected_refs:
+            selected_refs = self._fallback_select_catalog_refs(query, kb_context, limit=MAX_CATALOG_SELECTION)
+            selected_reason = "deterministic_navigation:fallback_lexical"
+
+        return {
+            "user_intent": text,
+            "information_needs": [],
+            "selected_source_refs": selected_refs,
+            "reason": selected_reason,
+        }
+
     def read(
         self,
         text: str,
@@ -81,7 +220,10 @@ class KBAgentService:
         answer_mode = kb_mode
 
         if kb_mode == "llm_wiki_catalog":
-            navigation = self._plan_navigation(text, kb_context, conversation_context=conversation_context)
+            if settings.kb_agent_deterministic_navigation:
+                navigation = self._deterministic_navigation(text, kb_context, conversation_context=conversation_context)
+            else:
+                navigation = self._plan_navigation(text, kb_context, conversation_context=conversation_context)
             selected_refs = self._normalize_catalog_refs(
                 navigation.get("selected_source_refs", []),
                 kb_context,
@@ -90,13 +232,21 @@ class KBAgentService:
             if not selected_refs:
                 selected_refs = self._fallback_select_catalog_refs(text, kb_context, limit=MAX_CATALOG_SELECTION)
             loaded_pages = self._load_catalog_pages(kb_context, selected_refs)
-            review = self._review_coverage(
-                text,
-                kb_context,
-                loaded_pages,
-                navigation,
-                conversation_context=conversation_context,
-            )
+            if settings.kb_agent_skip_coverage_review:
+                review = {
+                    "coverage_status": "enough",
+                    "missing_facts": [],
+                    "additional_source_refs": [],
+                    "reason": "skip_coverage_review:settings",
+                }
+            else:
+                review = self._review_coverage(
+                    text,
+                    kb_context,
+                    loaded_pages,
+                    navigation,
+                    conversation_context=conversation_context,
+                )
             if review.get("coverage_status") == "need_more_pages":
                 additional_refs = self._normalize_catalog_refs(
                     review.get("additional_source_refs", []),
@@ -180,7 +330,7 @@ class KBAgentService:
                 temperature=0,
                 response_format={"type": "json_object"},
             )
-            parsed = json.loads(raw)
+            parsed = self._parse_json_response(raw)
             self._record_llm_call('navigation')
             return parsed
         except Exception as exc:
@@ -246,7 +396,7 @@ class KBAgentService:
                 temperature=0,
                 response_format={"type": "json_object"},
             )
-            parsed = json.loads(raw)
+            parsed = self._parse_json_response(raw)
             self._record_llm_call('coverage_review')
             return parsed
         except Exception as exc:
@@ -279,27 +429,40 @@ class KBAgentService:
             return self._fallback_grounded_facts(answer_context, reason="stub_grounding")
 
         system_prompt = self.prompt_service.load_system_prompt()
+        minimal_schema = settings.kb_agent_minimal_extraction_schema
+        required_json_schema = {
+            "grounding_status": "ready|not_found",
+            "answer_basis": "short factual synthesis for the support agent, not a customer reply",
+            "grounded_facts": ["bullet-sized verified facts"],
+            "cited_source_refs": ["source_ref strings used"],
+            "reason": "short string",
+        }
+        if not minimal_schema:
+            required_json_schema["missing_information"] = ["facts that remain unknown"]
+        rules = [
+            "Работай как KB agent, а не как клиентский консультант.",
+            "Извлекай только подтвержденные факты из предоставленных страниц wiki.",
+            "Не дополняй выводы догадками и не отвечай в клиентском стиле.",
+            "answer_basis должен быть короткой служебной опорой для финального support-agent ответа.",
+        ]
+        if minimal_schema:
+            rules.extend(
+                [
+                    "Верни минимальный JSON: grounding_status, answer_basis, grounded_facts, cited_source_refs, reason.",
+                    "Не добавляй missing_information, если можно безопасно ответить без него.",
+                ]
+            )
+        else:
+            rules.append("Если данных не хватает, явно перечисли чего не хватает в missing_information.")
+
         user_prompt = json.dumps(
             {
                 "task": "Extract grounded facts from the selected wiki pages for the support agent.",
-                "required_json_schema": {
-                    "grounding_status": "ready|not_found",
-                    "answer_basis": "short factual synthesis for the support agent, not a customer reply",
-                    "grounded_facts": ["bullet-sized verified facts"],
-                    "missing_information": ["facts that remain unknown"],
-                    "cited_source_refs": ["source_ref strings used"],
-                    "reason": "short string",
-                },
+                "required_json_schema": required_json_schema,
                 "user_message": text,
                 "conversation_context": conversation_context or {},
                 "kb_mode": answer_mode,
-                "rules": [
-                    "Работай как KB agent, а не как клиентский консультант.",
-                    "Извлекай только подтвержденные факты из предоставленных страниц wiki.",
-                    "Не дополняй выводы догадками и не отвечай в клиентском стиле.",
-                    "Если данных не хватает, явно перечисли чего не хватает в missing_information.",
-                    "answer_basis должен быть короткой служебной опорой для финального support-agent ответа.",
-                ],
+                "rules": rules,
                 "selected_full_pages": answer_context,
             },
             ensure_ascii=False,
@@ -311,7 +474,7 @@ class KBAgentService:
                 temperature=self.temperature,
                 response_format={"type": "json_object"},
             )
-            parsed = json.loads(raw)
+            parsed = self._parse_json_response(raw)
             self._record_llm_call('grounded_extraction')
         except Exception as exc:
             self._record_llm_call('grounded_extraction')
@@ -321,6 +484,10 @@ class KBAgentService:
 
         if not parsed.get("cited_source_refs"):
             parsed["cited_source_refs"] = self._extract_source_refs(answer_context)
+        if not isinstance(parsed.get("missing_information"), list):
+            parsed["missing_information"] = []
+        if not isinstance(parsed.get("answer_basis"), str):
+            parsed["answer_basis"] = str(parsed.get("answer_basis") or "").strip()
         grounded_facts = parsed.get("grounded_facts") or []
         if isinstance(grounded_facts, list):
             parsed["grounded_facts"] = [str(item).strip() for item in grounded_facts if str(item).strip()][:MAX_GROUNDED_FACTS]

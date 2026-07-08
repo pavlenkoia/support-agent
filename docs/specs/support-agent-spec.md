@@ -51,6 +51,12 @@ Example class of task:
 - The KB agent is the stronger reasoning step and should be allowed to use the stronger model tier than the final answering step.
 - If the planner or final answer step fails after KB retrieval succeeded, the runtime should prefer a grounded degradation path over a template refusal whenever the retrieved KB still supports a safe short answer.
 - Deterministic degradations must be based on retrieved facts generically, not on one-off question-specific hardcodes.
+- The KB agent runtime must support feature-flagged hardening controls for structured-output reliability:
+  - deterministic navigation over wiki page cards
+  - optional coverage-review bypass when page selection is already sufficiently narrow
+  - minimal extraction schema for models that struggle with larger JSON envelopes
+  - tolerant JSON recovery from fenced or wrapped objects before surfacing a parsing failure
+- These hardening controls must be runtime-configurable so production can stay on the current model while isolated test contours experiment with alternative KB-agent models.
 
 ## Channel contract notes
 

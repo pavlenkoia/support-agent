@@ -94,6 +94,14 @@ The application-level outcomes are now:
 4. **Final-answer LLM failure does not erase grounded knowledge**. If KB facts were already gathered and the final answer-generation step fails, the runtime must return a short grounded fallback answer synthesized from the retrieved facts.
 5. **Deterministic fallbacks must stay generic**. The core must not hardcode one business question as the only fallback path; the degradation path must work across in-domain topics such as certificates, schedules, and rules.
 6. **Date/tool paths must advance after the tool result is gathered**. A live runtime must not repeat `use_tool` for the same turn once the relevant tool result is already present.
+7. **The KB agent now supports a hardened selective-read mode** for less JSON-disciplined models and for safer prod operation on the current Mistral tier:
+   - deterministic lexical navigation can replace free-form LLM navigation when enabled
+   - coverage review can be skipped when the selected page set is already narrowly scoped
+   - grounded extraction can request a minimal JSON schema instead of a larger object with optional fields
+   - JSON parsing for KB-agent steps accepts fenced or wrapped objects before failing hard
+   - rollout is controlled entirely by runtime flags so prod/test contours can diverge without forking code
+
+See also: `docs/architecture/kb-agent-hardening.md`.
 
 ## Transport-state persistence
 

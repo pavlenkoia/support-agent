@@ -35,6 +35,9 @@ class Settings(BaseSettings):
     kb_agent_timeout_seconds: int | None = None
     kb_agent_max_retries: int | None = None
     kb_agent_retry_backoff_seconds: float | None = None
+    kb_agent_skip_coverage_review: bool = False
+    kb_agent_deterministic_navigation: bool = False
+    kb_agent_minimal_extraction_schema: bool = False
 
     summary_llm_provider: str = "stub"
     summary_llm_base_url: str | None = None
