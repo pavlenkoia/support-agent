@@ -15,7 +15,7 @@ Runtime layers:
 - **External compiled knowledge base** outside the repository
 - **External prompt files** (`SYSTEM_PROMPT.md`, `KB_AGENT_PROMPT.md`) outside the repository
 - **Optional runtime tools** for current-date / calculation / environment-aware checks
-- **Provider-aware LLM client layer** with bounded retry / timeout handling for transient failures
+- **Provider-aware LLM client layer** with bounded retry / timeout handling for transient failures and ordered multi-key failover for Mistral/openai-compatible roles
 
 ## Per-turn orchestration contract
 
@@ -87,19 +87,28 @@ The application-level outcomes are now:
 ## Reliability and degradation rules
 
 1. **Transient provider failures are retried** with bounded timeout/backoff settings at the LLM client layer.
-2. **Planner over-clarification is constrained**:
+2. **Key-specific provider failures can fail over** at the same client layer:
+   - `DIRECT_LLM_API_KEYS`, `KB_AGENT_API_KEYS`, and `SUMMARY_LLM_API_KEYS` accept ordered CSV key pools
+   - transient/network/5xx failures retry on the current key
+   - auth/quota/key-specific failures fail over to the next key slot when available
+   - legacy single-key vars remain valid and are treated as the primary key
+3. **Planner over-clarification is constrained**:
    - if KB has not been read yet and the opener is broad but clearly in-domain, prefer `read_kb`
    - if KB is already found and a short safe overview is possible, prefer `answer_from_kb`
-3. **The KB agent is the heavy reasoning step**. The stronger model should be allocated to page selection / selective reading / coverage review, while the final customer-facing answer step can use a lighter model.
-4. **Final-answer LLM failure does not erase grounded knowledge**. If KB facts were already gathered and the final answer-generation step fails, the runtime must return a short grounded fallback answer synthesized from the retrieved facts.
-5. **Deterministic fallbacks must stay generic**. The core must not hardcode one business question as the only fallback path; the degradation path must work across in-domain topics such as certificates, schedules, and rules.
-6. **Date/tool paths must advance after the tool result is gathered**. A live runtime must not repeat `use_tool` for the same turn once the relevant tool result is already present.
-7. **The KB agent now supports a hardened selective-read mode** for less JSON-disciplined models and for safer prod operation on the current Mistral tier:
+4. **The KB agent is the heavy reasoning step**. The stronger model should be allocated to page selection / selective reading / coverage review, while the final customer-facing answer step can use a lighter model.
+5. **Final-answer LLM failure does not erase grounded knowledge**. If KB facts were already gathered and the final answer-generation step fails, the runtime must return a short grounded fallback answer synthesized from the retrieved facts.
+6. **Deterministic fallbacks must stay generic**. The core must not hardcode one business question as the only fallback path; the degradation path must work across in-domain topics such as certificates, schedules, and rules.
+7. **Date/tool paths must advance after the tool result is gathered**. A live runtime must not repeat `use_tool` for the same turn once the relevant tool result is already present.
+8. **The KB agent now supports a hardened selective-read mode** for less JSON-disciplined models and for safer prod operation on the current Mistral tier:
    - deterministic lexical navigation can replace free-form LLM navigation when enabled
    - coverage review can be skipped when the selected page set is already narrowly scoped
    - grounded extraction can request a minimal JSON schema instead of a larger object with optional fields
    - JSON parsing for KB-agent steps accepts fenced or wrapped objects before failing hard
    - rollout is controlled entirely by runtime flags so prod/test contours can diverge without forking code
+9. **Failover is observable without leaking secrets**:
+   - warning logs are emitted when the client switches from one key slot to another
+   - `last_call_info` / LLM trace preserve `api_key_index`, `used_failover`, `failover_count`, and structured `failover_events`
+   - LLM usage summaries aggregate `failover_count` and `failover_calls` so operators can tell when reserve keys are in active use
 
 See also: `docs/architecture/kb-agent-hardening.md`.
 

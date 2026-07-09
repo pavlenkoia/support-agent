@@ -9,6 +9,12 @@ def parse_csv_set(value: str | None) -> set[str]:
     return {item.strip() for item in value.split(',') if item.strip()}
 
 
+def parse_csv_list(value: str | None) -> list[str]:
+    if not value:
+        return []
+    return [item.strip() for item in value.split(',') if item.strip()]
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file="deploy/env/app.env", extra="ignore")
 
@@ -21,6 +27,7 @@ class Settings(BaseSettings):
     direct_llm_provider: str = "stub"
     direct_llm_base_url: str | None = None
     direct_llm_api_key: str | None = None
+    direct_llm_api_keys: str = ""
     direct_llm_model: str = "stub"
     direct_llm_temperature: float = 0.0
     direct_llm_timeout_seconds: int = 45
@@ -30,6 +37,7 @@ class Settings(BaseSettings):
     kb_agent_provider: str | None = None
     kb_agent_base_url: str | None = None
     kb_agent_api_key: str | None = None
+    kb_agent_api_keys: str = ""
     kb_agent_model: str | None = None
     kb_agent_temperature: float = 0.0
     kb_agent_timeout_seconds: int | None = None
@@ -42,6 +50,7 @@ class Settings(BaseSettings):
     summary_llm_provider: str = "stub"
     summary_llm_base_url: str | None = None
     summary_llm_api_key: str | None = None
+    summary_llm_api_keys: str = ""
     summary_llm_model: str = "stub"
     summary_llm_temperature: float = 0.0
     summary_llm_timeout_seconds: int = 45
@@ -77,6 +86,27 @@ class Settings(BaseSettings):
 
     log_level: str = "INFO"
 
+    @property
+    def direct_llm_api_key_list(self) -> list[str]:
+        keys = parse_csv_list(self.direct_llm_api_keys)
+        if self.direct_llm_api_key and self.direct_llm_api_key not in keys:
+            return [self.direct_llm_api_key, *keys]
+        return keys
+
+    @property
+    def kb_agent_api_key_list(self) -> list[str]:
+        keys = parse_csv_list(self.kb_agent_api_keys)
+        if self.kb_agent_api_key and self.kb_agent_api_key not in keys:
+            return [self.kb_agent_api_key, *keys]
+        return keys
+
+    @property
+    def summary_llm_api_key_list(self) -> list[str]:
+        keys = parse_csv_list(self.summary_llm_api_keys)
+        if self.summary_llm_api_key and self.summary_llm_api_key not in keys:
+            return [self.summary_llm_api_key, *keys]
+        return keys
+
     def model_post_init(self, __context) -> None:
         if not self.support_agent_system_prompt_path:
             self.support_agent_system_prompt_path = str(Path(self.support_agent_profile_root) / "SYSTEM_PROMPT.md")
@@ -91,6 +121,10 @@ class Settings(BaseSettings):
             self.kb_agent_provider = self.direct_llm_provider
         if not self.kb_agent_base_url:
             self.kb_agent_base_url = self.direct_llm_base_url
+        if not self.direct_llm_api_key and self.direct_llm_api_key_list:
+            self.direct_llm_api_key = self.direct_llm_api_key_list[0]
+        if not self.kb_agent_api_keys:
+            self.kb_agent_api_keys = self.direct_llm_api_keys
         if not self.kb_agent_api_key:
             self.kb_agent_api_key = self.direct_llm_api_key
         if not self.kb_agent_model:
@@ -107,6 +141,9 @@ class Settings(BaseSettings):
 
         if not self.kb_agent_base_url and self.kb_agent_provider == "mistral":
             self.kb_agent_base_url = "https://api.mistral.ai/v1"
+
+        if not self.summary_llm_api_key and self.summary_llm_api_key_list:
+            self.summary_llm_api_key = self.summary_llm_api_key_list[0]
 
         if not self.summary_llm_base_url and self.summary_llm_provider == "mistral":
             self.summary_llm_base_url = "https://api.mistral.ai/v1"

@@ -63,6 +63,7 @@ Current audit fields of interest:
 - `audit.response_strategy.steps` — compact step sequence such as `read_kb -> kb_agent_read -> answer`
 - `audit.response_strategy.loop_trace` — per-iteration planner/action trace
 - `audit.response_strategy.tool_trace` — structured runtime-tool trace for date/math/live-fact checks
+- `audit.response_strategy.llm_trace` — per-role LLM call metadata including provider/model/duration/attempts/usage and failover fields such as `api_key_index`, `used_failover`, `failover_count`, and `failover_events`
 
 Transport workers may also keep transport-level journal state outside the API response envelope; for VK this includes raw event processing, send reconciliation, and override suppression state.
 
@@ -120,3 +121,11 @@ These are internal persistence contracts rather than public HTTP endpoints, but 
   - `session_type`
   - `scenario_name`
   - `requested_by`
+
+## LLM observability side-contracts
+
+These are internal observability contracts, but they are part of the shipped repository behavior:
+- Mistral/openai-compatible roles may be configured with ordered CSV key pools via `DIRECT_LLM_API_KEYS`, `KB_AGENT_API_KEYS`, and `SUMMARY_LLM_API_KEYS`
+- successful LLM calls preserve `api_key_index`, `used_failover`, `failover_count`, and `failover_events` in `last_call_info` / `llm_trace`
+- failover warning logs identify only provider/model/key-slot transition/status/reason class and must not print raw API keys
+- aggregated LLM usage summaries also expose `failover_count` and `failover_calls` per role and overall

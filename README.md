@@ -15,6 +15,8 @@ Application-first skeleton for the **Агент поддержки** project.
 - separate KB agent for Karpathy-style wiki navigation and selective page reading
 - external hot-editable prompt files for the customer-facing agent and the KB agent
 - provider-aware LLM client with bounded retries/backoff for transient failures
+- ordered multi-key failover for Mistral/openai-compatible roles via `*_API_KEYS` pools
+- failover observability in LLM trace/usage summaries without exposing secrets
 - grounded fallback answers when KB is present but the final LLM answer step fails
 - transport persistence for raw events, outbound-send reconciliation, and VK human-override state
 - pytest smoke tests
@@ -39,6 +41,7 @@ Current runtime shape:
 - external `KB_AGENT_PROMPT.md` for the wiki-reading KB agent
 - compiled external KB pages used as the factual source of truth
 - optional runtime tools (for example weekday/date checks) before final answer generation
+- provider key pools via `DIRECT_LLM_API_KEYS`, `KB_AGENT_API_KEYS`, and `SUMMARY_LLM_API_KEYS` (CSV, first key primary, later keys reserve/failover)
 
 ## Quick start
 
@@ -117,6 +120,8 @@ Current UI contract:
 ## Reliability notes
 
 - Direct-answer, KB-agent, and summary LLM clients use configurable timeout / retry settings for transient provider failures.
+- Mistral/openai-compatible roles can also use ordered CSV key pools (`*_API_KEYS`): transient/network/5xx failures retry on the same key, while auth/quota/key-specific failures fail over to the next key.
+- LLM traces now preserve non-secret failover metadata (`api_key_index`, `used_failover`, `failover_count`, `failover_events`) and aggregate failover counters in usage summaries so operators can detect reserve-key usage.
 - VK long-poll transport failures that surface as transient network errors must not terminate the worker loop.
 - The stronger model should be allocated to the KB agent / wiki-reading step; the cheaper model can be used for the final customer-facing answer step.
 - If KB facts were already gathered and the final answer-generation call fails, the runtime degrades to a short grounded answer synthesized from the retrieved KB instead of a template refusal.

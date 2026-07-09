@@ -345,17 +345,31 @@ class OrchestratorService:
             "completion_tokens": 0,
             "total_tokens": 0,
             "missing_usage_calls": 0,
+            "failover_count": 0,
+            "failover_calls": 0,
         }
         by_role: dict[str, dict[str, Any]] = {}
         for item in llm_trace:
             role = str(item.get("role") or "unknown")
             role_bucket = by_role.setdefault(
                 role,
-                {"call_count": 0, "total_duration_ms": 0.0, "prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "missing_usage_calls": 0},
+                {
+                    "call_count": 0,
+                    "total_duration_ms": 0.0,
+                    "prompt_tokens": 0,
+                    "completion_tokens": 0,
+                    "total_tokens": 0,
+                    "missing_usage_calls": 0,
+                    "failover_count": 0,
+                    "failover_calls": 0,
+                },
             )
             for bucket in (summary, role_bucket):
                 bucket["call_count"] += 1
                 bucket["total_duration_ms"] += float(item.get("duration_ms") or 0.0)
+                bucket["failover_count"] += int(item.get("failover_count") or 0)
+                if item.get("used_failover"):
+                    bucket["failover_calls"] += 1
             usage = item.get("usage") or {}
             pt = usage.get("prompt_tokens")
             ct = usage.get("completion_tokens")

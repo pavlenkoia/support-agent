@@ -24,6 +24,7 @@ class KBAgentService:
             provider=settings.kb_agent_provider,
             base_url=settings.kb_agent_base_url,
             api_key=settings.kb_agent_api_key,
+            api_keys=settings.kb_agent_api_key_list,
             model=settings.kb_agent_model,
             timeout_seconds=settings.kb_agent_timeout_seconds,
             max_retries=settings.kb_agent_max_retries,
@@ -47,6 +48,10 @@ class KBAgentService:
             'model': info.get('model'),
             'duration_ms': info.get('duration_ms'),
             'attempts': info.get('attempts'),
+            'api_key_index': info.get('api_key_index'),
+            'used_failover': info.get('used_failover'),
+            'failover_count': info.get('failover_count'),
+            'failover_events': info.get('failover_events') or [],
             'usage': {
                 'prompt_tokens': usage.get('prompt_tokens'),
                 'completion_tokens': usage.get('completion_tokens'),

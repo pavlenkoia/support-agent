@@ -13,6 +13,7 @@ class SummaryService:
             provider=settings.summary_llm_provider,
             base_url=settings.summary_llm_base_url,
             api_key=settings.summary_llm_api_key,
+            api_keys=settings.summary_llm_api_key_list,
             model=settings.summary_llm_model,
             timeout_seconds=settings.summary_llm_timeout_seconds,
             max_retries=settings.summary_llm_max_retries,

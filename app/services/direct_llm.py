@@ -24,6 +24,7 @@ class DirectLLMService:
             provider=settings.direct_llm_provider,
             base_url=settings.direct_llm_base_url,
             api_key=settings.direct_llm_api_key,
+            api_keys=settings.direct_llm_api_key_list,
             model=settings.direct_llm_model,
             timeout_seconds=settings.direct_llm_timeout_seconds,
             max_retries=settings.direct_llm_max_retries,
@@ -48,6 +49,10 @@ class DirectLLMService:
                 "model": info.get("model"),
                 "duration_ms": info.get("duration_ms"),
                 "attempts": info.get("attempts"),
+                "api_key_index": info.get("api_key_index"),
+                "used_failover": info.get("used_failover"),
+                "failover_count": info.get("failover_count"),
+                "failover_events": info.get("failover_events") or [],
                 "usage": {
                     "prompt_tokens": usage.get("prompt_tokens"),
                     "completion_tokens": usage.get("completion_tokens"),
