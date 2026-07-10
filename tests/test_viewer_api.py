@@ -15,7 +15,7 @@ from app.services.viewer_service import ViewerService
 client = TestClient(app)
 
 
-def make_viewer_service(tmp_path) -> ViewerService:
+def make_viewer_service(tmp_path, *, viewer_timezone: str = "Asia/Yekaterinburg") -> ViewerService:
     db_path = tmp_path / "viewer.db"
     session_factory = make_session_factory(f"sqlite+pysqlite:///{db_path}")
     Base.metadata.create_all(bind=session_factory.kw["bind"])
@@ -62,7 +62,7 @@ def make_viewer_service(tmp_path) -> ViewerService:
         )
         session.commit()
 
-    return ViewerService(session_factory=session_factory)
+    return ViewerService(session_factory=session_factory, viewer_timezone=viewer_timezone)
 
 
 def test_viewer_dialogs_lists_only_vk_dialogs_for_selected_day(tmp_path) -> None:
@@ -130,3 +130,65 @@ def test_viewer_messages_returns_empty_list_for_day_without_messages(tmp_path) -
     payload = response.json()
     assert payload["conversation_id"] == "vk:123"
     assert payload["messages"] == []
+
+
+def test_viewer_dialogs_filters_by_local_day_boundary_not_utc(tmp_path) -> None:
+    db_path = tmp_path / "viewer_boundary.db"
+    session_factory = make_session_factory(f"sqlite+pysqlite:///{db_path}")
+    Base.metadata.create_all(bind=session_factory.kw["bind"])
+
+    with session_factory() as session:
+        conversation = Conversation(external_id="vk:1061355692")
+        session.add(conversation)
+        session.flush()
+
+        support_case = SupportCase(conversation_id=conversation.id, status="resolved", route_mode="answer")
+        session.add(support_case)
+        session.flush()
+
+        session.add_all(
+            [
+                Message(
+                    case_id=support_case.id,
+                    role="user",
+                    content="Здравствуйте",
+                    created_at=datetime(2026, 7, 9, 19, 42, 0, tzinfo=UTC),
+                ),
+                Message(
+                    case_id=support_case.id,
+                    role="assistant",
+                    content="Ответ",
+                    created_at=datetime(2026, 7, 9, 19, 43, 5, tzinfo=UTC),
+                ),
+            ]
+        )
+        session.commit()
+
+    service = ViewerService(session_factory=session_factory, viewer_timezone="Asia/Yekaterinburg")
+    app.dependency_overrides[get_viewer_service] = lambda: service
+    try:
+        july_9 = client.get("/api/viewer/dialogs", params={"day": "2026-07-09"})
+        july_10 = client.get("/api/viewer/dialogs", params={"day": "2026-07-10"})
+        july_10_messages = client.get(
+            "/api/viewer/dialogs/vk:1061355692/messages",
+            params={"day": "2026-07-10"},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert july_9.status_code == 200
+    assert july_10.status_code == 200
+    assert july_10_messages.status_code == 200
+
+    assert july_9.json() == []
+    assert july_10.json() == [
+        {
+            "conversation_id": "vk:1061355692",
+            "case_id": 1,
+            "display_name": None,
+            "external_chat_id": "1061355692",
+            "last_message_at": "2026-07-09T19:43:05Z",
+            "message_count": 2,
+        }
+    ]
+    assert [message["id"] for message in july_10_messages.json()["messages"]] == ["1", "2"]

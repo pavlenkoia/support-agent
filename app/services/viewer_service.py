@@ -2,10 +2,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 
+from app.core.config import settings
 from app.core.db import SessionLocal
 from app.models.case import SupportCase
 from app.models.conversation import Conversation
@@ -23,8 +25,13 @@ class _ViewerConversationMeta:
 
 
 class ViewerService:
-    def __init__(self, session_factory: sessionmaker = SessionLocal) -> None:
+    def __init__(
+        self,
+        session_factory: sessionmaker = SessionLocal,
+        viewer_timezone: str = settings.viewer_timezone,
+    ) -> None:
         self.session_factory = session_factory
+        self.viewer_timezone = ZoneInfo(viewer_timezone)
 
     def list_dialogs_for_day(self, day: date) -> list[ViewerDialogItem]:
         day_start, day_end = self._day_bounds(day)
@@ -120,10 +127,10 @@ class ViewerService:
             external_chat_id=self._external_chat_id_from_conversation(row.external_id),
         )
 
-    @staticmethod
-    def _day_bounds(day: date) -> tuple[datetime, datetime]:
-        day_start = datetime(day.year, day.month, day.day, tzinfo=UTC)
-        return day_start, day_start + timedelta(days=1)
+    def _day_bounds(self, day: date) -> tuple[datetime, datetime]:
+        local_day_start = datetime(day.year, day.month, day.day, tzinfo=self.viewer_timezone)
+        local_day_end = local_day_start + timedelta(days=1)
+        return local_day_start.astimezone(UTC), local_day_end.astimezone(UTC)
 
     @staticmethod
     def _normalize_dt(value: datetime) -> datetime:

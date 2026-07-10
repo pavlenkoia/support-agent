@@ -6,12 +6,9 @@ import { fetchDialogMessages, fetchDialogs } from '../api/viewer'
 import { ChatPanel } from '../components/ChatPanel'
 import { DialogList } from '../components/DialogList'
 import { ViewerHeader } from '../components/ViewerHeader'
+import { formatToday } from '../utils/time'
 
 const THEME_STORAGE_KEY = 'vk-dialog-viewer-theme'
-
-function formatToday() {
-  return new Date().toISOString().slice(0, 10)
-}
 
 function loadInitialTheme() {
   if (typeof window === 'undefined') return 'light'
