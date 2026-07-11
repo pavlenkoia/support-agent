@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 
 import { ChatMessage } from './ChatMessage'
 
-const EDGE_SWIPE_MAX_START_X = 96
+const EDGE_SWIPE_START_RATIO = 0.4
+const EDGE_SWIPE_MAX_START_X_CAP = 220
 const EDGE_SWIPE_MIN_DELTA_X = 48
 const EDGE_SWIPE_MAX_DELTA_Y = 96
 const SWIPE_CLOSE_ANIMATION_MS = 180
@@ -79,11 +80,16 @@ export function ChatPanel({
       closeTimerRef.current = null
     }
 
+    const panelWidth = event.currentTarget.clientWidth || 0
+    const swipeStartLimit = panelWidth > 0
+      ? Math.min(panelWidth * EDGE_SWIPE_START_RATIO, EDGE_SWIPE_MAX_START_X_CAP)
+      : EDGE_SWIPE_MAX_START_X_CAP
+
     swipeStateRef.current = {
       startX: touch.clientX,
       startY: touch.clientY,
-      tracking: touch.clientX <= EDGE_SWIPE_MAX_START_X,
-      panelWidth: event.currentTarget.clientWidth || 0,
+      tracking: touch.clientX <= swipeStartLimit,
+      panelWidth,
     }
 
     setIsDragging(false)
