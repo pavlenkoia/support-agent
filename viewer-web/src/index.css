@@ -38,10 +38,6 @@ body {
     -webkit-overflow-scrolling: touch;
   }
 
-  #root {
-    height: auto;
-    min-height: 100dvh;
-  }
 }
 
 * {

@@ -5,7 +5,7 @@ export function ChatPanel({ dialog, isLoading, theme, className = '', onBack = n
 
   return (
     <section className={[
-      'flex flex-col md:h-full md:min-h-0 md:flex-1',
+      'h-full min-h-0 flex-1 flex-col',
       onBack ? (isDark ? 'border-t border-slate-800' : 'border-t border-slate-200') : '',
       isDark ? 'bg-slate-950' : 'bg-white',
       className,
@@ -26,7 +26,7 @@ export function ChatPanel({ dialog, isLoading, theme, className = '', onBack = n
           </button>
         </div>
       ) : null}
-      <div className="px-6 py-6 md:min-h-0 md:flex-1 md:overflow-y-auto">
+      <div className="min-h-0 flex-1 overflow-y-auto px-6 py-6">
         {isLoading ? (
           <div
             className={[
