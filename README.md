@@ -8,7 +8,7 @@ Application-first skeleton for the **Агент поддержки** project.
 - polling transport workers for Telegram and VK
 - Telegram gateway slice for bot polling delivery
 - VK gateway slice via VK Bots Long Poll API for community direct messages
-- read-only VK dialog viewer web UI on port `3002`
+- read-only VK dialog viewer web UI on port `3002`, including installable online-first PWA shell
 - internal probe session API for governor-driven live runtime checks without customer-channel traffic
 - external knowledge-layer contract
 - bounded support-agent loop with planner -> tool/KB gathering -> finalize
@@ -92,6 +92,9 @@ The repository also exposes an operator/internal-test probe slice that reuses th
 Current UI/runtime contract:
 - viewer opens on a one-field login screen when viewer auth is enabled
 - successful login is persisted with a long-lived `HttpOnly` cookie (configurable, current default 365 days)
+- viewer-web is shipped as an installable online-first PWA with `manifest.webmanifest`, service worker registration, standalone display mode, and app icons
+- the PWA intentionally caches only the static app shell/assets; dialog API payloads are not aggressively persisted for offline history in v1
+- if the installed shell is opened without network before auth/data can load, the UI shows a clear offline state instead of a blank screen
 - theme remains light by default, with header-right light/dark toggle after login
 - theme toggle is icon-only; visible text is moved to tooltip/accessibility labels
 - compact sticky top header for app identity + theme toggle

@@ -110,6 +110,9 @@ Backend requirements:
 - selected-day filtering applies both to dialog summaries and to message history
 - auth endpoints exist under `/api/viewer/auth/...` for `me`, `login`, and `logout`
 - runtime viewer auth is controlled by env flags/key material (`VIEWER_AUTH_ENABLED`, `VIEWER_AUTH_KEY`, cookie name/TTL/secure settings)
+- viewer-web is delivered as an installable online-first PWA under the same origin, with manifest, service worker, app icons, and standalone display mode
+- the PWA caches only the static shell/assets in v1; `/api/viewer/*` data is intentionally not treated as an offline history cache
+- when the shell opens without network, it must show a clear offline/unavailable state instead of a white screen
 
 ## Internal probe session slice
 

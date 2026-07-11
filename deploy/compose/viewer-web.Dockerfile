@@ -12,5 +12,6 @@ FROM nginx:1.27-alpine
 
 COPY deploy/compose/viewer-web.nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=build /app/dist /usr/share/nginx/html
+RUN chmod -R a+r /usr/share/nginx/html
 
 EXPOSE 3000

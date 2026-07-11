@@ -38,6 +38,7 @@ Behavior rules:
 - when `VIEWER_AUTH_ENABLED=false`, the viewer API behaves as open read-only access
 - when `VIEWER_AUTH_ENABLED=true`, both `GET /api/viewer/dialogs...` routes require a valid viewer auth cookie and otherwise return `401`
 - the shipped frontend uses the auth endpoints before loading dialogs so the UI and the API stay under the same access gate
+- the shipped frontend is also an installable online-first PWA; its service worker may cache static shell/assets, but `/api/viewer/*` data is not the offline source of truth in v1
 
 ## VK viewer response contract
 
