@@ -32,6 +32,7 @@ export function ViewerPage({ onUnauthorized }) {
   const [reloadToken, setReloadToken] = useState(0)
   const [isMobileViewport, setIsMobileViewport] = useState(detectMobileViewport)
   const [mobileDialogOpen, setMobileDialogOpen] = useState(false)
+  const [mobileSwipeProgress, setMobileSwipeProgress] = useState(0)
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme
@@ -45,7 +46,10 @@ export function ViewerPage({ onUnauthorized }) {
     const syncViewport = (event) => {
       const matches = typeof event?.matches === 'boolean' ? event.matches : mediaQuery.matches
       setIsMobileViewport(matches)
-      if (!matches) setMobileDialogOpen(false)
+      if (!matches) {
+        setMobileDialogOpen(false)
+        setMobileSwipeProgress(0)
+      }
     }
 
     syncViewport()
@@ -65,6 +69,7 @@ export function ViewerPage({ onUnauthorized }) {
         const firstConversationId = items[0]?.conversation_id ?? null
         setSelectedConversationId(firstConversationId)
         setMobileDialogOpen(false)
+        setMobileSwipeProgress(0)
         if (!firstConversationId) {
           setDialogMessages(null)
         }
@@ -79,6 +84,7 @@ export function ViewerPage({ onUnauthorized }) {
         setSelectedConversationId(null)
         setDialogMessages(null)
         setMobileDialogOpen(false)
+        setMobileSwipeProgress(0)
         setErrorText('Не удалось загрузить диалоги.')
       })
       .finally(() => {
@@ -180,6 +186,7 @@ export function ViewerPage({ onUnauthorized }) {
               selectedDay={selectedDay}
               onSelect={(conversationId) => {
                 setSelectedConversationId(conversationId)
+                setMobileSwipeProgress(0)
                 const openMobileDetail = typeof window !== 'undefined' && typeof window.matchMedia === 'function'
                   ? window.matchMedia(MOBILE_MEDIA_QUERY).matches
                   : isMobileViewport
@@ -196,13 +203,25 @@ export function ViewerPage({ onUnauthorized }) {
               onBack={null}
             />
             {showMobileDetail ? (
-              <div className="fixed inset-x-0 bottom-0 top-14 z-30">
+              <div className="fixed inset-x-0 bottom-0 top-14 z-30 overflow-hidden">
+                <div
+                  aria-hidden="true"
+                  className={[
+                    'absolute inset-0 transition-opacity duration-200',
+                    theme === 'dark' ? 'bg-slate-950/28' : 'bg-slate-950/8',
+                  ].join(' ')}
+                  style={{ opacity: Math.max(0, 1 - mobileSwipeProgress) }}
+                />
                 <ChatPanel
                   dialog={chatDialog}
                   isLoading={messagesLoading}
                   theme={theme}
-                  className="flex h-full"
-                  onBack={() => setMobileDialogOpen(false)}
+                  className="relative z-10 flex h-full"
+                  onBack={() => {
+                    setMobileSwipeProgress(0)
+                    setMobileDialogOpen(false)
+                  }}
+                  onSwipeProgress={setMobileSwipeProgress}
                 />
               </div>
             ) : null}
