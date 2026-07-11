@@ -86,7 +86,7 @@ Current UI contract:
 - light theme by default, with header-right light/dark toggle
 - theme toggle is icon-only; visible text is moved to tooltip/accessibility labels
 - compact sticky top header for app identity + theme toggle
-- left panel header contains the date picker only (no extra title/label/counter)
+- left panel header contains the date picker plus an icon-only refresh button for reloading the currently selected date (no extra title/label/counter)
 - left panel items show `case_id` when available, otherwise `display_name/external_chat_id`
 - dialog list time and message-pane time are both rendered from full timestamps in the browser's current timezone
 - dialog list is sorted by earliest message time first for the selected day

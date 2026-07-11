@@ -87,7 +87,7 @@ UI requirements:
 - compact sticky top header
 - header-right light/dark theme toggle
 - icon-only theme button with tooltip/accessibility text instead of visible label
-- left panel header contains the date picker only
+- left panel header contains the date picker plus an icon-only refresh button for reloading the current selected day
 - no `Диалоги` heading and no `Диалогов за день N` counter block
 - left panel items show only `case_id` when available, otherwise `name/id`, plus time and `message_count`
 - no dialog preview text in the list

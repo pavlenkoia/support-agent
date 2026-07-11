@@ -29,6 +29,7 @@ export function ViewerPage() {
   const [dialogsLoading, setDialogsLoading] = useState(false)
   const [messagesLoading, setMessagesLoading] = useState(false)
   const [errorText, setErrorText] = useState('')
+  const [reloadToken, setReloadToken] = useState(0)
   const [isMobileViewport, setIsMobileViewport] = useState(detectMobileViewport)
   const [mobileDialogOpen, setMobileDialogOpen] = useState(false)
 
@@ -83,7 +84,7 @@ export function ViewerPage() {
     return () => {
       cancelled = true
     }
-  }, [selectedDay])
+  }, [selectedDay, reloadToken])
 
   useEffect(() => {
     if (!selectedConversationId) {
@@ -113,7 +114,7 @@ export function ViewerPage() {
     return () => {
       cancelled = true
     }
-  }, [selectedConversationId, selectedDay])
+  }, [selectedConversationId, selectedDay, reloadToken])
 
   const activeDialog = useMemo(
     () => dialogs.find((dialog) => dialog.conversation_id === selectedConversationId) ?? null,
@@ -164,7 +165,9 @@ export function ViewerPage() {
             <DialogList
               dialogs={dialogs}
               isLoading={dialogsLoading}
+              isRefreshing={dialogsLoading || messagesLoading}
               onDayChange={setSelectedDay}
+              onRefresh={() => setReloadToken((current) => current + 1)}
               selectedConversationId={selectedConversationId}
               selectedDay={selectedDay}
               onSelect={(conversationId) => {
