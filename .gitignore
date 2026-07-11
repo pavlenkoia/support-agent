@@ -21,6 +21,8 @@ postgres_data/
 # Tooling artifacts
 .codex/
 graphify-out/
+viewer-web/node_modules/
+viewer-web/dist/
 
 # Local knowledge-base artifacts
 kb/
