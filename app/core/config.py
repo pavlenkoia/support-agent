@@ -85,6 +85,11 @@ class Settings(BaseSettings):
     vk_override_silence_seconds: int = 3600
 
     viewer_timezone: str = "Asia/Yekaterinburg"
+    viewer_auth_enabled: bool = False
+    viewer_auth_key: str | None = None
+    viewer_auth_cookie_name: str = "viewer_auth"
+    viewer_auth_session_days: int = 365
+    viewer_auth_cookie_secure: bool = False
 
     log_level: str = "INFO"
 

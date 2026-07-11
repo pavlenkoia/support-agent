@@ -29,3 +29,11 @@ class ViewerDialogMessagesResponse(BaseModel):
     display_name: str | None
     day: date
     messages: list[ViewerMessageItem]
+
+
+class ViewerLoginRequest(BaseModel):
+    key: str
+
+
+class ViewerAuthStatus(BaseModel):
+    authenticated: bool

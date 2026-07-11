@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 
 const MOBILE_MEDIA_QUERY = '(max-width: 640px)'
 
-import { fetchDialogMessages, fetchDialogs } from '../api/viewer'
+import { ViewerAuthError, fetchDialogMessages, fetchDialogs } from '../api/viewer'
 import { ChatPanel } from '../components/ChatPanel'
 import { DialogList } from '../components/DialogList'
 import { ViewerHeader } from '../components/ViewerHeader'
@@ -20,7 +20,7 @@ function detectMobileViewport() {
   return window.matchMedia(MOBILE_MEDIA_QUERY).matches
 }
 
-export function ViewerPage() {
+export function ViewerPage({ onUnauthorized }) {
   const [selectedDay, setSelectedDay] = useState(formatToday)
   const [theme, setTheme] = useState(loadInitialTheme)
   const [dialogs, setDialogs] = useState([])
@@ -69,8 +69,12 @@ export function ViewerPage() {
           setDialogMessages(null)
         }
       })
-      .catch(() => {
+      .catch((error) => {
         if (cancelled) return
+        if (error instanceof ViewerAuthError) {
+          onUnauthorized?.()
+          return
+        }
         setDialogs([])
         setSelectedConversationId(null)
         setDialogMessages(null)
@@ -84,7 +88,7 @@ export function ViewerPage() {
     return () => {
       cancelled = true
     }
-  }, [selectedDay, reloadToken])
+  }, [selectedDay, reloadToken, onUnauthorized])
 
   useEffect(() => {
     if (!selectedConversationId) {
@@ -102,8 +106,12 @@ export function ViewerPage() {
         if (cancelled) return
         setDialogMessages(payload)
       })
-      .catch(() => {
+      .catch((error) => {
         if (cancelled) return
+        if (error instanceof ViewerAuthError) {
+          onUnauthorized?.()
+          return
+        }
         setDialogMessages(null)
         setErrorText('Не удалось загрузить сообщения диалога.')
       })
@@ -114,7 +122,7 @@ export function ViewerPage() {
     return () => {
       cancelled = true
     }
-  }, [selectedConversationId, selectedDay, reloadToken])
+  }, [selectedConversationId, selectedDay, reloadToken, onUnauthorized])
 
   const activeDialog = useMemo(
     () => dialogs.find((dialog) => dialog.conversation_id === selectedConversationId) ?? null,

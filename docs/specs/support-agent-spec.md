@@ -82,6 +82,12 @@ Example class of task:
 
 The repository includes a read-only VK dialog viewer web slice.
 
+Access/auth requirements:
+- the viewer may be protected by one shared access key
+- when enabled, the web UI opens on a one-field login screen before showing dialogs
+- successful login is persisted with a long-lived signed `HttpOnly` cookie (current default 365 days)
+- the same auth gate protects the underlying `/api/viewer/*` read-only routes, not just the React screen
+
 UI requirements:
 - React + Tailwind frontend served separately on port `3002`
 - compact sticky top header
@@ -102,6 +108,8 @@ Backend requirements:
 - viewer API lives inside the existing FastAPI application
 - viewer endpoints are read-only and day-scoped
 - selected-day filtering applies both to dialog summaries and to message history
+- auth endpoints exist under `/api/viewer/auth/...` for `me`, `login`, and `logout`
+- runtime viewer auth is controlled by env flags/key material (`VIEWER_AUTH_ENABLED`, `VIEWER_AUTH_KEY`, cookie name/TTL/secure settings)
 
 ## Internal probe session slice
 

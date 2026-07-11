@@ -11,9 +11,33 @@
 - `GET /api/internal/probe/sessions/{session_id}/messages`
 - `GET /api/internal/probe/sessions/{session_id}/trace`
 - `POST /api/internal/probe/sessions/{session_id}/close`
+- `GET /api/viewer/auth/me`
+- `POST /api/viewer/auth/login`
+- `POST /api/viewer/auth/logout`
 - `GET /api/viewer/dialogs?day=YYYY-MM-DD`
 - `GET /api/viewer/dialogs/{conversation_id}/messages?day=YYYY-MM-DD`
 - `POST /telegram/webhook`
+
+## VK viewer auth contract
+
+The viewer can be protected by a single shared access key.
+
+Endpoints:
+- `GET /api/viewer/auth/me` — returns `{ "authenticated": true|false }`
+- `POST /api/viewer/auth/login` — accepts `{ "key": "..." }`; on success returns `204 No Content` and sets a signed long-lived `HttpOnly` cookie
+- `POST /api/viewer/auth/logout` — returns `204 No Content` and clears the same cookie
+
+Runtime/env controls:
+- `VIEWER_AUTH_ENABLED`
+- `VIEWER_AUTH_KEY`
+- `VIEWER_AUTH_COOKIE_NAME`
+- `VIEWER_AUTH_SESSION_DAYS`
+- `VIEWER_AUTH_COOKIE_SECURE`
+
+Behavior rules:
+- when `VIEWER_AUTH_ENABLED=false`, the viewer API behaves as open read-only access
+- when `VIEWER_AUTH_ENABLED=true`, both `GET /api/viewer/dialogs...` routes require a valid viewer auth cookie and otherwise return `401`
+- the shipped frontend uses the auth endpoints before loading dialogs so the UI and the API stay under the same access gate
 
 ## VK viewer response contract
 

@@ -3,6 +3,7 @@ from datetime import UTC, date, datetime
 from fastapi.testclient import TestClient
 
 from app.api.deps import get_viewer_service
+from app.core.config import settings
 from app.core.db import Base, make_session_factory
 from app.main import app
 from app.models.case import SupportCase
@@ -13,6 +14,11 @@ from app.services.viewer_service import ViewerService
 
 
 client = TestClient(app)
+
+
+def reset_test_state() -> None:
+    app.dependency_overrides.clear()
+    client.cookies.clear()
 
 
 def make_viewer_service(tmp_path, *, viewer_timezone: str = "Asia/Yekaterinburg") -> ViewerService:
@@ -65,13 +71,22 @@ def make_viewer_service(tmp_path, *, viewer_timezone: str = "Asia/Yekaterinburg"
     return ViewerService(session_factory=session_factory, viewer_timezone=viewer_timezone)
 
 
-def test_viewer_dialogs_lists_only_vk_dialogs_for_selected_day(tmp_path) -> None:
+def configure_viewer_auth(monkeypatch, *, enabled: bool) -> None:
+    monkeypatch.setattr(settings, "viewer_auth_enabled", enabled)
+    monkeypatch.setattr(settings, "viewer_auth_key", "test-viewer-key")
+    monkeypatch.setattr(settings, "viewer_auth_cookie_name", "viewer_auth")
+    monkeypatch.setattr(settings, "viewer_auth_session_days", 365)
+
+
+def test_viewer_dialogs_lists_only_vk_dialogs_for_selected_day(tmp_path, monkeypatch) -> None:
+    reset_test_state()
+    configure_viewer_auth(monkeypatch, enabled=False)
     service = make_viewer_service(tmp_path)
     app.dependency_overrides[get_viewer_service] = lambda: service
     try:
         response = client.get("/api/viewer/dialogs", params={"day": "2026-06-30"})
     finally:
-        app.dependency_overrides.clear()
+        reset_test_state()
 
     assert response.status_code == 200
     payload = response.json()
@@ -87,13 +102,15 @@ def test_viewer_dialogs_lists_only_vk_dialogs_for_selected_day(tmp_path) -> None
     ]
 
 
-def test_viewer_messages_returns_only_selected_day_messages(tmp_path) -> None:
+def test_viewer_messages_returns_only_selected_day_messages(tmp_path, monkeypatch) -> None:
+    reset_test_state()
+    configure_viewer_auth(monkeypatch, enabled=False)
     service = make_viewer_service(tmp_path)
     app.dependency_overrides[get_viewer_service] = lambda: service
     try:
         response = client.get("/api/viewer/dialogs/vk:123/messages", params={"day": "2026-06-30"})
     finally:
-        app.dependency_overrides.clear()
+        reset_test_state()
 
     assert response.status_code == 200
     payload = response.json()
@@ -118,13 +135,15 @@ def test_viewer_messages_returns_only_selected_day_messages(tmp_path) -> None:
     ]
 
 
-def test_viewer_messages_returns_empty_list_for_day_without_messages(tmp_path) -> None:
+def test_viewer_messages_returns_empty_list_for_day_without_messages(tmp_path, monkeypatch) -> None:
+    reset_test_state()
+    configure_viewer_auth(monkeypatch, enabled=False)
     service = make_viewer_service(tmp_path)
     app.dependency_overrides[get_viewer_service] = lambda: service
     try:
         response = client.get("/api/viewer/dialogs/vk:123/messages", params={"day": "2026-07-01"})
     finally:
-        app.dependency_overrides.clear()
+        reset_test_state()
 
     assert response.status_code == 200
     payload = response.json()
@@ -132,7 +151,9 @@ def test_viewer_messages_returns_empty_list_for_day_without_messages(tmp_path) -
     assert payload["messages"] == []
 
 
-def test_viewer_dialogs_filters_by_local_day_boundary_not_utc(tmp_path) -> None:
+def test_viewer_dialogs_filters_by_local_day_boundary_not_utc(tmp_path, monkeypatch) -> None:
+    reset_test_state()
+    configure_viewer_auth(monkeypatch, enabled=False)
     db_path = tmp_path / "viewer_boundary.db"
     session_factory = make_session_factory(f"sqlite+pysqlite:///{db_path}")
     Base.metadata.create_all(bind=session_factory.kw["bind"])
@@ -174,7 +195,7 @@ def test_viewer_dialogs_filters_by_local_day_boundary_not_utc(tmp_path) -> None:
             params={"day": "2026-07-10"},
         )
     finally:
-        app.dependency_overrides.clear()
+        reset_test_state()
 
     assert july_9.status_code == 200
     assert july_10.status_code == 200
@@ -192,3 +213,66 @@ def test_viewer_dialogs_filters_by_local_day_boundary_not_utc(tmp_path) -> None:
         }
     ]
     assert [message["id"] for message in july_10_messages.json()["messages"]] == ["1", "2"]
+
+
+def test_viewer_requires_login_when_auth_enabled(tmp_path, monkeypatch) -> None:
+    reset_test_state()
+    configure_viewer_auth(monkeypatch, enabled=True)
+    service = make_viewer_service(tmp_path)
+    app.dependency_overrides[get_viewer_service] = lambda: service
+    try:
+        response = client.get("/api/viewer/dialogs", params={"day": "2026-06-30"})
+    finally:
+        reset_test_state()
+
+    assert response.status_code == 401
+    assert response.json() == {"detail": "Viewer authentication required."}
+
+
+def test_viewer_login_sets_cookie_and_allows_requests(tmp_path, monkeypatch) -> None:
+    reset_test_state()
+    configure_viewer_auth(monkeypatch, enabled=True)
+    service = make_viewer_service(tmp_path)
+    app.dependency_overrides[get_viewer_service] = lambda: service
+    try:
+        login_response = client.post("/api/viewer/auth/login", json={"key": "test-viewer-key"})
+        dialogs_response = client.get("/api/viewer/dialogs", params={"day": "2026-06-30"})
+        me_response = client.get("/api/viewer/auth/me")
+    finally:
+        reset_test_state()
+
+    assert login_response.status_code == 204
+    assert "viewer_auth=" in login_response.headers["set-cookie"]
+    assert dialogs_response.status_code == 200
+    assert me_response.status_code == 200
+    assert me_response.json() == {"authenticated": True}
+
+
+def test_viewer_login_rejects_invalid_key(monkeypatch) -> None:
+    reset_test_state()
+    configure_viewer_auth(monkeypatch, enabled=True)
+    try:
+        response = client.post("/api/viewer/auth/login", json={"key": "wrong-key"})
+    finally:
+        reset_test_state()
+
+    assert response.status_code == 401
+    assert response.json() == {"detail": "Invalid viewer access key."}
+
+
+def test_viewer_logout_clears_cookie_and_requires_login_again(tmp_path, monkeypatch) -> None:
+    reset_test_state()
+    configure_viewer_auth(monkeypatch, enabled=True)
+    service = make_viewer_service(tmp_path)
+    app.dependency_overrides[get_viewer_service] = lambda: service
+    try:
+        login_response = client.post("/api/viewer/auth/login", json={"key": "test-viewer-key"})
+        logout_response = client.post("/api/viewer/auth/logout")
+        dialogs_response = client.get("/api/viewer/dialogs", params={"day": "2026-06-30"})
+    finally:
+        reset_test_state()
+
+    assert login_response.status_code == 204
+    assert logout_response.status_code == 204
+    assert "viewer_auth=" in logout_response.headers["set-cookie"]
+    assert dialogs_response.status_code == 401

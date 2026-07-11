@@ -52,13 +52,17 @@ uv run pytest -q
 
 ### Start with Docker Compose
 ```bash
-cp deploy/env/app.env.example deploy/env/app.env
-# then edit deploy/env/app.env locally:
+mkdir -p /home/tian/support-agent-runtime
+cp deploy/env/app.env.example /home/tian/support-agent-runtime/app.env
+# then edit /home/tian/support-agent-runtime/app.env locally:
 # - set KNOWLEDGE_ROOT to your external KB path
 # - set TELEGRAM_BOT_TOKEN if you want live Telegram polling
 # - set VK_ENABLED=true, VK_GROUP_ID, and VK_ACCESS_TOKEN if you want live VK polling
+# - optionally enable VIEWER_AUTH_ENABLED=true and set VIEWER_AUTH_KEY for viewer-web access control
 docker compose up --build
 ```
+
+By default the Compose stack reads runtime env from `${SUPPORT_AGENT_RUNTIME_ROOT_HOST:-/home/tian/support-agent-runtime}/app.env` rather than from a repo-local `.env` file.
 
 ### Health check
 ```bash
@@ -68,8 +72,11 @@ curl http://127.0.0.1:8000/health
 ### VK dialog viewer
 After `docker compose up -d`, open:
 - `http://127.0.0.1:3002` — React/Tailwind viewer UI
-- `GET /api/viewer/dialogs?day=YYYY-MM-DD` — VK dialog list for the selected day
-- `GET /api/viewer/dialogs/{conversation_id}/messages?day=YYYY-MM-DD` — selected dialog messages for the selected day
+- `GET /api/viewer/auth/me` — current viewer auth state
+- `POST /api/viewer/auth/login` — accepts `{ "key": "..." }`, sets a long-lived `HttpOnly` session cookie
+- `POST /api/viewer/auth/logout` — clears the viewer session cookie
+- `GET /api/viewer/dialogs?day=YYYY-MM-DD` — VK dialog list for the selected day (requires viewer auth when enabled)
+- `GET /api/viewer/dialogs/{conversation_id}/messages?day=YYYY-MM-DD` — selected dialog messages for the selected day (requires viewer auth when enabled)
 
 ### Internal probe sessions
 The repository also exposes an operator/internal-test probe slice that reuses the real support runtime without sending traffic into customer channels:
@@ -82,8 +89,10 @@ The repository also exposes an operator/internal-test probe slice that reuses th
 - `GET /api/internal/probe/sessions/{session_id}/trace`
 - `POST /api/internal/probe/sessions/{session_id}/close`
 
-Current UI contract:
-- light theme by default, with header-right light/dark toggle
+Current UI/runtime contract:
+- viewer opens on a one-field login screen when viewer auth is enabled
+- successful login is persisted with a long-lived `HttpOnly` cookie (configurable, current default 365 days)
+- theme remains light by default, with header-right light/dark toggle after login
 - theme toggle is icon-only; visible text is moved to tooltip/accessibility labels
 - compact sticky top header for app identity + theme toggle
 - left panel header contains the date picker plus an icon-only refresh button for reloading the currently selected date (no extra title/label/counter)
@@ -93,6 +102,7 @@ Current UI contract:
 - on narrow/mobile screens the viewer switches to a master-detail flow: list -> selected chat -> `← К списку`
 - right panel has no separate desktop header above the messages; on mobile it may show only the compact back control
 - left and right panels scroll independently, and the mobile chat pane must scroll to the last message without bottom clipping
+- the backend viewer API is read-only but protected by the same auth layer when enabled
 
 ## Transport notes
 
