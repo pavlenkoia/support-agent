@@ -17,7 +17,7 @@ export function DialogList({
   return (
     <aside
       className={[
-        'h-full min-h-0 w-full flex-col border-r',
+        'w-full flex-col md:h-full md:min-h-0 md:border-r',
         isDark ? 'border-slate-800 bg-slate-950' : 'border-slate-200 bg-slate-50',
         className,
       ].join(' ')}
@@ -67,7 +67,7 @@ export function DialogList({
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
+      <div className="px-4 py-4 md:min-h-0 md:flex-1 md:overflow-y-auto">
         {isLoading ? (
           <div
             className={[

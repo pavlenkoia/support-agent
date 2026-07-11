@@ -143,13 +143,13 @@ export function ViewerPage({ onUnauthorized }) {
   return (
     <div
       className={[
-        'flex h-[100dvh] min-h-[100dvh] flex-col overflow-hidden',
+        'flex min-h-[100dvh] flex-col md:h-[100dvh] md:min-h-[100dvh] md:overflow-hidden',
         theme === 'dark' ? 'bg-slate-950 text-slate-100' : 'bg-slate-100 text-slate-900',
       ].join(' ')}
     >
       <ViewerHeader theme={theme} onThemeToggle={() => setTheme((current) => (current === 'dark' ? 'light' : 'dark'))} />
 
-      <main className="mx-auto flex min-h-0 flex-1 w-full max-w-[1800px] flex-col px-0 md:px-6 md:pb-6">
+      <main className="mx-auto flex w-full max-w-[1800px] flex-1 flex-col px-0 md:min-h-0 md:px-6 md:pb-6">
         {errorText ? (
           <div
             className={[
@@ -165,11 +165,14 @@ export function ViewerPage({ onUnauthorized }) {
 
         <div
           className={[
-            'min-h-0 w-full flex-1 overflow-hidden md:mt-6 md:rounded-3xl md:border',
+            'w-full flex-1 md:min-h-0 md:overflow-hidden md:mt-6 md:rounded-3xl md:border',
             theme === 'dark' ? 'md:border-slate-800 md:bg-slate-900/20' : 'md:border-slate-200 md:bg-white',
           ].join(' ')}
         >
-          <div className={["flex h-full min-h-0 w-full overflow-hidden", isMobileViewport ? 'flex-col' : 'flex-row'].join(' ')}>
+          <div className={[
+            'flex w-full',
+            isMobileViewport ? 'flex-col' : 'h-full min-h-0 overflow-hidden flex-row',
+          ].join(' ')}>
             <DialogList
               dialogs={dialogs}
               isLoading={dialogsLoading}
@@ -186,25 +189,15 @@ export function ViewerPage({ onUnauthorized }) {
                 setMobileDialogOpen(openMobileDetail)
               }}
               theme={theme}
-              className={isMobileViewport ? 'flex' : 'flex basis-[22rem] min-w-[22rem] max-w-[22rem]'}
+              className={isMobileViewport ? (showMobileDetail ? 'hidden' : 'flex w-full') : 'flex basis-[22rem] min-w-[22rem] max-w-[22rem]'}
             />
             <ChatPanel
               dialog={chatDialog}
               isLoading={messagesLoading}
               theme={theme}
-              className={isMobileViewport ? 'hidden' : 'flex min-w-0'}
+              className={isMobileViewport ? (showMobileDetail ? 'flex min-h-[calc(100dvh-3.5rem)] w-full' : 'hidden') : 'flex min-w-0'}
+              onBack={isMobileViewport ? () => setMobileDialogOpen(false) : null}
             />
-            {showMobileDetail ? (
-              <div className="fixed inset-x-0 bottom-0 top-14 z-30">
-                <ChatPanel
-                  dialog={chatDialog}
-                  isLoading={messagesLoading}
-                  theme={theme}
-                  className="flex h-full"
-                  onBack={() => setMobileDialogOpen(false)}
-                />
-              </div>
-            ) : null}
           </div>
         </div>
       </main>

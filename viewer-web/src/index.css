@@ -26,6 +26,24 @@ body {
   color: inherit;
 }
 
+@media (max-width: 640px) {
+  html {
+    font-size: 130%;
+    overscroll-behavior-y: auto;
+  }
+
+  body {
+    overflow-x: hidden;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  #root {
+    height: auto;
+    min-height: 100dvh;
+  }
+}
+
 * {
   box-sizing: border-box;
 }
