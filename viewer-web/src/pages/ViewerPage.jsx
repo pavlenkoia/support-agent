@@ -7,13 +7,7 @@ import { ChatPanel } from '../components/ChatPanel'
 import { DialogList } from '../components/DialogList'
 import { ViewerHeader } from '../components/ViewerHeader'
 import { formatToday } from '../utils/time'
-
-const THEME_STORAGE_KEY = 'vk-dialog-viewer-theme'
-
-function loadInitialTheme() {
-  if (typeof window === 'undefined') return 'light'
-  return window.localStorage.getItem(THEME_STORAGE_KEY) || 'light'
-}
+import { THEME_STORAGE_KEY, loadInitialTheme } from '../utils/theme'
 
 function detectMobileViewport() {
   if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return false

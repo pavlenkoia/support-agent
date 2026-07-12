@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { ViewerPage } from './pages/ViewerPage'
 import { ViewerLoginPage } from './components/ViewerLoginPage'
 import { ViewerAuthError, fetchViewerAuthStatus, loginToViewer } from './api/viewer'
+import { loadInitialTheme } from './utils/theme'
 
 function isOfflineError() {
   return typeof navigator !== 'undefined' && navigator.onLine === false
@@ -12,6 +13,14 @@ export default function App() {
   const [authState, setAuthState] = useState('checking')
   const [authError, setAuthError] = useState('')
   const [loginPending, setLoginPending] = useState(false)
+  const [theme, setTheme] = useState(loadInitialTheme)
+  const isDark = theme === 'dark'
+
+  useEffect(() => {
+    if (typeof document !== 'undefined') {
+      document.documentElement.dataset.theme = theme
+    }
+  }, [theme])
 
   useEffect(() => {
     let cancelled = false
@@ -64,7 +73,12 @@ export default function App() {
 
   if (authState === 'checking') {
     return (
-      <div className="flex min-h-[100dvh] items-center justify-center bg-slate-100 px-4 text-sm text-slate-600">
+      <div
+        className={[
+          'flex min-h-[100dvh] items-center justify-center px-4 text-sm',
+          isDark ? 'bg-slate-950 text-slate-300' : 'bg-slate-100 text-slate-600',
+        ].join(' ')}
+      >
         Проверяю авторизацию…
       </div>
     )
@@ -72,11 +86,25 @@ export default function App() {
 
   if (authState === 'offline') {
     return (
-      <div className="flex min-h-[100dvh] items-center justify-center bg-slate-100 px-4 py-10 text-slate-900">
-        <div className="w-full max-w-md rounded-3xl border border-slate-200 bg-white p-6 shadow-sm md:p-8">
-          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-sky-600">support-agent</p>
-          <h1 className="mt-2 text-2xl font-semibold text-slate-900">VK dialog viewer</h1>
-          <p className="mt-3 text-sm text-slate-600">
+      <div
+        className={[
+          'flex min-h-[100dvh] items-center justify-center px-4 py-10',
+          isDark ? 'bg-slate-950 text-slate-100' : 'bg-slate-100 text-slate-900',
+        ].join(' ')}
+      >
+        <div
+          className={[
+            'w-full max-w-md rounded-3xl border p-6 shadow-sm md:p-8',
+            isDark ? 'border-slate-800 bg-slate-900' : 'border-slate-200 bg-white',
+          ].join(' ')}
+        >
+          <p className={['text-xs font-semibold uppercase tracking-[0.16em]', isDark ? 'text-sky-400' : 'text-sky-600'].join(' ')}>
+            support-agent
+          </p>
+          <h1 className={['mt-2 text-2xl font-semibold', isDark ? 'text-slate-100' : 'text-slate-900'].join(' ')}>
+            VK dialog viewer
+          </h1>
+          <p className={['mt-3 text-sm', isDark ? 'text-slate-400' : 'text-slate-600'].join(' ')}>
             Viewer установлен и оболочка доступна, но сейчас нет сети. Подключите интернет и откройте приложение снова.
           </p>
           <button
@@ -92,7 +120,7 @@ export default function App() {
   }
 
   if (authState !== 'authenticated') {
-    return <ViewerLoginPage isSubmitting={loginPending} errorText={authError} onSubmit={handleLogin} />
+    return <ViewerLoginPage isSubmitting={loginPending} errorText={authError} onSubmit={handleLogin} theme={theme} />
   }
 
   return <ViewerPage onUnauthorized={() => setAuthState('unauthenticated')} />
