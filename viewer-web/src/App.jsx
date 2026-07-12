@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react'
 import { ViewerPage } from './pages/ViewerPage'
 import { ViewerLoginPage } from './components/ViewerLoginPage'
 import { ViewerAuthError, fetchViewerAuthStatus, loginToViewer } from './api/viewer'
-import { loadInitialTheme } from './utils/theme'
+import { applyThemeToDocument, loadInitialTheme } from './utils/theme'
 
 function isOfflineError() {
   return typeof navigator !== 'undefined' && navigator.onLine === false
@@ -17,9 +17,7 @@ export default function App() {
   const isDark = theme === 'dark'
 
   useEffect(() => {
-    if (typeof document !== 'undefined') {
-      document.documentElement.dataset.theme = theme
-    }
+    applyThemeToDocument(theme)
   }, [theme])
 
   useEffect(() => {

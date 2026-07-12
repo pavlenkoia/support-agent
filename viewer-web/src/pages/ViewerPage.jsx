@@ -7,7 +7,7 @@ import { ChatPanel } from '../components/ChatPanel'
 import { DialogList } from '../components/DialogList'
 import { ViewerHeader } from '../components/ViewerHeader'
 import { formatToday } from '../utils/time'
-import { THEME_STORAGE_KEY, loadInitialTheme } from '../utils/theme'
+import { THEME_STORAGE_KEY, applyThemeToDocument, loadInitialTheme } from '../utils/theme'
 
 function detectMobileViewport() {
   if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return false
@@ -29,7 +29,7 @@ export function ViewerPage({ onUnauthorized }) {
   const [mobileSwipeProgress, setMobileSwipeProgress] = useState(0)
 
   useEffect(() => {
-    document.documentElement.dataset.theme = theme
+    applyThemeToDocument(theme)
     window.localStorage.setItem(THEME_STORAGE_KEY, theme)
   }, [theme])
 

@@ -11,9 +11,30 @@
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <script>
+      ;(() => {
+        const storageKey = 'vk-dialog-viewer-theme'
+        const savedTheme = window.localStorage.getItem(storageKey)
+        const theme = savedTheme === 'dark' ? 'dark' : 'light'
+        const palette =
+          theme === 'dark'
+            ? { background: '#020617', text: '#e2e8f0', themeColor: '#020617' }
+            : { background: '#f8fafc', text: '#0f172a', themeColor: '#f8fafc' }
+
+        document.documentElement.dataset.theme = theme
+        document.documentElement.style.colorScheme = theme
+        document.documentElement.style.backgroundColor = palette.background
+        document.documentElement.style.color = palette.text
+
+        const themeMeta = document.querySelector('meta[name="theme-color"]')
+        if (themeMeta) {
+          themeMeta.setAttribute('content', palette.themeColor)
+        }
+      })()
+    </script>
     <title>VK Dialog Viewer</title>
   </head>
-  <body class="bg-slate-950">
+  <body>
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
   </body>
