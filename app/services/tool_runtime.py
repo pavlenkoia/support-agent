@@ -30,7 +30,6 @@ DAY_ONLY_RE = re.compile(r"(?<!\d)(?P<day>\d{1,2})(?:-?го|\s*числа)?(?!\d
 
 class ToolRuntimeService:
     def collect(self, *, text: str, kb_hits: list[dict], conversation_context: dict | None = None) -> dict[str, Any]:
-        _ = conversation_context
         observations: list[dict[str, Any]] = []
         trace: list[dict[str, Any]] = []
 
@@ -65,7 +64,7 @@ class ToolRuntimeService:
         )
 
         kb_text = "\n".join(str(hit.get("text", "")) for hit in kb_hits).lower()
-        if any(token in kb_text for token in ("выходн", "суббот", "воскрес")):
+        if any(token in kb_text for token in ("выходн", "суббот", "воскрес")) and self._is_jump_schedule_request(text, conversation_context):
             availability = "может соответствовать правилу про выходные" if is_weekend else "не соответствует правилу про выходные"
             observations.append(
                 {
@@ -90,6 +89,9 @@ class ToolRuntimeService:
     def _extract_date(self, text: str) -> date | None:
         now = datetime.now(UTC).date()
         now_year = now.year
+        relative_date = self._extract_relative_date(text, now)
+        if relative_date is not None:
+            return relative_date
 
         match = NUMERIC_DATE_RE.search(text)
         if match:
@@ -107,10 +109,49 @@ class ToolRuntimeService:
 
         match = DAY_ONLY_RE.search(text)
         if match:
+            if self._day_only_match_looks_like_time(text, match.start(), match.end()):
+                return None
             day = int(match.group("day"))
             return self._nearest_day_only_date(now, day)
 
         return None
+
+    @staticmethod
+    def _extract_relative_date(text: str, current_date: date) -> date | None:
+        lowered = str(text or "").lower()
+        if "послезавтра" in lowered:
+            return current_date.fromordinal(current_date.toordinal() + 2)
+        if "завтра" in lowered:
+            return current_date.fromordinal(current_date.toordinal() + 1)
+        if "сегодня" in lowered:
+            return current_date
+        return None
+
+    @staticmethod
+    def _day_only_match_looks_like_time(text: str, start: int, end: int) -> bool:
+        before = text[max(0, start - 6):start].lower()
+        after = text[end:end + 12].lower()
+        stripped_after = after.lstrip()
+        return stripped_after.startswith(":") or stripped_after.startswith("час") or before.endswith("к ")
+
+    @staticmethod
+    def _is_jump_schedule_request(text: str, conversation_context: dict | None = None) -> bool:
+        parts = [str(text or "")]
+        if isinstance(conversation_context, dict):
+            recent_messages = conversation_context.get("recent_messages", [])
+            if isinstance(recent_messages, list):
+                parts.extend(str(item.get("content") or "") for item in recent_messages if isinstance(item, dict))
+
+        combined = "\n".join(parts).lower()
+        jump_markers = ("прыж", "тандем", "полет", "полёт", "аэродром", "инструкт")
+        schedule_markers = ("выходн", "суббот", "воскрес", "сегодня", "завтра", "послезавтра", "дата", "когда")
+        office_markers = ("офис", "сертифик", "подар")
+
+        if any(marker in combined for marker in jump_markers):
+            return True
+        if any(marker in combined for marker in office_markers):
+            return False
+        return any(marker in combined for marker in schedule_markers)
 
     @staticmethod
     def _nearest_day_only_date(current_date: date, day: int) -> date | None:

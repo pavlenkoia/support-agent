@@ -40,10 +40,13 @@ The loop must support runtime facts that are not reliable from model memory alon
 
 Example class of task:
 - user asks about a calendar date
+- relative-date words such as `сегодня`, `завтра`, and `послезавтра` are resolved from the runtime current date for that request
 - KB contains a rule such as weekend-only availability
 - tool computes the weekday for the relevant date using the current year if the year is omitted
+- day-only parsing must not reinterpret clock-time phrases like `к 15:00` as day-of-month input
 - once the tool result exists, the loop must advance to KB / answer generation instead of repeating `use_tool`
 - final answer combines KB rule + tool result
+- weekend-only schedule rules must stay scoped to jump/schedule intent rather than unrelated office/certificate questions
 
 ## Provider failure handling
 

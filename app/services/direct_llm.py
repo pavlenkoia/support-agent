@@ -889,8 +889,8 @@ class DirectLLMService:
         combined_text = "\n".join(str(item.get("text", "")) for item in answer_context).lower()
         used_kb_sources = self._extract_source_refs(answer_context) or [hit.get("source_ref") for hit in kb_hits if hit.get("source_ref")]
 
-        if tool_observations and any(token in combined_text for token in ("выходн", "суббот", "воскрес")):
-            weekend_obs = next((item for item in tool_observations if item.get("kind") == "weekend_rule_check"), None)
+        weekend_obs = next((item for item in tool_observations if item.get("kind") == "weekend_rule_check"), None)
+        if weekend_obs and any(token in combined_text for token in ("выходн", "суббот", "воскрес")) and self._is_jump_schedule_request(text, conversation_context):
             weekday_obs = next((item for item in tool_observations if item.get("kind") == "calendar_weekday"), None)
             weekday_ru = (((weekday_obs or {}).get("structured") or {}).get("weekday_ru")) or "этот день"
             is_weekend = bool((((weekday_obs or {}).get("structured") or {}).get("is_weekend")))
@@ -929,6 +929,25 @@ class DirectLLMService:
             "decision": "answer",
             "reason": reason,
         }
+
+    @staticmethod
+    def _is_jump_schedule_request(text: str, conversation_context: dict | None = None) -> bool:
+        parts = [str(text or "")]
+        if isinstance(conversation_context, dict):
+            recent_messages = conversation_context.get("recent_messages", [])
+            if isinstance(recent_messages, list):
+                parts.extend(str(item.get("content") or "") for item in recent_messages if isinstance(item, dict))
+
+        combined = "\n".join(parts).lower()
+        jump_markers = ("прыж", "тандем", "полет", "полёт", "аэродром", "инструкт")
+        schedule_markers = ("выходн", "суббот", "воскрес", "сегодня", "завтра", "послезавтра", "дата", "когда")
+        office_markers = ("офис", "сертифик", "подар")
+
+        if any(marker in combined for marker in jump_markers):
+            return True
+        if any(marker in combined for marker in office_markers):
+            return False
+        return any(marker in combined for marker in schedule_markers)
 
     def _compose_grounded_fallback_answer(
         self,

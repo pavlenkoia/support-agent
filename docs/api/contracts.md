@@ -87,7 +87,7 @@ Current audit fields of interest:
 - `audit.response_strategy.loop_mode` — expected runtime family identifier (for the current architecture: `agentic_bounded_loop_with_kb_agent`)
 - `audit.response_strategy.steps` — compact step sequence such as `read_kb -> kb_agent_read -> answer`
 - `audit.response_strategy.loop_trace` — per-iteration planner/action trace
-- `audit.response_strategy.tool_trace` — structured runtime-tool trace for date/math/live-fact checks
+- `audit.response_strategy.tool_trace` — structured runtime-tool trace for date/math/live-fact checks; for relative-date requests this trace must reflect the runtime-resolved `iso_date` (`сегодня`/`завтра`/`послезавтра`) rather than a clock-time number accidentally parsed from the same sentence
 - `audit.response_strategy.llm_trace` — per-role LLM call metadata including provider/model/duration/attempts/usage and failover fields such as `api_key_index`, `used_failover`, `failover_count`, and `failover_events`
 
 Transport workers may also keep transport-level journal state outside the API response envelope; for VK this includes raw event processing, send reconciliation, and override suppression state.

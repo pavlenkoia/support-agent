@@ -99,7 +99,9 @@ The application-level outcomes are now:
 5. **Final-answer LLM failure does not erase grounded knowledge**. If KB facts were already gathered and the final answer-generation step fails, the runtime must return a short grounded fallback answer synthesized from the retrieved facts.
 6. **Deterministic fallbacks must stay generic**. The core must not hardcode one business question as the only fallback path; the degradation path must work across in-domain topics such as certificates, schedules, and rules.
 7. **Date/tool paths must advance after the tool result is gathered**. A live runtime must not repeat `use_tool` for the same turn once the relevant tool result is already present.
-8. **The KB agent now supports a hardened selective-read mode** for less JSON-disciplined models and for safer prod operation on the current Mistral tier:
+8. **Relative-date resolution is runtime-anchored**. Words such as `сегодня`, `завтра`, and `послезавтра` must resolve from the active request's runtime date, and clock-time phrases like `к 15:00` must not be misread as a calendar day.
+9. **Weekend schedule heuristics are intent-scoped**. Weekend-only availability checks are valid for jump/schedule questions, not for office/certificate questions that happen to coexist with weekend wording in KB snippets.
+10. **The KB agent now supports a hardened selective-read mode** for less JSON-disciplined models and for safer prod operation on the current Mistral tier:
    - deterministic lexical navigation can replace free-form LLM navigation when enabled
    - coverage review can be skipped when the selected page set is already narrowly scoped
    - grounded extraction can request a minimal JSON schema instead of a larger object with optional fields

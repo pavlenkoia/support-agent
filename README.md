@@ -140,6 +140,9 @@ Current UI/runtime contract:
 - If KB facts were already gathered and the final answer-generation call fails, the runtime degrades to a short grounded answer synthesized from the retrieved KB instead of a template refusal.
 - Broad but clearly in-domain openers (for example `Подскажите пожалуйста по прыжкам`) should prefer a short KB overview before asking clarification.
 - Date/tool paths must not loop on repeated `use_tool` after the tool result is already present; the next step must advance to KB or answer generation.
+- Relative-date words (`сегодня`, `завтра`, `послезавтра`) must resolve from the runtime current date for the active request, not from a guessed calendar day extracted elsewhere in the sentence.
+- Day-only date parsing must not mistake clock-time phrases such as `к 15:00` / `к 15 часам` for a calendar day-of-month.
+- Weekend-only schedule checks must stay scoped to jump/schedule questions and must not hijack office/certificate answers just because KB snippets also mention weekends.
 - The KB agent now has an optional hardened runtime mode with deterministic navigation, optional coverage-review skip, minimal extraction schema, and tolerant JSON recovery for structured-output drift.
 
 For rollout notes and the production/test split, see `docs/architecture/kb-agent-hardening.md`.
