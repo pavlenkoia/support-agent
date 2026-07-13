@@ -99,7 +99,8 @@ Current UI/runtime contract:
 - theme toggle is icon-only; visible text is moved to tooltip/accessibility labels
 - compact sticky top header for app identity + theme toggle
 - left panel header contains the date picker plus an icon-only refresh button for reloading the currently selected date (no extra title/label/counter)
-- left panel items show `case_id` when available, otherwise `display_name/external_chat_id`
+- left panel items show `№<case_id> Имя пользователя` when `case_id` exists, otherwise `display_name/external_chat_id`
+- inbound VK messages are labeled from cached `users.display_name` when available; the VK gateway populates missing names via `users.get` and falls back to id when lookup is unavailable
 - dialog list time and message-pane time are both rendered from full timestamps in the browser's current timezone
 - dialog list is sorted by earliest message time first for the selected day
 - on narrow/mobile screens the viewer switches to a master-detail overlay flow: tapping a list item slides the selected chat in from right to left over the list, and swipe-back or the icon-only back button returns to the list
@@ -118,6 +119,7 @@ Current UI/runtime contract:
 - inbound customer message: `message_new`
 - outgoing community activity event: `message_reply`
 - target surface: direct messages to the VK community
+- inbound `message_new` handling should opportunistically enrich missing `users.display_name` via `users.get` and cache it for the viewer/runtime
 - out of scope for v1: VK chats / besedy and history backfill
 
 ### VK manual-admin override rule

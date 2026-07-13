@@ -98,7 +98,8 @@ UI requirements:
 - icon-only theme button with tooltip/accessibility text instead of visible label
 - left panel header contains the date picker plus an icon-only refresh button for reloading the current selected day
 - no `Диалоги` heading and no `Диалогов за день N` counter block
-- left panel items show only `case_id` when available, otherwise `name/id`, plus time and `message_count`
+- left panel items show `№<case_id> Имя пользователя` when `case_id` exists, otherwise `name/id`, plus time and `message_count`
+- inbound viewer messages prefer cached `users.display_name` for the author label and fall back to VK id when profile enrichment is unavailable
 - no dialog preview text in the list
 - dialog list ordering is earliest-first within the selected day
 - both the list time and the message time must be rendered from full timestamps in the browser's current timezone

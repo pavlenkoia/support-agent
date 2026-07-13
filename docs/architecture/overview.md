@@ -129,6 +129,7 @@ Current VK slice boundaries:
 - inbound customer traffic enters through `message_new`
 - outgoing community activity is observed through `message_reply`
 - supported surface is VK community direct messages, not group chats / besedy
+- inbound `message_new` handling may enrich missing `users.display_name` via `users.get` and cache it for the viewer/runtime
 - no history backfill is required for v1
 
 Manual-admin override rule:

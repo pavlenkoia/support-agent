@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 from sqlalchemy import select, text
 
@@ -9,6 +10,7 @@ from app.core.db import Base, make_session_factory
 from app.models.conversation import Conversation
 from app.models.conversation_transport_state import ConversationTransportState
 from app.models.outbound_transport_send import OutboundTransportSend
+from app.models.user import User
 from app.services.persistence import activate_human_override, get_or_create_conversation_transport_state
 from app.services.vk_gateway import VKGatewayService
 
@@ -64,6 +66,23 @@ class FailingVKSender:
         }
 
 
+class RecordingVKProfileClient:
+    def __init__(self, responses: dict[str, dict] | None = None, *, ok: bool = True) -> None:
+        self.responses = responses or {}
+        self.ok = ok
+        self.calls: list[list[str]] = []
+
+    def get_users(self, user_ids: list[str | int], *, fields: list[str] | None = None) -> dict:
+        normalized_ids = [str(user_id) for user_id in user_ids]
+        self.calls.append(normalized_ids)
+        if not self.ok:
+            return {"ok": False, "reason": "vk_api_error"}
+        return {
+            "ok": True,
+            "response": [self.responses.get(user_id, {"id": int(user_id), "first_name": "VK", "last_name": user_id}) for user_id in normalized_ids],
+        }
+
+
 class StubRouting:
     def __init__(self, *, response_text: str = "Готовый ответ") -> None:
         self.response_text = response_text
@@ -96,17 +115,90 @@ class RaceRouting(StubRouting):
         return result
 
 
-def make_service(tmp_path: Path, *, routing=None, sender=None) -> tuple[VKGatewayService, any]:
+def make_service(tmp_path: Path, *, routing=None, sender=None, client=None) -> tuple[VKGatewayService, Any]:
     db_path = tmp_path / "vk.db"
     session_factory = make_session_factory(f"sqlite+pysqlite:///{db_path}")
     Base.metadata.create_all(bind=session_factory.kw["bind"])
     service = VKGatewayService(
         routing=routing or StubRouting(),
         sender=sender or RecordingVKSender(),
+        client=client,
         session_factory=session_factory,
         override_silence_seconds=3600,
     )
     return service, session_factory
+
+
+def test_vk_gateway_populates_missing_user_display_name_from_vk_profile(tmp_path: Path) -> None:
+    client = RecordingVKProfileClient(
+        responses={"3001": {"id": 3001, "first_name": "Иван", "last_name": "Петров"}}
+    )
+    service, session_factory = make_service(tmp_path, client=client)
+
+    result = service.handle_event(
+        {
+            "type": "message_new",
+            "group_id": 55,
+            "object": {"message": {"id": 101, "peer_id": 2001, "from_id": 3001, "text": "Здравствуйте", "date": 1780000000}},
+        }
+    )
+
+    assert result["suppressed"] is False
+    assert client.calls == [["3001"]]
+    with session_factory() as session:
+        user = session.scalar(select(User).where(User.external_id == "vk:3001"))
+        assert user is not None
+        assert user.display_name == "Иван Петров"
+
+
+def test_vk_gateway_skips_profile_lookup_when_display_name_already_exists(tmp_path: Path) -> None:
+    client = RecordingVKProfileClient(
+        responses={"3006": {"id": 3006, "first_name": "Новый", "last_name": "Профиль"}}
+    )
+    service, session_factory = make_service(tmp_path, client=client)
+
+    with session_factory() as session:
+        session.add(User(external_id="vk:3006", display_name="Старое Имя"))
+        session.commit()
+
+    result = service.handle_event(
+        {
+            "type": "message_new",
+            "group_id": 55,
+            "object": {"message": {"id": 106, "peer_id": 2006, "from_id": 3006, "text": "Здравствуйте", "date": 1780000600}},
+        }
+    )
+
+    assert result["suppressed"] is False
+    assert client.calls == []
+    with session_factory() as session:
+        user = session.scalar(select(User).where(User.external_id == "vk:3006"))
+        assert user is not None
+        assert user.display_name == "Старое Имя"
+
+
+def test_vk_gateway_ignores_profile_lookup_failures_and_keeps_processing(tmp_path: Path) -> None:
+    client = RecordingVKProfileClient(ok=False)
+    service, session_factory = make_service(tmp_path, client=client)
+
+    with session_factory() as session:
+        session.add(User(external_id="vk:3007", display_name=None))
+        session.commit()
+
+    result = service.handle_event(
+        {
+            "type": "message_new",
+            "group_id": 55,
+            "object": {"message": {"id": 107, "peer_id": 2007, "from_id": 3007, "text": "Здравствуйте", "date": 1780000700}},
+        }
+    )
+
+    assert result["suppressed"] is False
+    assert client.calls == [["3007"]]
+    with session_factory() as session:
+        user = session.scalar(select(User).where(User.external_id == "vk:3007"))
+        assert user is not None
+        assert user.display_name is None
 
 
 def test_vk_gateway_reconciles_bot_message_reply_without_override(tmp_path: Path) -> None:

@@ -98,3 +98,15 @@ class VKAPIClient:
                 "random_id": str(random_id),
             },
         )
+
+    def get_users(self, user_ids: list[str | int], *, fields: list[str] | None = None) -> dict:
+        normalized_ids = [str(user_id).strip() for user_id in user_ids if str(user_id).strip()]
+        if not normalized_ids:
+            return {"ok": True, "response": []}
+
+        params: dict[str, str] = {"user_ids": ",".join(normalized_ids)}
+        if fields:
+            normalized_fields = [str(field).strip() for field in fields if str(field).strip()]
+            if normalized_fields:
+                params["fields"] = ",".join(normalized_fields)
+        return self.api_call("users.get", params)

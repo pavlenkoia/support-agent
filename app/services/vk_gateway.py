@@ -7,8 +7,10 @@ from sqlalchemy import select
 
 from app.core.config import settings
 from app.core.db import SessionLocal
+from app.integrations.vk.client import VKAPIClient
 from app.integrations.vk.sender import VKSender
 from app.models.conversation import Conversation
+from app.models.user import User
 from app.schemas.message import InboundMessage
 from app.services.case_resolution import ensure_conversation, resolve_case
 from app.services.persistence import (
@@ -35,11 +37,13 @@ class VKGatewayService:
         *,
         routing: RoutingService | None = None,
         sender: VKSender | None = None,
+        client: VKAPIClient | None = None,
         session_factory=SessionLocal,
         override_silence_seconds: int | None = None,
     ) -> None:
         self.routing = routing or RoutingService()
         self.sender = sender or VKSender()
+        self.client = client or getattr(self.sender, "client", None) or VKAPIClient()
         self.session_factory = session_factory
         self.override_silence_seconds = override_silence_seconds or settings.vk_override_silence_seconds
 
@@ -95,6 +99,7 @@ class VKGatewayService:
                 session.commit()
                 return {"ok": True, "ignored": True, "reason": "duplicate_event", "event_type": "message_new"}
 
+            self._sync_user_display_name(session, external_user_id=from_id)
             conversation = ensure_conversation(session, channel="vk", external_chat_id=peer_id)
             state = get_or_create_conversation_transport_state(session, conversation_id=conversation.id, platform="vk")
             set_last_inbound_message(session, state, external_message_id=message_id)
@@ -265,6 +270,55 @@ class VKGatewayService:
                 "sent_by": "admin",
                 "override_until": state.human_override_until.isoformat() if state.human_override_until else None,
             }
+
+    def _sync_user_display_name(self, session, *, external_user_id: str) -> None:
+        normalized_user_id = self._string_id(external_user_id)
+        if not self._is_vk_person_user_id(normalized_user_id):
+            return
+
+        user_external_id = f"vk:{normalized_user_id}"
+        user = session.scalar(select(User).where(User.external_id == user_external_id))
+        if user is not None and str(user.display_name or "").strip():
+            return
+
+        profile = self._lookup_vk_user_profile(normalized_user_id)
+        if profile is None:
+            return
+
+        display_name = self._compose_vk_display_name(profile)
+        if not display_name:
+            return
+
+        if user is None:
+            user = User(external_id=user_external_id, display_name=display_name)
+            session.add(user)
+        else:
+            user.display_name = display_name
+        session.flush()
+
+    def _lookup_vk_user_profile(self, external_user_id: str) -> dict[str, Any] | None:
+        response = self.client.get_users([external_user_id])
+        if not response.get("ok"):
+            return None
+        profiles = response.get("response")
+        if not isinstance(profiles, list) or not profiles:
+            return None
+        profile = profiles[0]
+        return profile if isinstance(profile, dict) else None
+
+    @staticmethod
+    def _is_vk_person_user_id(external_user_id: str) -> bool:
+        try:
+            return int(external_user_id) > 0
+        except (TypeError, ValueError):
+            return False
+
+    @staticmethod
+    def _compose_vk_display_name(profile: dict[str, Any]) -> str | None:
+        first_name = str(profile.get("first_name") or "").strip()
+        last_name = str(profile.get("last_name") or "").strip()
+        display_name = " ".join(part for part in (first_name, last_name) if part).strip()
+        return display_name or None
 
     @staticmethod
     def _format_delivery_error(delivery: dict[str, Any]) -> str:
