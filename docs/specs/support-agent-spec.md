@@ -103,8 +103,9 @@ UI requirements:
 - dialog list ordering is earliest-first within the selected day
 - both the list time and the message time must be rendered from full timestamps in the browser's current timezone
 - right panel renders the selected dialog as a chat view for the selected day only
-- no separate desktop right-panel header above the messages; on mobile the detail view may show only a compact back control
-- on narrow/mobile screens the viewer switches to a master-detail flow with explicit return to the list
+- no separate desktop right-panel header above the messages; on mobile the detail view uses only a compact header with an icon-only back control and the real current `case_id` label when available
+- on narrow/mobile screens the viewer switches to a master-detail overlay flow with explicit return to the list
+- selecting a dialog on mobile opens the detail pane with a right-to-left slide transition, and swipe-back or the icon-only back control returns left-to-right to the list
 - left and right panels must scroll independently, and the mobile detail pane must be able to scroll to the final message without clipping
 
 Backend requirements:

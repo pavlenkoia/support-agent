@@ -64,7 +64,7 @@ export function ChatPanel({
 
     closeTimerRef.current = window.setTimeout(() => {
       closeTimerRef.current = null
-      onBack?.()
+      onBack?.({ completedBySwipe: true })
       setDragOffsetX(0)
       onSwipeProgress?.(0)
     }, SWIPE_CLOSE_ANIMATION_MS)
@@ -188,18 +188,36 @@ export function ChatPanel({
     >
       {onBack ? (
         <div className={["border-b px-4 py-3 md:hidden", isDark ? 'border-slate-800' : 'border-slate-200'].join(' ')}>
-          <button
-            className={[
-              'inline-flex items-center rounded-xl border px-3 py-2 text-sm transition',
-              isDark
-                ? 'border-slate-700 bg-slate-900 text-slate-100 hover:border-slate-600'
-                : 'border-slate-300 bg-white text-slate-900 hover:border-slate-400',
-            ].join(' ')}
-            onClick={onBack}
-            type="button"
-          >
-            ← К списку
-          </button>
+          <div className="flex items-center gap-3">
+            <button
+              aria-label="К списку"
+              title="К списку"
+              className={[
+                'inline-flex h-10 w-10 items-center justify-center rounded-xl border transition',
+                isDark
+                  ? 'border-slate-700 bg-slate-900 text-slate-100 hover:border-slate-600'
+                  : 'border-slate-300 bg-white text-slate-900 hover:border-slate-400',
+              ].join(' ')}
+              onClick={onBack}
+              type="button"
+            >
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="h-5 w-5"
+                aria-hidden="true"
+              >
+                <path d="M15 18l-6-6 6-6" />
+              </svg>
+            </button>
+            <div className={["text-sm font-semibold", isDark ? 'text-slate-100' : 'text-slate-900'].join(' ')}>
+              {dialog?.case_id ? `Обращение №${dialog.case_id}` : 'Сообщение'}
+            </div>
+          </div>
         </div>
       ) : null}
       <div className="min-h-0 flex-1 overflow-y-auto px-6 py-6">

@@ -102,8 +102,9 @@ Current UI/runtime contract:
 - left panel items show `case_id` when available, otherwise `display_name/external_chat_id`
 - dialog list time and message-pane time are both rendered from full timestamps in the browser's current timezone
 - dialog list is sorted by earliest message time first for the selected day
-- on narrow/mobile screens the viewer switches to a master-detail flow: list -> selected chat -> `← К списку`
-- right panel has no separate desktop header above the messages; on mobile it may show only the compact back control
+- on narrow/mobile screens the viewer switches to a master-detail overlay flow: tapping a list item slides the selected chat in from right to left over the list, and swipe-back or the icon-only back button returns to the list
+- the mobile detail header uses an icon-only back control plus the real current `case_id` label (`Обращение №...`) when available
+- right panel has no separate desktop header above the messages; on mobile it keeps only that compact detail header
 - left and right panels scroll independently, and the mobile chat pane must scroll to the last message without bottom clipping
 - the backend viewer API is read-only but protected by the same auth layer when enabled
 

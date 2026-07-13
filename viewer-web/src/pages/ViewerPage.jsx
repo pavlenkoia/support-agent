@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
 const MOBILE_MEDIA_QUERY = '(max-width: 640px)'
+const MOBILE_DETAIL_TRANSITION_MS = 240
 
 import { ViewerAuthError, fetchDialogMessages, fetchDialogs } from '../api/viewer'
 import { ChatPanel } from '../components/ChatPanel'
@@ -25,13 +26,64 @@ export function ViewerPage({ onUnauthorized }) {
   const [errorText, setErrorText] = useState('')
   const [reloadToken, setReloadToken] = useState(0)
   const [isMobileViewport, setIsMobileViewport] = useState(detectMobileViewport)
-  const [mobileDialogOpen, setMobileDialogOpen] = useState(false)
+  const [mobileDetailRendered, setMobileDetailRendered] = useState(false)
+  const [mobileDetailVisible, setMobileDetailVisible] = useState(false)
   const [mobileSwipeProgress, setMobileSwipeProgress] = useState(0)
+  const mobileDetailFrameRef = useRef(null)
+  const mobileDetailCloseTimerRef = useRef(null)
+
+  const clearMobileDetailTimers = () => {
+    if (mobileDetailFrameRef.current !== null && typeof window !== 'undefined') {
+      window.cancelAnimationFrame(mobileDetailFrameRef.current)
+      mobileDetailFrameRef.current = null
+    }
+
+    if (mobileDetailCloseTimerRef.current !== null && typeof window !== 'undefined') {
+      window.clearTimeout(mobileDetailCloseTimerRef.current)
+      mobileDetailCloseTimerRef.current = null
+    }
+  }
+
+  const hideMobileDetail = ({ immediate = false } = {}) => {
+    clearMobileDetailTimers()
+    setMobileSwipeProgress(0)
+    setMobileDetailVisible(false)
+
+    if (immediate || typeof window === 'undefined') {
+      setMobileDetailRendered(false)
+      return
+    }
+
+    mobileDetailCloseTimerRef.current = window.setTimeout(() => {
+      mobileDetailCloseTimerRef.current = null
+      setMobileDetailRendered(false)
+    }, MOBILE_DETAIL_TRANSITION_MS)
+  }
+
+  const showMobileDetailOverlay = () => {
+    clearMobileDetailTimers()
+    setMobileSwipeProgress(0)
+    setMobileDetailRendered(true)
+
+    if (typeof window === 'undefined') {
+      setMobileDetailVisible(true)
+      return
+    }
+
+    mobileDetailFrameRef.current = window.requestAnimationFrame(() => {
+      mobileDetailFrameRef.current = window.requestAnimationFrame(() => {
+        mobileDetailFrameRef.current = null
+        setMobileDetailVisible(true)
+      })
+    })
+  }
 
   useEffect(() => {
     applyThemeToDocument(theme)
     window.localStorage.setItem(THEME_STORAGE_KEY, theme)
   }, [theme])
+
+  useEffect(() => () => clearMobileDetailTimers(), [])
 
   useEffect(() => {
     if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return undefined
@@ -41,8 +93,7 @@ export function ViewerPage({ onUnauthorized }) {
       const matches = typeof event?.matches === 'boolean' ? event.matches : mediaQuery.matches
       setIsMobileViewport(matches)
       if (!matches) {
-        setMobileDialogOpen(false)
-        setMobileSwipeProgress(0)
+        hideMobileDetail({ immediate: true })
       }
     }
 
@@ -62,8 +113,7 @@ export function ViewerPage({ onUnauthorized }) {
         setDialogs(items)
         const firstConversationId = items[0]?.conversation_id ?? null
         setSelectedConversationId(firstConversationId)
-        setMobileDialogOpen(false)
-        setMobileSwipeProgress(0)
+        hideMobileDetail({ immediate: true })
         if (!firstConversationId) {
           setDialogMessages(null)
         }
@@ -77,8 +127,7 @@ export function ViewerPage({ onUnauthorized }) {
         setDialogs([])
         setSelectedConversationId(null)
         setDialogMessages(null)
-        setMobileDialogOpen(false)
-        setMobileSwipeProgress(0)
+        hideMobileDetail({ immediate: true })
         setErrorText('Не удалось загрузить диалоги.')
       })
       .finally(() => {
@@ -129,7 +178,7 @@ export function ViewerPage({ onUnauthorized }) {
     [dialogs, selectedConversationId],
   )
 
-  const showMobileDetail = isMobileViewport && mobileDialogOpen
+  const showMobileDetail = isMobileViewport && mobileDetailRendered
 
   const chatDialog = dialogMessages
     ? {
@@ -180,11 +229,14 @@ export function ViewerPage({ onUnauthorized }) {
               selectedDay={selectedDay}
               onSelect={(conversationId) => {
                 setSelectedConversationId(conversationId)
-                setMobileSwipeProgress(0)
-                const openMobileDetail = typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+                const shouldOpenMobileDetail = typeof window !== 'undefined' && typeof window.matchMedia === 'function'
                   ? window.matchMedia(MOBILE_MEDIA_QUERY).matches
                   : isMobileViewport
-                setMobileDialogOpen(openMobileDetail)
+                if (shouldOpenMobileDetail) {
+                  showMobileDetailOverlay()
+                } else {
+                  hideMobileDetail({ immediate: true })
+                }
               }}
               theme={theme}
               className={isMobileViewport ? 'flex' : 'flex basis-[22rem] min-w-[22rem] max-w-[22rem]'}
@@ -204,19 +256,24 @@ export function ViewerPage({ onUnauthorized }) {
                     'absolute inset-0 transition-opacity duration-200',
                     theme === 'dark' ? 'bg-slate-950/28' : 'bg-slate-950/8',
                   ].join(' ')}
-                  style={{ opacity: Math.max(0, 1 - mobileSwipeProgress) }}
+                  style={{ opacity: (mobileDetailVisible ? 1 : 0) * Math.max(0, 1 - mobileSwipeProgress) }}
                 />
-                <ChatPanel
-                  dialog={chatDialog}
-                  isLoading={messagesLoading}
-                  theme={theme}
-                  className="relative z-10 flex h-full"
-                  onBack={() => {
-                    setMobileSwipeProgress(0)
-                    setMobileDialogOpen(false)
+                <div
+                  className="relative z-10 flex h-full transition-transform duration-300 ease-out"
+                  style={{
+                    transform: mobileDetailVisible ? 'translateX(0%)' : 'translateX(100%)',
+                    willChange: 'transform',
                   }}
-                  onSwipeProgress={setMobileSwipeProgress}
-                />
+                >
+                  <ChatPanel
+                    dialog={chatDialog}
+                    isLoading={messagesLoading}
+                    theme={theme}
+                    className="flex h-full"
+                    onBack={(options) => hideMobileDetail({ immediate: Boolean(options?.completedBySwipe) })}
+                    onSwipeProgress={setMobileSwipeProgress}
+                  />
+                </div>
               </div>
             ) : null}
           </div>
