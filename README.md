@@ -99,6 +99,7 @@ Current UI/runtime contract:
 - theme toggle is icon-only; visible text is moved to tooltip/accessibility labels
 - compact sticky top header for app identity + theme toggle
 - left panel header contains the date picker plus an icon-only refresh button for reloading the currently selected date (no extra title/label/counter)
+- on touch/mobile screens, a clear horizontal swipe in the dialog list switches days: left-to-right selects the previous day and right-to-left the next; the list follows the finger, snaps back on an incomplete gesture, and exits in the swipe direction before reloading without a separate loading card or incoming-list animation
 - left panel items show `№<case_id> Имя пользователя` when `case_id` exists, otherwise `display_name/external_chat_id`
 - inbound VK messages are labeled from cached `users.display_name` when available; the VK gateway populates missing names via `users.get` and falls back to id when lookup is unavailable
 - dialog list time and message-pane time are both rendered from full timestamps in the browser's current timezone

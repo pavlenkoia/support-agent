@@ -178,6 +178,12 @@ export function ViewerPage({ onUnauthorized }) {
     [dialogs, selectedConversationId],
   )
 
+  const handleDayChange = (nextDay) => {
+    if (!nextDay || nextDay === selectedDay) return
+    setDialogsLoading(true)
+    setSelectedDay(nextDay)
+  }
+
   const showMobileDetail = isMobileViewport && mobileDetailRendered
 
   const chatDialog = dialogMessages
@@ -223,7 +229,7 @@ export function ViewerPage({ onUnauthorized }) {
               dialogs={dialogs}
               isLoading={dialogsLoading}
               isRefreshing={dialogsLoading || messagesLoading}
-              onDayChange={setSelectedDay}
+              onDayChange={handleDayChange}
               onRefresh={() => setReloadToken((current) => current + 1)}
               selectedConversationId={selectedConversationId}
               selectedDay={selectedDay}

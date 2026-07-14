@@ -97,6 +97,8 @@ UI requirements:
 - header-right light/dark theme toggle
 - icon-only theme button with tooltip/accessibility text instead of visible label
 - left panel header contains the date picker plus an icon-only refresh button for reloading the current selected day
+- on touch/mobile screens, swiping the dialog list left-to-right selects the previous day and right-to-left selects the next day; the current list follows the finger, snaps back if the gesture is incomplete, and completes its exit before the new day reloads
+- the day reload must not render a separate `Загружаю диалоги…` panel or animate the newly loaded list into view
 - no `Диалоги` heading and no `Диалогов за день N` counter block
 - left panel items show `№<case_id> Имя пользователя` when `case_id` exists, otherwise `name/id`, plus time and `message_count`
 - inbound viewer messages prefer cached `users.display_name` for the author label and fall back to VK id when profile enrichment is unavailable
