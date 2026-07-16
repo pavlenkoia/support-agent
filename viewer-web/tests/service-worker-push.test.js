@@ -7,6 +7,8 @@ test('always shows a high-visibility native notification for an inbound viewer p
 
   assert.match(source, /requireInteraction:\s*true/)
   assert.match(source, /vibrate:\s*\[200,\s*100,\s*200\]/)
+  assert.match(source, /self\.skipWaiting\(\)/)
+  assert.match(source, /self\.clients\.claim\(\)/)
   assert.match(source, /windows\.forEach\(\(client\) => client\.postMessage/)
   assert.doesNotMatch(source, /if \(visibleWindow\) \{[\s\S]*?return/)
 })

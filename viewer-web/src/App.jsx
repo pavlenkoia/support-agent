@@ -68,6 +68,7 @@ export default function App() {
   const [pushConfig, setPushConfig] = useState(null)
   const [pushStatus, setPushStatus] = useState('unavailable')
   const [pushRefreshToken, setPushRefreshToken] = useState(0)
+  const [pushAlertToken, setPushAlertToken] = useState(0)
   const pushMutationInFlight = useRef(false)
   const isDark = theme === 'dark'
 
@@ -103,6 +104,7 @@ export default function App() {
     const handleServiceWorkerMessage = (event) => {
       if (event.data?.type === 'viewer_user_message' || event.data?.type === 'viewer_notification_click') {
         setPushRefreshToken((current) => current + 1)
+        if (event.data?.type === 'viewer_user_message') setPushAlertToken((current) => current + 1)
       }
     }
 
@@ -248,6 +250,7 @@ export default function App() {
     <ViewerPage
       onPushToggle={handlePushToggle}
       onUnauthorized={() => setAuthState('unauthenticated')}
+      pushAlertToken={pushAlertToken}
       pushRefreshToken={pushRefreshToken}
       pushStatus={pushStatus}
     />

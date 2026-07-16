@@ -15,7 +15,7 @@ function detectMobileViewport() {
   return window.matchMedia(MOBILE_MEDIA_QUERY).matches
 }
 
-export function ViewerPage({ onPushToggle, onUnauthorized, pushRefreshToken, pushStatus }) {
+export function ViewerPage({ onPushToggle, onUnauthorized, pushAlertToken, pushRefreshToken, pushStatus }) {
   const [selectedDay, setSelectedDay] = useState(formatToday)
   const [theme, setTheme] = useState(loadInitialTheme)
   const [dialogs, setDialogs] = useState([])
@@ -24,6 +24,7 @@ export function ViewerPage({ onPushToggle, onUnauthorized, pushRefreshToken, pus
   const [dialogsLoading, setDialogsLoading] = useState(false)
   const [messagesLoading, setMessagesLoading] = useState(false)
   const [errorText, setErrorText] = useState('')
+  const [showPushAlert, setShowPushAlert] = useState(false)
   const [reloadToken, setReloadToken] = useState(0)
   const [isMobileViewport, setIsMobileViewport] = useState(detectMobileViewport)
   const [mobileDetailRendered, setMobileDetailRendered] = useState(false)
@@ -85,6 +86,14 @@ export function ViewerPage({ onPushToggle, onUnauthorized, pushRefreshToken, pus
     applyThemeToDocument(theme)
     window.localStorage.setItem(THEME_STORAGE_KEY, theme)
   }, [theme])
+
+  useEffect(() => {
+    if (!pushAlertToken) return undefined
+    setShowPushAlert(true)
+    navigator.vibrate?.([200, 100, 200])
+    const timer = window.setTimeout(() => setShowPushAlert(false), 15000)
+    return () => window.clearTimeout(timer)
+  }, [pushAlertToken])
 
   useEffect(() => () => clearMobileDetailTimers(), [])
 
@@ -216,6 +225,16 @@ export function ViewerPage({ onPushToggle, onUnauthorized, pushRefreshToken, pus
         onPushToggle={onPushToggle}
         pushStatus={pushStatus}
       />
+      {showPushAlert ? (
+        <button
+          aria-label="Закрыть уведомление о новом сообщении"
+          className="fixed inset-x-4 top-20 z-50 rounded-2xl border border-amber-200 bg-amber-400 px-4 py-4 text-left text-sm font-bold text-slate-950 shadow-2xl animate-pulse md:left-auto md:right-6 md:w-96"
+          onClick={() => setShowPushAlert(false)}
+          type="button"
+        >
+          🔔 Новое сообщение в VK — viewer обновлён
+        </button>
+      ) : null}
 
       <main className="mx-auto flex min-h-0 flex-1 w-full max-w-[1800px] flex-col px-0 md:px-6 md:pb-6">
         {errorText ? (
