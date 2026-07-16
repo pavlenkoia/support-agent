@@ -15,11 +15,7 @@ self.addEventListener('push', (event) => {
 
   event.waitUntil((async () => {
     const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
-    const visibleWindow = windows.find((client) => client.visibilityState === 'visible')
-    if (visibleWindow) {
-      visibleWindow.postMessage({ type: 'viewer_user_message', payload })
-      return
-    }
+    windows.forEach((client) => client.postMessage({ type: 'viewer_user_message', payload }))
     await self.registration.showNotification('Новое сообщение в VK', {
       body: payload.case_id ? `Обращение №${payload.case_id}` : 'Откройте viewer для просмотра диалога.',
       data: payload,
