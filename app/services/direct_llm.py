@@ -76,6 +76,16 @@ class DirectLLMService:
         fallback_text = self.prompt_service.render_cannot_answer()
         system_prompt = self.prompt_service.load_system_prompt()
         kb_packet = self._coerce_kb_result(kb_result)
+        calendar_period_guard = self._fallback_answer_from_grounding(
+            text,
+            kb_packet.get("answer_context", []),
+            kb_hits=kb_packet.get("answer_context", []),
+            conversation_context={**(conversation_context or {}), "tool_observations": tool_observations},
+            reason="calendar_period_tool_guard",
+        ) if any(item.get("kind") == "calendar_period_weekends" for item in tool_observations) else None
+        if calendar_period_guard is not None:
+            calendar_period_guard["llm_trace"] = []
+            return calendar_period_guard
 
         if settings.direct_llm_provider == "stub":
             return self._respond_stub(
@@ -104,7 +114,9 @@ class DirectLLMService:
                 "output_rules": [
                     "Верни только JSON-объект по указанной схеме.",
                     "response_text должен быть готовым текстом для клиента без служебных пояснений.",
-                    "Используй только facts и answer_basis из KB agent result плюс правила системного промпта.",
+                    "Используй только facts и answer_basis из KB agent result, результаты инструментов и правила системного промпта.",
+                    "Если есть tool result kind=calendar_period_weekends, не выводи клиенту точные календарные даты; сохрани исходный период и укажи, что проведение зависит от анонса и погоды.",
+                    "В calendar-period fallback сохрани исходный период пользователя; не заменяй его относительными конструкциями вроде 'после этих месяцев'.",
                     "Если информации недостаточно, используй обязательный ответ из системного промпта.",
                 ],
             },
@@ -321,7 +333,8 @@ class DirectLLMService:
                 "rules": [
                     "Use read_kb only when support-domain information may exist in the KB and it has not been gathered yet.",
                     "If retrieval.kb_status is found, do not choose read_kb again because the KB has already been gathered for this loop; choose answer_from_kb, use_tool, ask_clarification, or cannot_answer.",
-                    "Use use_tool when the answer depends on runtime computation like date, weekday, current year, arithmetic, or other live facts.",
+                    "Use use_tool when the answer depends on runtime computation like date, weekday, calendar month/season period, current year, arithmetic, or other live facts.",
+                    "For a calendar month, month range, or season request, preserve the user's stated period in any fallback; never rewrite it as a relative period such as 'after these months'.",
                     "Use answer_from_kb when the gathered KB/tool context is already sufficient for a grounded answer.",
                     "Use the conversation context to resolve short follow-up turns like 'почему', 'как', 'а если', 'то есть', pronouns, or yes/no follow-ups.",
                     "If the previous assistant turn already established the topic, do not ask the user to restate it; prefer read_kb or answer_from_kb.",
@@ -890,6 +903,23 @@ class DirectLLMService:
         used_kb_sources = self._extract_source_refs(answer_context) or [hit.get("source_ref") for hit in kb_hits if hit.get("source_ref")]
 
         weekend_obs = next((item for item in tool_observations if item.get("kind") == "weekend_rule_check"), None)
+        period_obs = next((item for item in tool_observations if item.get("kind") == "calendar_period_weekends"), None)
+        if period_obs and any(token in combined_text for token in ("выходн", "суббот", "воскрес")) and self._is_jump_schedule_request(text, conversation_context):
+            period_data = period_obs.get("structured") or {}
+            original_period = str(period_data.get("original_period") or "в указанный период")
+            period_intro = original_period[:1].upper() + original_period[1:] if original_period.startswith("в ") else f"В указанный период ({original_period})"
+            return {
+                "direct_status": "ready",
+                "response_text": (
+                    f"{period_intro} прыжки обычно проходят по выходным. "
+                    "Точные даты проведения публикуются в анонсах и зависят от погоды."
+                ),
+                "used_kb_sources": used_kb_sources,
+                "confidence": 0.76,
+                "decision": "answer",
+                "reason": reason,
+            }
+
         if weekend_obs and any(token in combined_text for token in ("выходн", "суббот", "воскрес")) and self._is_jump_schedule_request(text, conversation_context):
             weekday_obs = next((item for item in tool_observations if item.get("kind") == "calendar_weekday"), None)
             weekday_ru = (((weekday_obs or {}).get("structured") or {}).get("weekday_ru")) or "этот день"

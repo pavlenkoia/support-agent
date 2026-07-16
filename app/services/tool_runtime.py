@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from datetime import UTC, datetime, date
+from datetime import UTC, datetime, date, timedelta
 from typing import Any
 
 
@@ -26,12 +26,61 @@ TEXT_DATE_RE = re.compile(
     flags=re.IGNORECASE,
 )
 DAY_ONLY_RE = re.compile(r"(?<!\d)(?P<day>\d{1,2})(?:-?го|\s*числа)?(?!\d)", flags=re.IGNORECASE)
+MONTH_PERIOD_RE = re.compile(
+    r"(?P<prefix>с|по|в)\s+(?P<start>январ(?:ь|я|е)?|феврал(?:ь|я|е)?|март(?:а|е)?|апрел(?:ь|я|е)?|ма(?:й|я|е)|июн(?:ь|я|е)?|июл(?:ь|я|е)?|август(?:а|е)?|сентябр(?:ь|я|е)?|октябр(?:ь|я|е)?|ноябр(?:ь|я|е)?|декабр(?:ь|я|е)?)(?:\s+(?:по|—|-|до)\s+(?P<end>январ(?:ь|я|е)?|феврал(?:ь|я|е)?|март(?:а|е)?|апрел(?:ь|я|е)?|ма(?:й|я|е)|июн(?:ь|я|е)?|июл(?:ь|я|е)?|август(?:а|е)?|сентябр(?:ь|я|е)?|октябр(?:ь|я|е)?|ноябр(?:ь|я|е)?|декабр(?:ь|я|е)?))?",
+    flags=re.IGNORECASE,
+)
+SEASONS_RU = {
+    "весна": (3, 4, 5),
+    "лето": (6, 7, 8),
+    "осень": (9, 10, 11),
+    "зима": (12, 1, 2),
+}
 
 
 class ToolRuntimeService:
+    def matches_calendar_query(self, text: str) -> bool:
+        return self._extract_calendar_period(text) is not None or self._extract_date(text) is not None
+
     def collect(self, *, text: str, kb_hits: list[dict], conversation_context: dict | None = None) -> dict[str, Any]:
         observations: list[dict[str, Any]] = []
         trace: list[dict[str, Any]] = []
+
+        period = self._extract_calendar_period(text)
+        if period is not None:
+            weekend_dates = self._weekend_dates_for_period(period["months"], period["year"])
+            period_result = {
+                "tool_name": "calendar_period_weekends",
+                "input": {
+                    "original_period": period["original_period"],
+                    "months": period["months"],
+                    "year": period["year"],
+                },
+                "result": {
+                    "original_period": period["original_period"],
+                    "start_month": period["months"][0],
+                    "end_month": period["months"][-1],
+                    "year": period["year"],
+                    "weekend_dates": [item.isoformat() for item in weekend_dates],
+                },
+            }
+            trace.append(period_result)
+            observations.append(
+                {
+                    "kind": "calendar_period_weekends",
+                    "summary": (
+                        f"В период {period['original_period']} календарные выходные: "
+                        + ", ".join(item.strftime("%d.%m.%Y") for item in weekend_dates)
+                        + ". Эти даты являются только календарными ориентирами."
+                    ),
+                    "structured": period_result["result"],
+                }
+            )
+            return {
+                "tool_status": "used",
+                "tool_results": observations,
+                "tool_trace": trace,
+            }
 
         parsed_date = self._extract_date(text)
         if parsed_date is None:
@@ -85,6 +134,105 @@ class ToolRuntimeService:
             "tool_results": observations,
             "tool_trace": trace,
         }
+
+    def _extract_calendar_period(self, text: str) -> dict[str, Any] | None:
+        lowered = str(text or "").lower()
+        now_year = datetime.now(UTC).year
+
+        for season, months in SEASONS_RU.items():
+            season_forms = {
+                "весна": ("весной", "весна"),
+                "лето": ("летом", "лето"),
+                "осень": ("осенью", "осень"),
+                "зима": ("зимой", "зима"),
+            }[season]
+            if any(form in lowered for form in season_forms):
+                return {
+                    "original_period": self._matched_season_text(lowered, season),
+                    "months": list(months),
+                    "year": now_year,
+                }
+
+        match = MONTH_PERIOD_RE.search(lowered)
+        if not match:
+            return None
+        start_month = self._month_number(match.group("start"))
+        end_month = self._month_number(match.group("end")) if match.group("end") else start_month
+        if start_month is None or end_month is None:
+            return None
+        months = self._month_range(start_month, end_month)
+        original_period = match.group(0)
+        list_segment = lowered[match.start():].split("?", 1)[0]
+        if not match.group("end") and ("," in list_segment or " и " in list_segment):
+            listed_months = [
+                month for token in re.findall(r"[а-яё]+", list_segment)
+                if (month := self._month_number(token)) is not None
+            ]
+            if len(listed_months) > 1:
+                months = list(dict.fromkeys(listed_months))
+                original_period = self._format_month_list(months)
+        return {
+            "original_period": original_period,
+            "months": months,
+            "year": now_year,
+        }
+
+    @staticmethod
+    def _matched_season_text(text: str, season: str) -> str:
+        forms = {
+            "весна": ("весной", "весна"),
+            "лето": ("летом", "лето"),
+            "осень": ("осенью", "осень"),
+            "зима": ("зимой", "зима"),
+        }
+        return next((form for form in forms[season] if form in text), season)
+
+    @staticmethod
+    def _month_number(value: str | None) -> int | None:
+        lowered = str(value or "").lower()
+        month_prefixes = (
+            ("январ", 1), ("феврал", 2), ("март", 3), ("апрел", 4),
+            ("ма", 5), ("июн", 6), ("июл", 7), ("август", 8),
+            ("сентябр", 9), ("октябр", 10), ("ноябр", 11), ("декабр", 12),
+        )
+        return next((number for prefix, number in month_prefixes if lowered.startswith(prefix)), None)
+
+    @staticmethod
+    def _month_range(start_month: int, end_month: int) -> list[int]:
+        months = [start_month]
+        while months[-1] != end_month:
+            months.append((months[-1] % 12) + 1)
+        return months
+
+    @staticmethod
+    def _format_month_list(months: list[int]) -> str:
+        month_forms = {
+            1: "январе", 2: "феврале", 3: "марте", 4: "апреле",
+            5: "мае", 6: "июне", 7: "июле", 8: "августе",
+            9: "сентябре", 10: "октябре", 11: "ноябре", 12: "декабре",
+        }
+        names = [month_forms[month] for month in months]
+        if len(names) == 1:
+            return f"в {names[0]}"
+        if len(names) == 2:
+            return f"в {names[0]} и {names[1]}"
+        return "в " + ", ".join(names[:-1]) + f" и {names[-1]}"
+
+    @staticmethod
+    def _weekend_dates_for_period(months: list[int], year: int) -> list[date]:
+        dates: list[date] = []
+        current_year = year
+        previous_month = months[0]
+        for index, month in enumerate(months):
+            if index and month < previous_month:
+                current_year += 1
+            current = date(current_year, month, 1)
+            while current.month == month:
+                if current.weekday() >= 5:
+                    dates.append(current)
+                current += timedelta(days=1)
+            previous_month = month
+        return dates
 
     def _extract_date(self, text: str) -> date | None:
         now = datetime.now(UTC).date()

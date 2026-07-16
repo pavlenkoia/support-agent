@@ -216,6 +216,14 @@ class OrchestratorService:
         retrieval: dict[str, Any],
         tool_observations: list[dict[str, Any]],
     ) -> dict[str, Any]:
+        if not tool_observations and self.tool_runtime.matches_calendar_query(text):
+            return {
+                "action": "use_tool",
+                "scope_status": "in_scope",
+                "confidence": 1.0,
+                "reason": "system_calendar_query_match",
+                "clarification_question": "",
+            }
         if hasattr(self.direct_llm, "assess_request"):
             return self.direct_llm.assess_request(
                 text,

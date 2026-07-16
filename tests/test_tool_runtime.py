@@ -73,3 +73,138 @@ def test_direct_llm_grounded_fallback_ignores_weekend_kb_for_office_question() -
     assert result is not None
     assert "Прыжки обычно проходят по выходным" not in result["response_text"]
     assert "офисе по будням" in result["response_text"]
+
+
+def test_tool_runtime_resolves_month_range_to_weekend_dates(monkeypatch) -> None:
+    monkeypatch.setattr(tool_runtime_module, "datetime", FrozenDateTime)
+    service = ToolRuntimeService()
+
+    result = service.collect(
+        text="Какие выходные с мая по июнь бывают для прыжков?",
+        kb_hits=[{"text": "Прыжки обычно проходят по выходным."}],
+    )
+
+    assert result["tool_status"] == "used"
+    period = next(item for item in result["tool_results"] if item["kind"] == "calendar_period_weekends")
+    assert period["structured"]["original_period"] == "с мая по июнь"
+    assert period["structured"]["start_month"] == 5
+    assert period["structured"]["end_month"] == 6
+    assert period["structured"]["weekend_dates"][0] == "2026-05-02"
+    assert period["structured"]["weekend_dates"][-1] == "2026-06-28"
+
+
+def test_tool_runtime_resolves_month_list_and_season(monkeypatch) -> None:
+    monkeypatch.setattr(tool_runtime_module, "datetime", FrozenDateTime)
+    service = ToolRuntimeService()
+
+    month_list = service.collect(text="В мае, июне и июле какие выходные?", kb_hits=[])
+    season = service.collect(text="Какие выходные летом?", kb_hits=[])
+
+    month_list_period = next(item for item in month_list["tool_results"] if item["kind"] == "calendar_period_weekends")
+    season_period = next(item for item in season["tool_results"] if item["kind"] == "calendar_period_weekends")
+    assert month_list_period["structured"]["start_month"] == 5
+    assert month_list_period["structured"]["end_month"] == 7
+    assert season_period["structured"]["start_month"] == 6
+    assert season_period["structured"]["end_month"] == 8
+
+
+def test_tool_runtime_normalizes_month_list_without_trailing_request_clause(monkeypatch) -> None:
+    monkeypatch.setattr(tool_runtime_module, "datetime", FrozenDateTime)
+    result = ToolRuntimeService().collect(
+        text="Будут прыжки в тандеме в августе, сентябре и если известны даты, чтобы запланировать",
+        kb_hits=[],
+    )
+
+    period = next(item for item in result["tool_results"] if item["kind"] == "calendar_period_weekends")
+    assert period["structured"]["original_period"] == "в августе и сентябре"
+
+
+def test_direct_llm_period_fallback_preserves_requested_period_and_adds_conditions() -> None:
+    service = DirectLLMService(client=None)
+
+    result = service._fallback_answer_from_grounding(
+        text="А с мая по сентябрь?",
+        answer_context=[{"text": "Прыжки обычно проходят по выходным."}],
+        kb_hits=[],
+        conversation_context={
+            "recent_messages": [
+                {"role": "user", "content": "Когда обычно проходят прыжки?"},
+                {"role": "assistant", "content": "Обычно по выходным."},
+            ],
+            "tool_observations": [
+                {
+                    "kind": "calendar_period_weekends",
+                    "structured": {
+                        "original_period": "с мая по сентябрь",
+                        "weekend_dates": ["2026-05-02", "2026-05-03"],
+                    },
+                }
+            ]
+        },
+        reason="planner_requested_but_no_tool_match",
+    )
+
+    assert result is not None
+    assert "с мая по сентябрь" in result["response_text"]
+    assert "после этих месяцев" not in result["response_text"].lower()
+    assert "анонс" in result["response_text"].lower()
+    assert "погод" in result["response_text"].lower()
+
+
+def test_direct_llm_period_fallback_does_not_duplicate_preposition() -> None:
+    service = DirectLLMService(client=None)
+    result = service._fallback_answer_from_grounding(
+        text="Будут прыжки в тандеме в августе и сентябре?",
+        answer_context=[{"text": "Прыжки обычно проходят по выходным."}],
+        kb_hits=[],
+        conversation_context={
+            "tool_observations": [
+                {"kind": "calendar_period_weekends", "structured": {"original_period": "в августе и сентябре"}},
+            ]
+        },
+        reason="calendar_period_tool_guard",
+    )
+
+    assert result is not None
+    assert result["response_text"].startswith("В августе и сентябре")
+    assert "В период в августе" not in result["response_text"]
+
+
+def test_direct_llm_period_guard_keeps_calendar_dates_out_of_customer_reply(monkeypatch) -> None:
+    class IncorrectCalendarClient:
+        def generate(self, **kwargs):
+            raise AssertionError("calendar-period response must not delegate dates to the model")
+
+    from app.services import direct_llm as direct_llm_module
+
+    monkeypatch.setattr(direct_llm_module.settings, "direct_llm_provider", "mistral")
+    service = DirectLLMService(client=IncorrectCalendarClient())
+    result = service.respond(
+        "Когда обычно проходят прыжки с мая по июню?",
+        {"answer_context": [{"text": "Прыжки обычно проходят по выходным."}]},
+        conversation_context={
+            "tool_observations": [
+                {
+                    "kind": "calendar_period_weekends",
+                    "structured": {
+                        "original_period": "с мая по июню",
+                        "weekend_dates": ["2026-05-02", "2026-05-03"],
+                    },
+                }
+            ]
+        },
+        tool_observations=[
+            {
+                "kind": "calendar_period_weekends",
+                "structured": {
+                    "original_period": "с мая по июню",
+                    "weekend_dates": ["2026-05-02", "2026-05-03"],
+                },
+            }
+        ],
+    )
+
+    assert "02.05.2026" not in result["response_text"]
+    assert "03.05.2026" not in result["response_text"]
+    assert "анонс" in result["response_text"].lower()
+    assert "погод" in result["response_text"].lower()
