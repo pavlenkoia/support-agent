@@ -27,11 +27,9 @@ export function ViewerHeader({ theme, onThemeToggle, onPushToggle, pushStatus })
               aria-label={pushLabel}
               className={[
                 'inline-flex h-10 w-10 items-center justify-center rounded-xl border text-base transition md:h-11 md:w-11 md:text-lg',
-                pushEnabled
-                  ? 'border-sky-400 bg-sky-500/15 text-sky-600 hover:bg-sky-500/25'
-                  : isDark
-                    ? 'border-slate-700 bg-slate-900 text-slate-100 hover:border-slate-600 hover:bg-slate-800'
-                    : 'border-slate-300 bg-slate-50 text-slate-700 hover:border-slate-400 hover:bg-slate-100',
+                isDark
+                  ? 'border-slate-700 bg-slate-900 text-slate-100 hover:border-slate-600 hover:bg-slate-800'
+                  : 'border-slate-300 bg-slate-50 text-slate-700 hover:border-slate-400 hover:bg-slate-100',
               ].join(' ')}
               disabled={pushStatus === 'pending'}
               onClick={onPushToggle}
