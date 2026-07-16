@@ -8,7 +8,7 @@ export class ViewerAuthError extends Error {
 
 const API_PREFIX = '/api/viewer'
 
-async function requestJson(path, options = {}) {
+export async function requestJson(path, options = {}) {
   const response = await fetch(path, {
     credentials: 'same-origin',
     ...options,
@@ -26,7 +26,7 @@ async function requestJson(path, options = {}) {
     throw new Error(`Request failed: ${response.status}`)
   }
 
-  if (response.status === 204) {
+  if (response.status === 204 || !response.headers.get('content-type')?.includes('application/json')) {
     return null
   }
 
