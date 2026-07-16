@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import { ViewerPage } from './pages/ViewerPage'
 import { ViewerLoginPage } from './components/ViewerLoginPage'
@@ -68,6 +68,7 @@ export default function App() {
   const [pushConfig, setPushConfig] = useState(null)
   const [pushStatus, setPushStatus] = useState('unavailable')
   const [pushRefreshToken, setPushRefreshToken] = useState(0)
+  const pushMutationInFlight = useRef(false)
   const isDark = theme === 'dark'
 
   useEffect(() => {
@@ -111,12 +112,13 @@ export default function App() {
     }
     navigator.serviceWorker.addEventListener('message', handleServiceWorkerMessage)
     const syncPushSubscription = async () => {
+      if (pushMutationInFlight.current) return
       try {
         const registration = await navigator.serviceWorker.ready
         const subscription = await registration.pushManager.getSubscription()
-        if (!cancelled) setPushStatus(subscription ? 'enabled' : 'disabled')
+        if (!cancelled && !pushMutationInFlight.current) setPushStatus(subscription ? 'enabled' : 'disabled')
       } catch {
-        if (!cancelled) setPushStatus('unavailable')
+        if (!cancelled && !pushMutationInFlight.current) setPushStatus('unavailable')
       }
     }
     const syncAfterPermissionDialog = () => {
@@ -143,6 +145,7 @@ export default function App() {
 
   const handlePushToggle = async () => {
     if (!pushConfig || pushStatus === 'unsupported' || pushStatus === 'unavailable') return
+    pushMutationInFlight.current = true
     setPushStatus('pending')
     try {
       const registration = await navigator.serviceWorker.ready
@@ -162,10 +165,12 @@ export default function App() {
         userVisibleOnly: true,
         applicationServerKey: base64UrlToUint8Array(pushConfig.public_key),
       })
-      await saveViewerPushSubscription(subscription)
       setPushStatus('enabled')
+      await saveViewerPushSubscription(subscription)
     } catch {
       setPushStatus('disabled')
+    } finally {
+      pushMutationInFlight.current = false
     }
   }
 
