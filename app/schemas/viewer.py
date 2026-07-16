@@ -37,3 +37,18 @@ class ViewerLoginRequest(BaseModel):
 
 class ViewerAuthStatus(BaseModel):
     authenticated: bool
+
+
+class ViewerPushConfig(BaseModel):
+    public_key: str
+
+
+class ViewerPushSubscriptionKeys(BaseModel):
+    p256dh: str
+    auth: str
+
+
+class ViewerPushSubscriptionRequest(BaseModel):
+    endpoint: str
+    keys: ViewerPushSubscriptionKeys
+    expiration_time: int | None = None

@@ -57,6 +57,16 @@ Ordering contract:
 
 `GET /api/viewer/dialogs/{conversation_id}/messages?day=YYYY-MM-DD` returns the selected dialog scoped to the requested day only.
 
+## Viewer Web Push contract
+
+All push routes require the same viewer-auth cookie as the dialog routes.
+
+- `GET /api/viewer/push/config` returns `{ "public_key": "<VAPID public key>" }` only when `VIEWER_PUSH_ENABLED=true` and the public key is configured; otherwise it returns `503`.
+- `POST /api/viewer/push/subscriptions` accepts the browser `PushSubscription.toJSON()` shape (`endpoint`, `keys.p256dh`, `keys.auth`, optional `expirationTime`) and creates or re-enables the endpoint.
+- `DELETE /api/viewer/push/subscriptions` disables the endpoint without deleting audit/delivery history.
+
+For each committed inbound VK `Message`, the same DB transaction creates one `viewer_user_message_received` outbox event. `viewer-push-worker` delivers events asynchronously. The push payload contains only `type`, `conversation_id`, and `case_id`; it must not contain customer message text. Delivery uses configurable Web Push TTL/urgency; a stale `processing` event is reclaimed after its configured lease, while transient provider errors are retried with bounded backoff.
+
 ## Shared inbound message contract
 
 The normalized application inbound contract is transport-neutral and currently accepts these fields:

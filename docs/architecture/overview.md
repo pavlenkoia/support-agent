@@ -9,6 +9,7 @@ Runtime layers:
 - **Telegram gateway + polling worker** for chat delivery
 - **VK gateway + VK Bots Long Poll worker** for VK community direct messages
 - **React + Tailwind viewer-web** published separately on port `3002` for read-only dialog browsing, with optional shared-key login, long-lived `HttpOnly` cookie sessions, installable online-first PWA shell, theme toggle, mobile master-detail overlay navigation with slide-in / swipe-back detail transitions, and touch-driven day navigation in the dialog list
+- **Viewer Push worker** for opt-in Web Push delivery from a transactional PostgreSQL outbox to authenticated viewer PWA installations
 - **PostgreSQL** as system of record for cases, messages, workflow events, and transport state
 - **Bounded orchestrator loop** for per-turn decision making
 - **Separate KB agent** for Karpathy-style wiki navigation, selective page reads, and grounded fact extraction
@@ -48,6 +49,10 @@ Hard limits:
 - mandatory final outcome or explicit clarification request
 
 ## Architectural boundaries
+
+### Viewer Push boundary
+
+Viewer Push is a transport adjunct around persisted VK inbound messages, not a second support workflow. The inbound persistence transaction creates a durable outbox event only for `channel=vk`; a separate `viewer-push-worker` delivers it after commit. The browser receives only `conversation_id` / `case_id`, fetches current data through the existing viewer API, and never treats a push payload as message history. VAPID private-key material remains in the external runtime environment; browser subscription registration is protected by viewer auth.
 
 ### 1. Orchestrator
 Chooses the next action and stops the loop within bounded limits.

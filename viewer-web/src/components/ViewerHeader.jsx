@@ -1,6 +1,8 @@
-export function ViewerHeader({ theme, onThemeToggle }) {
+export function ViewerHeader({ theme, onThemeToggle, onPushToggle, pushStatus }) {
   const isDark = theme === 'dark'
   const nextThemeLabel = isDark ? 'Переключить на светлую тему' : 'Переключить на тёмную тему'
+  const pushEnabled = pushStatus === 'enabled'
+  const pushLabel = pushEnabled ? 'Отключить уведомления о новых сообщениях' : 'Включить уведомления о новых сообщениях'
 
   return (
     <header
@@ -19,20 +21,41 @@ export function ViewerHeader({ theme, onThemeToggle }) {
           </h1>
         </div>
 
-        <button
-          aria-label={nextThemeLabel}
-          className={[
-            'inline-flex h-10 w-10 items-center justify-center rounded-xl border text-base transition md:h-11 md:w-11 md:text-lg',
-            isDark
-              ? 'border-slate-700 bg-slate-900 text-slate-100 hover:border-slate-600 hover:bg-slate-800'
-              : 'border-slate-300 bg-slate-50 text-slate-700 hover:border-slate-400 hover:bg-slate-100',
-          ].join(' ')}
-          onClick={onThemeToggle}
-          title={nextThemeLabel}
-          type="button"
-        >
-          <span aria-hidden="true">{isDark ? '☀️' : '🌙'}</span>
-        </button>
+        <div className="flex items-center gap-2">
+          {pushStatus !== 'unsupported' && pushStatus !== 'unavailable' ? (
+            <button
+              aria-label={pushLabel}
+              className={[
+                'inline-flex h-10 w-10 items-center justify-center rounded-xl border text-base transition md:h-11 md:w-11 md:text-lg',
+                pushEnabled
+                  ? 'border-sky-400 bg-sky-500/15 text-sky-600 hover:bg-sky-500/25'
+                  : isDark
+                    ? 'border-slate-700 bg-slate-900 text-slate-100 hover:border-slate-600 hover:bg-slate-800'
+                    : 'border-slate-300 bg-slate-50 text-slate-700 hover:border-slate-400 hover:bg-slate-100',
+              ].join(' ')}
+              disabled={pushStatus === 'pending'}
+              onClick={onPushToggle}
+              title={pushLabel}
+              type="button"
+            >
+              <span aria-hidden="true">{pushEnabled ? '🔔' : '🔕'}</span>
+            </button>
+          ) : null}
+          <button
+            aria-label={nextThemeLabel}
+            className={[
+              'inline-flex h-10 w-10 items-center justify-center rounded-xl border text-base transition md:h-11 md:w-11 md:text-lg',
+              isDark
+                ? 'border-slate-700 bg-slate-900 text-slate-100 hover:border-slate-600 hover:bg-slate-800'
+                : 'border-slate-300 bg-slate-50 text-slate-700 hover:border-slate-400 hover:bg-slate-100',
+            ].join(' ')}
+            onClick={onThemeToggle}
+            title={nextThemeLabel}
+            type="button"
+          >
+            <span aria-hidden="true">{isDark ? '☀️' : '🌙'}</span>
+          </button>
+        </div>
       </div>
     </header>
   )

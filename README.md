@@ -77,6 +77,10 @@ After `docker compose up -d`, open:
 - `POST /api/viewer/auth/logout` — clears the viewer session cookie
 - `GET /api/viewer/dialogs?day=YYYY-MM-DD` — VK dialog list for the selected day (requires viewer auth when enabled)
 - `GET /api/viewer/dialogs/{conversation_id}/messages?day=YYYY-MM-DD` — selected dialog messages for the selected day (requires viewer auth when enabled)
+- `GET /api/viewer/push/config` — public VAPID key for an authenticated PWA client
+- `POST` / `DELETE /api/viewer/push/subscriptions` — create/update or disable the current browser push subscription
+
+Web Push is opt-in: after login, the operator presses the header bell and grants the browser permission. Enable it only on an HTTPS viewer origin. Runtime secrets stay in the external `app.env`: `VIEWER_PUSH_VAPID_PRIVATE_KEY` and `VIEWER_PUSH_VAPID_SUBJECT`; the public key is exposed only through the authenticated config endpoint. The `viewer-push-worker` reads committed VK inbound-message outbox records and sends a payload containing only the conversation/case identifiers, never the message text. Production defaults use high urgency, a 24-hour TTL, a 90-second stale-worker lease reclaim, and a persistent/vibrating native notification while the PWA is backgrounded.
 
 ### Internal probe sessions
 The repository also exposes an operator/internal-test probe slice that reuses the real support runtime without sending traffic into customer channels:
@@ -109,6 +113,7 @@ Current UI/runtime contract:
 - right panel has no separate desktop header above the messages; on mobile it keeps only that compact detail header
 - left and right panels scroll independently, and the mobile chat pane must scroll to the last message without bottom clipping
 - the backend viewer API is read-only but protected by the same auth layer when enabled
+- an enabled PWA subscription receives a native notification when the viewer is closed; an already-open viewer refreshes dialogs/messages without a duplicate system banner
 
 ## Transport notes
 

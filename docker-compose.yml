@@ -57,6 +57,18 @@ services:
       - ${SUPPORT_AGENT_RUNTIME_ROOT_HOST:-/home/tian/support-agent-runtime}/logs:/app/logs
     command: ["uv", "run", "--no-dev", "python", "-m", "app.workers.vk_main"]
 
+  viewer-push-worker:
+    build:
+      context: .
+      dockerfile: deploy/compose/worker.Dockerfile
+    restart: unless-stopped
+    env_file:
+      - ${SUPPORT_AGENT_RUNTIME_ROOT_HOST:-/home/tian/support-agent-runtime}/app.env
+    depends_on:
+      db:
+        condition: service_healthy
+    command: ["uv", "run", "--no-dev", "python", "-m", "app.workers.viewer_push_main"]
+
   db:
     image: postgres:16
     restart: unless-stopped

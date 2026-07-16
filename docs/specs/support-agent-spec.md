@@ -95,6 +95,7 @@ UI requirements:
 - React + Tailwind frontend served separately on port `3002`
 - compact sticky top header
 - header-right light/dark theme toggle
+- header-right opt-in Web Push bell; it requests browser permission only after an explicit operator click
 - icon-only theme button with tooltip/accessibility text instead of visible label
 - left panel header contains the date picker plus an icon-only refresh button for reloading the current selected day
 - on touch/mobile screens, swiping the dialog list left-to-right selects the previous day and right-to-left selects the next day; the current list follows the finger, snaps back if the gesture is incomplete, and completes its exit before the new day reloads
@@ -120,6 +121,8 @@ Backend requirements:
 - viewer-web is delivered as an installable online-first PWA under the same origin, with manifest, service worker, app icons, and standalone display mode
 - the PWA caches only the static shell/assets in v1; `/api/viewer/*` data is intentionally not treated as an offline history cache
 - when the shell opens without network, it must show a clear offline/unavailable state instead of a white screen
+- when Web Push is configured on HTTPS, a closed PWA receives a native notification for a new VK user message; an open viewer refreshes the affected data without a duplicate native banner
+- push payloads must not contain customer message text; they may contain only transport-safe conversation/case identifiers
 
 ## Internal probe session slice
 

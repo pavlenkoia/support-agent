@@ -51,3 +51,21 @@ export function fetchDialogs(day) {
 export function fetchDialogMessages(conversationId, day) {
   return requestJson(`${API_PREFIX}/dialogs/${encodeURIComponent(conversationId)}/messages?day=${encodeURIComponent(day)}`)
 }
+
+export function fetchViewerPushConfig() {
+  return requestJson(`${API_PREFIX}/push/config`)
+}
+
+export function saveViewerPushSubscription(subscription) {
+  return requestJson(`${API_PREFIX}/push/subscriptions`, {
+    method: 'POST',
+    body: JSON.stringify(subscription.toJSON()),
+  })
+}
+
+export function deleteViewerPushSubscription(subscription) {
+  return requestJson(`${API_PREFIX}/push/subscriptions`, {
+    method: 'DELETE',
+    body: JSON.stringify(subscription.toJSON()),
+  })
+}

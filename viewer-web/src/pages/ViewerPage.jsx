@@ -15,7 +15,7 @@ function detectMobileViewport() {
   return window.matchMedia(MOBILE_MEDIA_QUERY).matches
 }
 
-export function ViewerPage({ onUnauthorized }) {
+export function ViewerPage({ onPushToggle, onUnauthorized, pushRefreshToken, pushStatus }) {
   const [selectedDay, setSelectedDay] = useState(formatToday)
   const [theme, setTheme] = useState(loadInitialTheme)
   const [dialogs, setDialogs] = useState([])
@@ -31,6 +31,9 @@ export function ViewerPage({ onUnauthorized }) {
   const [mobileSwipeProgress, setMobileSwipeProgress] = useState(0)
   const mobileDetailFrameRef = useRef(null)
   const mobileDetailCloseTimerRef = useRef(null)
+  const notificationConversationIdRef = useRef(
+    typeof window === 'undefined' ? null : new URLSearchParams(window.location.search).get('conversation_id'),
+  )
 
   const clearMobileDetailTimers = () => {
     if (mobileDetailFrameRef.current !== null && typeof window !== 'undefined') {
@@ -111,8 +114,13 @@ export function ViewerPage({ onUnauthorized }) {
       .then((items) => {
         if (cancelled) return
         setDialogs(items)
+        const requestedConversationId = notificationConversationIdRef.current
         const firstConversationId = items[0]?.conversation_id ?? null
-        setSelectedConversationId(firstConversationId)
+        const nextConversationId = items.some((item) => item.conversation_id === requestedConversationId)
+          ? requestedConversationId
+          : firstConversationId
+        setSelectedConversationId(nextConversationId)
+        notificationConversationIdRef.current = null
         hideMobileDetail({ immediate: true })
         if (!firstConversationId) {
           setDialogMessages(null)
@@ -137,7 +145,7 @@ export function ViewerPage({ onUnauthorized }) {
     return () => {
       cancelled = true
     }
-  }, [selectedDay, reloadToken, onUnauthorized])
+  }, [selectedDay, reloadToken, pushRefreshToken, onUnauthorized])
 
   useEffect(() => {
     if (!selectedConversationId) {
@@ -171,7 +179,7 @@ export function ViewerPage({ onUnauthorized }) {
     return () => {
       cancelled = true
     }
-  }, [selectedConversationId, selectedDay, reloadToken, onUnauthorized])
+  }, [selectedConversationId, selectedDay, reloadToken, pushRefreshToken, onUnauthorized])
 
   const activeDialog = useMemo(
     () => dialogs.find((dialog) => dialog.conversation_id === selectedConversationId) ?? null,
@@ -202,7 +210,12 @@ export function ViewerPage({ onUnauthorized }) {
         theme === 'dark' ? 'bg-slate-950 text-slate-100' : 'bg-slate-100 text-slate-900',
       ].join(' ')}
     >
-      <ViewerHeader theme={theme} onThemeToggle={() => setTheme((current) => (current === 'dark' ? 'light' : 'dark'))} />
+      <ViewerHeader
+        theme={theme}
+        onThemeToggle={() => setTheme((current) => (current === 'dark' ? 'light' : 'dark'))}
+        onPushToggle={onPushToggle}
+        pushStatus={pushStatus}
+      />
 
       <main className="mx-auto flex min-h-0 flex-1 w-full max-w-[1800px] flex-col px-0 md:px-6 md:pb-6">
         {errorText ? (

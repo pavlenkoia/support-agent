@@ -6,6 +6,8 @@ from app.models.message import Message
 from app.models.outbound_transport_send import OutboundTransportSend
 from app.models.transport_event import TransportEvent
 from app.models.user import User
+from app.models.viewer_notification_outbox import ViewerNotificationOutbox
+from app.models.viewer_push_subscription import ViewerPushSubscription
 from app.models.workflow_event import WorkflowEvent
 
 __all__ = [
@@ -18,4 +20,6 @@ __all__ = [
     "TransportEvent",
     "OutboundTransportSend",
     "ConversationTransportState",
+    "ViewerNotificationOutbox",
+    "ViewerPushSubscription",
 ]

@@ -10,6 +10,7 @@ dependencies = [
   "sqlalchemy>=2.0.41",
   "psycopg[binary]>=3.2.9",
   "alembic>=1.16.0",
+  "pywebpush>=2.0.3",
 ]
 
 [dependency-groups]

@@ -90,6 +90,14 @@ class Settings(BaseSettings):
     viewer_auth_cookie_name: str = "viewer_auth"
     viewer_auth_session_days: int = 365
     viewer_auth_cookie_secure: bool = False
+    viewer_push_enabled: bool = False
+    viewer_push_vapid_public_key: str | None = None
+    viewer_push_vapid_private_key: str | None = None
+    viewer_push_vapid_subject: str | None = None
+    viewer_push_poll_interval_seconds: int = 5
+    viewer_push_ttl_seconds: int = 86400
+    viewer_push_urgency: str = "high"
+    viewer_push_processing_lease_seconds: int = 90
 
     log_level: str = "INFO"
 

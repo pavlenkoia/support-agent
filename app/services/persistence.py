@@ -12,6 +12,9 @@ from app.models.message import Message
 from app.models.outbound_transport_send import OutboundTransportSend
 from app.models.transport_event import TransportEvent
 from app.models.workflow_event import WorkflowEvent
+from app.models.case import SupportCase
+from app.models.viewer_notification_outbox import ViewerNotificationOutbox
+from app.core.config import settings
 from app.schemas.message import InboundMessage
 
 
@@ -35,6 +38,17 @@ def persist_inbound_message(session: Session, case_id: int, payload: InboundMess
     message = Message(case_id=case_id, role="user", content=payload.text)
     session.add(message)
     session.flush()
+    if settings.viewer_push_enabled and payload.channel == "vk":
+        conversation_id = session.scalar(select(SupportCase.conversation_id).where(SupportCase.id == case_id))
+        if conversation_id is not None:
+            session.add(
+                ViewerNotificationOutbox(
+                    event_type="viewer_user_message_received",
+                    conversation_id=conversation_id,
+                    message_id=message.id,
+                )
+            )
+            session.flush()
     return message
 
 

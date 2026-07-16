@@ -2,8 +2,16 @@ import { useEffect, useState } from 'react'
 
 import { ViewerPage } from './pages/ViewerPage'
 import { ViewerLoginPage } from './components/ViewerLoginPage'
-import { ViewerAuthError, fetchViewerAuthStatus, loginToViewer } from './api/viewer'
+import {
+  ViewerAuthError,
+  deleteViewerPushSubscription,
+  fetchViewerAuthStatus,
+  fetchViewerPushConfig,
+  loginToViewer,
+  saveViewerPushSubscription,
+} from './api/viewer'
 import { applyThemeToDocument, loadInitialTheme } from './utils/theme'
+import { base64UrlToUint8Array } from './utils/web-push'
 
 function isOfflineError() {
   return typeof navigator !== 'undefined' && navigator.onLine === false
@@ -57,6 +65,9 @@ export default function App() {
   const [authError, setAuthError] = useState('')
   const [loginPending, setLoginPending] = useState(false)
   const [theme, setTheme] = useState(loadInitialTheme)
+  const [pushConfig, setPushConfig] = useState(null)
+  const [pushStatus, setPushStatus] = useState('unavailable')
+  const [pushRefreshToken, setPushRefreshToken] = useState(0)
   const isDark = theme === 'dark'
 
   useEffect(() => {
@@ -84,6 +95,79 @@ export default function App() {
       cancelled = true
     }
   }, [])
+
+  useEffect(() => {
+    if (authState !== 'authenticated') return undefined
+    let cancelled = false
+    const handleServiceWorkerMessage = (event) => {
+      if (event.data?.type === 'viewer_user_message' || event.data?.type === 'viewer_notification_click') {
+        setPushRefreshToken((current) => current + 1)
+      }
+    }
+
+    if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) {
+      setPushStatus('unsupported')
+      return undefined
+    }
+    navigator.serviceWorker.addEventListener('message', handleServiceWorkerMessage)
+    const syncPushSubscription = async () => {
+      try {
+        const registration = await navigator.serviceWorker.ready
+        const subscription = await registration.pushManager.getSubscription()
+        if (!cancelled) setPushStatus(subscription ? 'enabled' : 'disabled')
+      } catch {
+        if (!cancelled) setPushStatus('unavailable')
+      }
+    }
+    const syncAfterPermissionDialog = () => {
+      if (!document.hidden) void syncPushSubscription()
+    }
+    fetchViewerPushConfig()
+      .then((config) => {
+        if (cancelled) return
+        setPushConfig(config)
+        return syncPushSubscription()
+      })
+      .catch(() => {
+        if (!cancelled) setPushStatus('unavailable')
+      })
+    window.addEventListener('focus', syncAfterPermissionDialog)
+    document.addEventListener('visibilitychange', syncAfterPermissionDialog)
+    return () => {
+      cancelled = true
+      navigator.serviceWorker.removeEventListener('message', handleServiceWorkerMessage)
+      window.removeEventListener('focus', syncAfterPermissionDialog)
+      document.removeEventListener('visibilitychange', syncAfterPermissionDialog)
+    }
+  }, [authState])
+
+  const handlePushToggle = async () => {
+    if (!pushConfig || pushStatus === 'unsupported' || pushStatus === 'unavailable') return
+    setPushStatus('pending')
+    try {
+      const registration = await navigator.serviceWorker.ready
+      const existing = await registration.pushManager.getSubscription()
+      if (existing) {
+        await deleteViewerPushSubscription(existing)
+        await existing.unsubscribe()
+        setPushStatus('disabled')
+        return
+      }
+      const permission = await Notification.requestPermission()
+      if (permission !== 'granted') {
+        setPushStatus('denied')
+        return
+      }
+      const subscription = await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: base64UrlToUint8Array(pushConfig.public_key),
+      })
+      await saveViewerPushSubscription(subscription)
+      setPushStatus('enabled')
+    } catch {
+      setPushStatus('disabled')
+    }
+  }
 
   const handleLogin = async (key) => {
     setLoginPending(true)
@@ -155,5 +239,12 @@ export default function App() {
     return <ViewerLoginPage isSubmitting={loginPending} errorText={authError} onSubmit={handleLogin} theme={theme} />
   }
 
-  return <ViewerPage onUnauthorized={() => setAuthState('unauthenticated')} />
+  return (
+    <ViewerPage
+      onPushToggle={handlePushToggle}
+      onUnauthorized={() => setAuthState('unauthenticated')}
+      pushRefreshToken={pushRefreshToken}
+      pushStatus={pushStatus}
+    />
+  )
 }
