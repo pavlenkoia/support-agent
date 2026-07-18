@@ -9,6 +9,7 @@ from sqlalchemy import select, text
 from app.core.db import Base, make_session_factory
 from app.models.conversation import Conversation
 from app.models.conversation_transport_state import ConversationTransportState
+from app.models.message import Message
 from app.models.outbound_transport_send import OutboundTransportSend
 from app.models.user import User
 from app.services.persistence import activate_human_override, get_or_create_conversation_transport_state
@@ -233,6 +234,26 @@ def test_vk_gateway_reconciles_bot_message_reply_without_override(tmp_path: Path
         assert state.human_override_until is None
 
 
+def test_vk_gateway_persists_unmatched_admin_reply_for_viewer(tmp_path: Path) -> None:
+    service, session_factory = make_service(tmp_path)
+    event_timestamp = 1780000100
+
+    result = service.handle_event(
+        {
+            "type": "message_reply",
+            "group_id": 55,
+            "object": {"message": {"id": 7001, "peer_id": 2002, "text": "Отвечу сам", "date": event_timestamp}},
+        }
+    )
+
+    assert result["sent_by"] == "admin"
+    with session_factory() as session:
+        messages = session.scalars(select(Message).order_by(Message.id)).all()
+        assert [(message.role, message.content) for message in messages] == [("human", "Отвечу сам")]
+        assert messages[0].created_at.replace(tzinfo=UTC) == datetime.fromtimestamp(event_timestamp, tz=UTC)
+        assert messages[0].support_case.conversation.external_id == "vk:2002"
+
+
 def test_vk_gateway_unmatched_admin_reply_activates_override_and_suppresses_inbound(tmp_path: Path) -> None:
     sender = RecordingVKSender()
     routing = StubRouting()
@@ -259,8 +280,11 @@ def test_vk_gateway_unmatched_admin_reply_activates_override_and_suppresses_inbo
     assert len(routing.handled_payloads) == 0
 
     with session_factory() as session:
-        messages_count = session.execute(text("select count(*) from messages")).scalar_one()
-        assert messages_count == 1
+        messages = session.scalars(select(Message).order_by(Message.id)).all()
+        assert [(message.role, message.content) for message in messages] == [
+            ("human", "Отвечу сам"),
+            ("user", "Тогда уточню"),
+        ]
         state = session.scalar(select(ConversationTransportState))
         assert state is not None
         assert state.human_override_until is not None

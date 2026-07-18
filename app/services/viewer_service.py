@@ -97,7 +97,13 @@ class ViewerService:
                     id=str(message.id),
                     sent_at=self._normalize_dt(message.created_at),
                     direction="inbound" if message.role == "user" else "outbound",
-                    author_name=(meta.display_name or meta.external_chat_id) if message.role == "user" else "Support Agent",
+                    author_name=(
+                        (meta.display_name or meta.external_chat_id)
+                        if message.role == "user"
+                        else "Оператор VK"
+                        if message.role == "human"
+                        else "Support Agent"
+                    ),
                     text=message.content,
                 )
                 for message in messages

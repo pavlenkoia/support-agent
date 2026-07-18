@@ -135,6 +135,37 @@ def test_viewer_messages_returns_only_selected_day_messages(tmp_path, monkeypatc
     ]
 
 
+def test_viewer_messages_labels_human_vk_reply_as_operator(tmp_path, monkeypatch) -> None:
+    reset_test_state()
+    configure_viewer_auth(monkeypatch, enabled=False)
+    service = make_viewer_service(tmp_path)
+    with service.session_factory() as session:
+        session.add(
+            Message(
+                case_id=1,
+                role="human",
+                content="Отвечу сам",
+                created_at=datetime(2026, 6, 30, 9, 17, tzinfo=UTC),
+            )
+        )
+        session.commit()
+    app.dependency_overrides[get_viewer_service] = lambda: service
+    try:
+        response = client.get("/api/viewer/dialogs/vk:123/messages", params={"day": "2026-06-30"})
+    finally:
+        reset_test_state()
+
+    assert response.status_code == 200
+    last_message = response.json()["messages"][-1]
+    assert last_message["id"].isdigit()
+    assert {key: value for key, value in last_message.items() if key != "id"} == {
+        "sent_at": "2026-06-30T09:17:00Z",
+        "direction": "outbound",
+        "author_name": "Оператор VK",
+        "text": "Отвечу сам",
+    }
+
+
 def test_viewer_messages_returns_empty_list_for_day_without_messages(tmp_path, monkeypatch) -> None:
     reset_test_state()
     configure_viewer_auth(monkeypatch, enabled=False)

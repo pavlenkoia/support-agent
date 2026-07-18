@@ -130,7 +130,7 @@ Current UI/runtime contract:
 
 ### VK manual-admin override rule
 - if a `message_reply` matches a recent bot send, it is reconciled as `sent_by=bot`
-- if a `message_reply` does not match a recent bot send, it is treated as a live admin reply
+- if a `message_reply` does not match a recent bot send, it is treated as a live admin reply, persisted in dialog history as `human`, and shown in viewer-web as `Оператор VK`
 - a live admin reply activates silence for 1 hour from the last such reply
 - inbound messages during that window are still stored, but the bot does not answer
 - the worker re-checks override state immediately before `messages.send` to avoid stale auto-replies racing a human admin

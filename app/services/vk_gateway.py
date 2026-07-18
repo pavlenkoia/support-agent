@@ -21,6 +21,7 @@ from app.services.persistence import (
     is_override_active,
     mark_transport_event_failed,
     mark_transport_event_processed,
+    persist_human_outbound_message,
     persist_inbound_message,
     persist_outbound_transport_send,
     persist_transport_event,
@@ -255,6 +256,12 @@ class VKGatewayService:
                     "matched_send_id": matched.id,
                 }
 
+            persist_human_outbound_message(
+                session,
+                conversation_id=conversation.id,
+                text=text,
+                sent_at=event_time,
+            )
             activate_human_override(
                 session,
                 state,

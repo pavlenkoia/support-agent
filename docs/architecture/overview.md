@@ -138,7 +138,7 @@ Current VK slice boundaries:
 - no history backfill is required for v1
 
 Manual-admin override rule:
-- unmatched `message_reply` is treated as a live admin reply
+- unmatched `message_reply` is treated as a live admin reply, persisted as a `human` message, and rendered in viewer-web with the author label `Оператор VK`
 - that reply activates silence for 1 hour from the last admin message
 - inbound user messages are still persisted during silence
 - before a bot reply is actually sent, the worker re-checks override state to prevent a stale race with a human admin reply

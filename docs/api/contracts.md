@@ -149,7 +149,8 @@ These are internal persistence contracts rather than public HTTP endpoints, but 
 - raw transport events are journaled with a dedupe key and processing status
 - outbound transport sends are stored for later reconciliation against transport-side activity events
 - VK conversation transport state stores `last_bot_reply_at`, `last_admin_reply_at`, and `human_override_until`
-- VK `message_reply` is classified as either bot-originated (reconciled) or admin-originated (override activation)
+- VK `message_reply` is classified as either bot-originated (reconciled) or admin-originated (persisted as a `human` dialog message plus override activation)
+- viewer message items render `human` messages as outbound with `author_name: "Оператор VK"`
 - internal probe/test sessions are marked explicitly on both `conversations` and `support_cases` with:
   - `is_test`
   - `source`

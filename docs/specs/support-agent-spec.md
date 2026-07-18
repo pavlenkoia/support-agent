@@ -76,7 +76,7 @@ Example class of task:
 - `message_reply` is the observed outgoing community activity event
 - direct messages to the community are in scope for v1
 - group chats / besedy and history backfill are out of scope for v1
-- unmatched `message_reply` activates a 1-hour human override window
+- unmatched `message_reply` is persisted in the dialog as a human/operator outbound message and activates a 1-hour human override window
 - inbound messages during override are still persisted, but no automatic reply is sent
 - transient long-poll transport failures reported as `transport_error:*` must not crash the worker loop; they should degrade to an empty poll / retryable condition
 - the `vk-worker` deployment must use automatic container restart (`restart: unless-stopped` or an equivalent supervisor policy)

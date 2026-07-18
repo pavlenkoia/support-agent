@@ -59,6 +59,34 @@ def persist_outbound_message(session: Session, case_id: int, text: str, *, role:
     return message
 
 
+def persist_human_outbound_message(
+    session: Session,
+    *,
+    conversation_id: int,
+    text: str,
+    sent_at: datetime | None = None,
+) -> Message:
+    support_case = session.scalar(
+        select(SupportCase)
+        .where(SupportCase.conversation_id == conversation_id)
+        .order_by(SupportCase.id.desc())
+    )
+    if support_case is None:
+        support_case = SupportCase(conversation_id=conversation_id, status="open", route_mode="human_override")
+        session.add(support_case)
+        session.flush()
+
+    message = Message(
+        case_id=support_case.id,
+        role="human",
+        content=str(text or "").strip(),
+        created_at=normalize_timestamp(sent_at),
+    )
+    session.add(message)
+    session.flush()
+    return message
+
+
 def persist_workflow_event(
     session: Session,
     case_id: int,
