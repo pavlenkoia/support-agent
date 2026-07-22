@@ -104,6 +104,42 @@ def test_direct_llm_runtime_error_returns_grounded_kb_answer(monkeypatch) -> Non
     assert result["reason"] == "prompt_runtime_grounded_fallback:RuntimeError"
 
 
+def test_direct_llm_runtime_error_uses_only_kb_grounded_facts(monkeypatch) -> None:
+    class BrokenClient:
+        def generate(self, **kwargs):
+            raise RuntimeError("IncompleteRead")
+
+    monkeypatch.setattr(direct_llm_module.settings, "direct_llm_provider", "mistral")
+    result = DirectLLMService(client=BrokenClient()).respond(
+        "Добрый день, можно ли записаться на самостоятельный прыжок",
+        {
+            "kb_status": "found",
+            "grounding_status": "ready",
+            "answer_context": [
+                {
+                    "text": (
+                        "Самостоятельный прыжок требует подготовки 3–4 часа в день прыжка. "
+                        "Если клиент спрашивает, можно ли прыгнуть завтра, нужно уточнить анонс. "
+                        "Прыжки обычно проходят по выходным."
+                    ),
+                    "source_ref": "skydiving-services.md",
+                }
+            ],
+            "grounded_facts": [
+                "На самостоятельный прыжок можно записаться по телефону +7 (351) 214-30-30, добавочный 1.",
+                "Обычно запись проходит в пятницу после 12:00 на субботу и в субботу после 12:00 на воскресенье.",
+            ],
+            "answer_basis": "Запись на самостоятельный прыжок: телефон и время записи.",
+        },
+    )
+
+    assert result["route"] == "answer"
+    assert "+7 (351) 214-30-30" in result["response_text"]
+    assert "пятницу после 12:00" in result["response_text"]
+    assert "3–4 часа" not in result["response_text"]
+    assert "прыгнуть завтра" not in result["response_text"]
+
+
 def test_tool_runtime_resolves_month_range_to_weekend_dates(monkeypatch) -> None:
     monkeypatch.setattr(tool_runtime_module, "datetime", FrozenDateTime)
     service = ToolRuntimeService()

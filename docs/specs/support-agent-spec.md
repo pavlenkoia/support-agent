@@ -57,7 +57,7 @@ Example class of task:
 - Transient/network/5xx failures should retry on the current key; auth/quota/key-specific failures should fail over to the next key when available.
 - The runtime must expose non-secret failover observability: warning logs on key-slot switches plus `api_key_index` / `used_failover` / `failover_count` / `failover_events` in LLM trace metadata.
 - The KB agent is the stronger reasoning step and should be allowed to use the stronger model tier than the final answering step.
-- If the planner or final answer step fails after KB retrieval succeeded, the runtime should prefer a grounded degradation path over a template refusal whenever the retrieved KB still supports a safe short answer.
+- If the planner or final answer step fails after KB retrieval succeeded, the runtime should prefer a grounded degradation path over a template refusal whenever the KB agent's extracted `grounded_facts` or `answer_basis` support a safe short answer. It must not select sentences from arbitrary loaded KB pages.
 - Deterministic degradations must be based on retrieved facts generically, not on one-off question-specific hardcodes.
 - The KB agent runtime must support feature-flagged hardening controls for structured-output reliability:
   - deterministic navigation over wiki page cards

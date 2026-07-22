@@ -135,20 +135,23 @@ class DirectLLMService:
         except Exception as exc:
             self._record_llm_call("final_response")
             grounded_fallback = None
+            grounded_context = self._grounded_fallback_context(kb_packet)
+            fallback_context = grounded_context or kb_packet.get("answer_context") or []
             if (
                 kb_packet.get("kb_status") == "found"
                 and kb_packet.get("grounding_status") == "ready"
-                and kb_packet.get("answer_context")
+                and fallback_context
             ):
                 grounded_fallback = self._fallback_answer_from_grounding(
                     text,
-                    kb_packet["answer_context"],
-                    kb_hits=kb_packet["answer_context"],
+                    fallback_context,
+                    kb_hits=fallback_context,
                     conversation_context={
                         **(conversation_context or {}),
                         "tool_observations": tool_observations,
                     },
                     reason=f"prompt_runtime_grounded_fallback:{type(exc).__name__}",
+                    preserve_context_order=bool(grounded_context),
                 )
             if grounded_fallback is not None:
                 return {
@@ -169,6 +172,20 @@ class DirectLLMService:
         normalized = self._normalize_prompt_reply(parsed, fallback_text=fallback_text)
         normalized["llm_trace"] = list(self._active_llm_trace)
         return normalized
+
+    @staticmethod
+    def _grounded_fallback_context(kb_packet: dict[str, Any]) -> list[dict[str, str]]:
+        facts = kb_packet.get("grounded_facts")
+        if isinstance(facts, list):
+            context = [
+                {"text": fact.strip()}
+                for fact in facts
+                if isinstance(fact, str) and fact.strip()
+            ]
+            if context:
+                return context
+        answer_basis = str(kb_packet.get("answer_basis") or "").strip()
+        return [{"text": answer_basis}] if answer_basis else []
 
     def respond_social(self, text: str, *, conversation_context: dict | None = None) -> dict:
         """Finish a planner-approved social turn without KB retrieval or cannot_answer UX."""
@@ -940,6 +957,7 @@ class DirectLLMService:
         kb_hits: list[dict],
         conversation_context: dict | None,
         reason: str,
+        preserve_context_order: bool = False,
     ) -> dict | None:
         tool_observations = []
         if isinstance(conversation_context, dict):
@@ -991,11 +1009,14 @@ class DirectLLMService:
                 "reason": reason,
             }
 
-        response_text = self._compose_grounded_fallback_answer(
-            text,
-            answer_context,
-            conversation_context=conversation_context,
-        )
+        if preserve_context_order:
+            response_text = " ".join(self._collect_grounding_sentences(answer_context)[:3]).strip()
+        else:
+            response_text = self._compose_grounded_fallback_answer(
+                text,
+                answer_context,
+                conversation_context=conversation_context,
+            )
         if not response_text:
             return None
 
