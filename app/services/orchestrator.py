@@ -49,6 +49,17 @@ class OrchestratorService:
             planner_action = str(planner.get("action") or "cannot_answer")
             planner_trace.append({"iteration": iteration, **planner})
 
+            if planner_action == "social_reply":
+                final_reply = self._finalize_social_reply(text, context)
+                loop_trace.append(
+                    {
+                        "iteration": iteration,
+                        "action": "social_reply",
+                        "reason": final_reply.get("reason", "planner_social_reply"),
+                    }
+                )
+                break
+
             if retrieval.get("kb_status") != "found" and planner_action not in {"read_kb", "use_tool"}:
                 planner_action = "read_kb"
                 loop_trace.append(
@@ -277,6 +288,17 @@ class OrchestratorService:
             "response_text": str(legacy.get("response_text") or ""),
             "confidence": float(legacy.get("confidence", 0.0)),
             "reason": str(legacy.get("reason") or "legacy_answer"),
+        }
+
+    def _finalize_social_reply(self, text: str, context: dict) -> dict[str, Any]:
+        if hasattr(self.direct_llm, "respond_social"):
+            return self.direct_llm.respond_social(text, conversation_context=context)
+        return {
+            "route": "answer",
+            "response_text": "Пожалуйста!",
+            "confidence": 1.0,
+            "reason": "social_reply_legacy_fallback",
+            "llm_trace": [],
         }
 
     def _ensure_kb_result(

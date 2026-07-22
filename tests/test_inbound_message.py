@@ -9,9 +9,11 @@ from app.core.db import Base, make_session_factory
 from app.main import app
 from app.schemas.message import InboundMessage
 from app.services.direct_llm import DirectLLMService
+from app.services.orchestrator import OrchestratorService
 from app.services.policy import PolicyService
-from app.services.routing import RoutingService
 from app.services.system_prompt import SystemPromptService
+from app.services.tool_runtime import ToolRuntimeService
+from app.services.routing import RoutingService
 
 
 client = TestClient(app)
@@ -401,3 +403,56 @@ def test_direct_llm_prefers_answer_from_kb_over_clarification_when_kb_is_already
 
     assert result["action"] == "answer_from_kb"
     assert result["reason"] == "too_broad_after_kb"
+
+
+def test_social_reply_bypasses_kb_and_finishes_as_customer_answer() -> None:
+    class SocialDirectLLM:
+        def assess_request(self, *args, **kwargs):
+            return {"action": "social_reply", "confidence": 0.99, "reason": "short_acknowledgement", "llm_trace": []}
+
+        def respond_social(self, text: str, *, conversation_context: dict | None = None) -> dict:
+            assert text == "Спасибо)"
+            assert conversation_context is not None
+            return {"route": "answer", "response_text": "Пожалуйста!", "confidence": 0.99, "reason": "social_reply", "llm_trace": []}
+
+    class NoKBRetrieval:
+        def retrieve(self, *args, **kwargs):
+            raise AssertionError("social_reply must not retrieve KB")
+
+    class NoKBReader:
+        def read(self, *args, **kwargs):
+            raise AssertionError("social_reply must not call KB agent")
+
+    orchestrator = OrchestratorService(
+        retrieval=NoKBRetrieval(),
+        kb_agent=NoKBReader(),
+        direct_llm=SocialDirectLLM(),
+        policy=PolicyService(),
+        tool_runtime=ToolRuntimeService(),
+    )
+
+    result = orchestrator.run(
+        text="Спасибо)",
+        context={"recent_messages": [{"role": "user", "content": "Спасибо)"}]},
+        knowledge_backend="filesystem",
+        knowledge_root="/unused",
+        knowledge_query="Спасибо)",
+    )
+
+    assert result["route"]["route"] == "answer"
+    assert result["route"]["reply"]["response_text"] == "Пожалуйста!"
+    assert result["retrieval"]["kb_status"] == "not_started"
+    assert result["kb_result"] == {}
+    assert result["response_strategy"]["steps"] == ["social_reply"]
+
+
+def test_social_reply_runtime_error_uses_polite_answer_not_cannot_answer() -> None:
+    class BrokenSocialClient:
+        def generate(self, **kwargs):
+            raise RuntimeError("IncompleteRead")
+
+    result = DirectLLMService(client=BrokenSocialClient()).respond_social("Благодарю")
+
+    assert result["route"] == "answer"
+    assert result["response_text"] == "Пожалуйста!"
+    assert result["reason"] == "social_llm_error:RuntimeError"

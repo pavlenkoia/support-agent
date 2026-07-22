@@ -92,7 +92,8 @@ The application-level outcomes are now:
 ## Reliability and degradation rules
 
 1. **Transient provider failures are retried** with bounded timeout/backoff settings at the LLM client layer.
-2. **Key-specific provider failures can fail over** at the same client layer:
+2. **Planner-approved social replies bypass KB work**. When the planner selects `social_reply` for a greeting or short acknowledgement (for example, thanks), the loop finalizes a brief customer-facing answer immediately: it must not inject `mandatory_kb_before_customer_reply`, invoke retrieval/KB agent, or degrade to the `cannot_answer` template. If the social-reply model call fails, a neutral polite answer is returned instead.
+3. **Key-specific provider failures can fail over** at the same client layer:
    - `DIRECT_LLM_API_KEYS`, `KB_AGENT_API_KEYS`, and `SUMMARY_LLM_API_KEYS` accept ordered CSV key pools
    - transient/network/5xx failures retry on the current key
    - auth/quota/key-specific failures fail over to the next key slot when available

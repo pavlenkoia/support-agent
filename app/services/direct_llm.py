@@ -145,6 +145,28 @@ class DirectLLMService:
         normalized = self._normalize_prompt_reply(parsed, fallback_text=fallback_text)
         normalized["llm_trace"] = list(self._active_llm_trace)
         return normalized
+
+    def respond_social(self, text: str, *, conversation_context: dict | None = None) -> dict:
+        """Finish a planner-approved social turn without KB retrieval or cannot_answer UX."""
+        self._reset_llm_trace()
+        social = self._answer_social_turn(text, conversation_context=conversation_context)
+        response_text = self._sanitize_customer_text(str(social.get("response_text") or ""))
+        if not response_text or self._contains_forbidden_output(response_text):
+            return {
+                "route": "answer",
+                "response_text": "Пожалуйста!",
+                "confidence": 1.0,
+                "reason": str(social.get("reason") or "social_reply_runtime_fallback"),
+                "llm_trace": list(self._active_llm_trace),
+            }
+        return {
+            "route": "answer",
+            "response_text": response_text,
+            "confidence": max(float(social.get("confidence") or 0.0), 0.7),
+            "reason": str(social.get("reason") or "social_reply"),
+            "llm_trace": list(self._active_llm_trace),
+        }
+
     def _normalize_prompt_reply(self, parsed: dict[str, Any], *, fallback_text: str) -> dict:
         route = str(parsed.get("route") or "cannot_answer").strip()
         if route not in {"answer", "cannot_answer", "out_of_scope", "clarification_requested"}:
@@ -838,8 +860,10 @@ class DirectLLMService:
                 temperature=max(self.temperature, 0.35),
                 response_format={"type": "json_object"},
             )
+            self._record_llm_call("social_reply")
             parsed: dict[str, Any] = json.loads(raw)
         except Exception as exc:
+            self._record_llm_call("social_reply")
             return {
                 "direct_status": "insufficient_confidence",
                 "response_text": "",

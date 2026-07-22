@@ -9,30 +9,32 @@ It is not a ticket router and not an escalation-first bot.
 ## Main invariants
 
 1. The agent must stay within an explicit domain scope from the external profile.
-2. The agent must prefer grounded answers from KB and runtime tools.
+2. The agent must prefer grounded answers from KB and runtime tools for substantive requests.
 3. Substantive KB reasoning must pass through a dedicated KB agent that reads the compiled wiki selectively rather than treating lexical snippets as the final reasoning surface.
 4. The customer-facing support agent and the KB agent must use separate external prompt files.
 5. The agent must not fabricate facts when KB/tool evidence is missing.
-6. If the answer cannot be grounded, the final outcome must be `cannot_answer`.
-7. If the request is outside the domain, the final outcome must be `out_of_scope`.
-8. If a critical ambiguity blocks a safe answer, the final outcome must be `clarification_requested`.
-9. The main runtime flow must not silently switch into human or Hermes escalation.
-10. A transient LLM-provider failure must not discard already gathered KB facts when a short grounded fallback answer is still possible.
-11. Broad but clearly in-domain openers should prefer a safe overview answer over unnecessary clarification.
-12. Channel-specific transport workers must reuse the same application runtime rather than creating a second support agent.
-13. VK transport-level manual-admin intervention must silence auto-replies for 1 hour from the last unmatched `message_reply`.
-14. Transport-level override must be re-checked immediately before a VK reply is sent.
+6. A planner-approved `social_reply` (greeting, acknowledgement, thanks) is not a substantive request: it must finish immediately without retrieval or KB-agent work and always return a short polite `answer`, including when its model call fails.
+7. If a substantive answer cannot be grounded, the final outcome must be `cannot_answer`.
+8. If the request is outside the domain, the final outcome must be `out_of_scope`.
+9. If a critical ambiguity blocks a safe answer, the final outcome must be `clarification_requested`.
+10. The main runtime flow must not silently switch into human or Hermes escalation.
+11. A transient LLM-provider failure must not discard already gathered KB facts when a short grounded fallback answer is still possible.
+12. Broad but clearly in-domain openers should prefer a safe overview answer over unnecessary clarification.
+13. Channel-specific transport workers must reuse the same application runtime rather than creating a second support agent.
+14. VK transport-level manual-admin intervention must silence auto-replies for 1 hour from the last unmatched `message_reply`.
+15. Transport-level override must be re-checked immediately before a VK reply is sent.
 
 ## Decision loop
 
 Per inbound turn:
 1. classify social vs substantive turn
-2. for substantive turns, assess the next action
-3. optionally gather runtime tool observations
-4. optionally gather KB facts
-5. run the dedicated KB agent over the compiled wiki material already gathered
-6. re-assess / finalize
-7. emit one of the allowed outcomes
+2. for a planner-approved social turn, finalize a brief polite answer without KB lookup
+3. for substantive turns, assess the next action
+4. optionally gather runtime tool observations
+5. optionally gather KB facts
+6. run the dedicated KB agent over the compiled wiki material already gathered
+7. re-assess / finalize
+8. emit one of the allowed outcomes
 
 ## Tool-aware reasoning
 
