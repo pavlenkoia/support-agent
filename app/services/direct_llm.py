@@ -134,6 +134,30 @@ class DirectLLMService:
             parsed: dict[str, Any] = json.loads(raw)
         except Exception as exc:
             self._record_llm_call("final_response")
+            grounded_fallback = None
+            if (
+                kb_packet.get("kb_status") == "found"
+                and kb_packet.get("grounding_status") == "ready"
+                and kb_packet.get("answer_context")
+            ):
+                grounded_fallback = self._fallback_answer_from_grounding(
+                    text,
+                    kb_packet["answer_context"],
+                    kb_hits=kb_packet["answer_context"],
+                    conversation_context={
+                        **(conversation_context or {}),
+                        "tool_observations": tool_observations,
+                    },
+                    reason=f"prompt_runtime_grounded_fallback:{type(exc).__name__}",
+                )
+            if grounded_fallback is not None:
+                return {
+                    "route": "answer",
+                    "response_text": grounded_fallback["response_text"],
+                    "confidence": grounded_fallback["confidence"],
+                    "reason": grounded_fallback["reason"],
+                    "llm_trace": list(self._active_llm_trace),
+                }
             return {
                 "route": "cannot_answer",
                 "response_text": fallback_text,

@@ -4,6 +4,7 @@ import json
 import logging
 import socket
 import time
+from http.client import IncompleteRead
 from typing import Any
 from urllib import error, request
 
@@ -172,7 +173,7 @@ class OpenAICompatibleClient(BaseLLMClient):
                         }
                     )
                     raise RuntimeError(f"LLM HTTP {exc.code}: {detail}") from exc
-                except (error.URLError, TimeoutError, socket.timeout) as exc:  # pragma: no cover - network error path
+                except (error.URLError, TimeoutError, socket.timeout, IncompleteRead) as exc:  # pragma: no cover - network error path
                     if retry_attempt < self.max_retries:
                         last_error = RuntimeError(f"LLM connection error: {exc}")
                         time.sleep(self.retry_backoff_seconds * (2 ** retry_attempt or 1))

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
+from app.services import direct_llm as direct_llm_module
 from app.services.direct_llm import DirectLLMService
 from app.services import tool_runtime as tool_runtime_module
 from app.services.tool_runtime import ToolRuntimeService
@@ -73,6 +74,34 @@ def test_direct_llm_grounded_fallback_ignores_weekend_kb_for_office_question() -
     assert result is not None
     assert "Прыжки обычно проходят по выходным" not in result["response_text"]
     assert "офисе по будням" in result["response_text"]
+
+
+def test_direct_llm_runtime_error_returns_grounded_kb_answer(monkeypatch) -> None:
+    class BrokenClient:
+        def generate(self, **kwargs):
+            raise RuntimeError("IncompleteRead")
+
+    monkeypatch.setattr(direct_llm_module.settings, "direct_llm_provider", "mistral")
+    result = DirectLLMService(client=BrokenClient()).respond(
+        "Можно ли записаться на самостоятельный прыжок?",
+        {
+            "kb_status": "found",
+            "grounding_status": "ready",
+            "answer_context": [
+                {
+                    "text": (
+                        "На самостоятельный прыжок можно записаться по телефону +7 (351) 214-30-30, "
+                        "добавочный 1. Прыжки обычно проходят по выходным; точную дату уточняйте по телефону."
+                    ),
+                    "source_ref": "contacts.md",
+                }
+            ],
+        },
+    )
+
+    assert result["route"] == "answer"
+    assert "+7 (351) 214-30-30" in result["response_text"]
+    assert result["reason"] == "prompt_runtime_grounded_fallback:RuntimeError"
 
 
 def test_tool_runtime_resolves_month_range_to_weekend_dates(monkeypatch) -> None:

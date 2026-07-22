@@ -52,7 +52,7 @@ Example class of task:
 
 ## Provider failure handling
 
-- LLM clients must support bounded timeout / retry / backoff settings for transient network or upstream-provider failures.
+- LLM clients must support bounded timeout / retry / backoff settings for transient network or upstream-provider failures, including an incomplete HTTP response body (`IncompleteRead`).
 - Mistral/openai-compatible roles must also support ordered multi-key pools via `DIRECT_LLM_API_KEYS`, `KB_AGENT_API_KEYS`, and `SUMMARY_LLM_API_KEYS` with backward-compatible single-key aliases.
 - Transient/network/5xx failures should retry on the current key; auth/quota/key-specific failures should fail over to the next key when available.
 - The runtime must expose non-secret failover observability: warning logs on key-slot switches plus `api_key_index` / `used_failover` / `failover_count` / `failover_events` in LLM trace metadata.
