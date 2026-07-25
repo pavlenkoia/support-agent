@@ -91,8 +91,8 @@ The application-level outcomes are now:
 
 ## Reliability and degradation rules
 
-1. **Transient provider failures are retried** with bounded timeout/backoff settings at the LLM client layer, including incomplete HTTP response bodies (`IncompleteRead`).
-2. **Planner-approved social replies bypass KB work**. When the planner selects `social_reply` for a greeting or short acknowledgement (for example, thanks), the loop finalizes a brief customer-facing answer immediately: it must not inject `mandatory_kb_before_customer_reply`, invoke retrieval/KB agent, or degrade to the `cannot_answer` template. If the social-reply model call fails, a neutral polite answer is returned instead.
+1. **Transient provider failures are retried** with a bounded total deadline at the LLM client layer, including incomplete HTTP response bodies (`IncompleteRead`). The direct/KB defaults are four total attempts (initial + three retries), exponential jittered pauses based on 0.75 seconds, and a 45-second total retry deadline.
+2. **Planner-approved terminal actions do not enter final LLM generation.** `social_reply` finalizes a brief customer-facing answer without retrieval/KB work; a social-model failure returns a neutral polite answer. `out_of_scope` finalizes through the policy template without retrieval, KB-agent work, or a final answer-model call. Neither action may be replaced by `cannot_answer` because of an `IncompleteRead` in an unrelated final-generation path.
 3. **Key-specific provider failures can fail over** at the same client layer:
    - `DIRECT_LLM_API_KEYS`, `KB_AGENT_API_KEYS`, and `SUMMARY_LLM_API_KEYS` accept ordered CSV key pools
    - transient/network/5xx failures retry on the current key

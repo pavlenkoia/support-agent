@@ -13,6 +13,7 @@ def get_llm_client(
     timeout_seconds: int = 30,
     max_retries: int = 0,
     retry_backoff_seconds: float = 0.0,
+    retry_deadline_seconds: float | None = None,
 ) -> BaseLLMClient:
     normalized_provider = provider.strip().lower()
     if normalized_provider == "stub":
@@ -34,6 +35,7 @@ def get_llm_client(
             timeout_seconds=timeout_seconds,
             max_retries=max_retries,
             retry_backoff_seconds=retry_backoff_seconds,
+            retry_deadline_seconds=retry_deadline_seconds,
         )
 
     raise ValueError(f"Unsupported LLM provider: {provider}")

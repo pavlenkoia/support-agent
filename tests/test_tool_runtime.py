@@ -104,6 +104,34 @@ def test_direct_llm_runtime_error_returns_grounded_kb_answer(monkeypatch) -> Non
     assert result["reason"] == "prompt_runtime_grounded_fallback:RuntimeError"
 
 
+def test_direct_llm_ready_grounding_never_degrades_to_cannot_answer_when_secondary_fallback_fails(monkeypatch) -> None:
+    class BrokenClient:
+        def generate(self, **kwargs):
+            raise RuntimeError("IncompleteRead")
+
+    monkeypatch.setattr(direct_llm_module.settings, "direct_llm_provider", "mistral")
+    service = DirectLLMService(client=BrokenClient())
+    monkeypatch.setattr(service, "_fallback_answer_from_grounding", lambda *args, **kwargs: None)
+
+    result = service.respond(
+        "Можно ли в тандеме при весе 120 кг?",
+        {
+            "kb_status": "found",
+            "grounding_status": "ready",
+            "grounded_facts": [
+                "Максимальный вес для тандем-прыжка — до 85 кг.",
+                "При превышении веса необходимо уточнить возможность участия в офисе.",
+            ],
+            "answer_basis": "При весе 120 кг тандем-прыжок невозможен.",
+        },
+    )
+
+    assert result["route"] == "answer"
+    assert "до 85 кг" in result["response_text"]
+    assert result["reason"] == "prompt_runtime_grounded_fallback:RuntimeError"
+    assert any(item.get("step") == "grounded_fallback" for item in result["llm_trace"])
+
+
 def test_direct_llm_runtime_error_uses_only_kb_grounded_facts(monkeypatch) -> None:
     class BrokenClient:
         def generate(self, **kwargs):

@@ -31,8 +31,9 @@ class Settings(BaseSettings):
     direct_llm_model: str = "stub"
     direct_llm_temperature: float = 0.0
     direct_llm_timeout_seconds: int = 45
-    direct_llm_max_retries: int = 2
-    direct_llm_retry_backoff_seconds: float = 1.0
+    direct_llm_max_retries: int = 3
+    direct_llm_retry_backoff_seconds: float = 0.75
+    direct_llm_retry_deadline_seconds: float = 45.0
 
     kb_agent_provider: str | None = None
     kb_agent_base_url: str | None = None
@@ -43,6 +44,7 @@ class Settings(BaseSettings):
     kb_agent_timeout_seconds: int | None = None
     kb_agent_max_retries: int | None = None
     kb_agent_retry_backoff_seconds: float | None = None
+    kb_agent_retry_deadline_seconds: float | None = None
     kb_agent_skip_coverage_review: bool = False
     kb_agent_deterministic_navigation: bool = False
     kb_agent_minimal_extraction_schema: bool = False
@@ -150,6 +152,8 @@ class Settings(BaseSettings):
             self.kb_agent_max_retries = self.direct_llm_max_retries
         if self.kb_agent_retry_backoff_seconds is None:
             self.kb_agent_retry_backoff_seconds = self.direct_llm_retry_backoff_seconds
+        if self.kb_agent_retry_deadline_seconds is None:
+            self.kb_agent_retry_deadline_seconds = self.direct_llm_retry_deadline_seconds
 
         if not self.direct_llm_base_url and self.direct_llm_provider == "mistral":
             self.direct_llm_base_url = "https://api.mistral.ai/v1"

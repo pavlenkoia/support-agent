@@ -29,6 +29,7 @@ class DirectLLMService:
             timeout_seconds=settings.direct_llm_timeout_seconds,
             max_retries=settings.direct_llm_max_retries,
             retry_backoff_seconds=settings.direct_llm_retry_backoff_seconds,
+            retry_deadline_seconds=settings.direct_llm_retry_deadline_seconds,
         )
         self.temperature = settings.direct_llm_temperature
         self.prompt_service = prompt_service or SystemPromptService()
@@ -137,11 +138,12 @@ class DirectLLMService:
             grounded_fallback = None
             grounded_context = self._grounded_fallback_context(kb_packet)
             fallback_context = grounded_context or kb_packet.get("answer_context") or []
-            if (
+            grounded_fallback_eligible = bool(
                 kb_packet.get("kb_status") == "found"
                 and kb_packet.get("grounding_status") == "ready"
                 and fallback_context
-            ):
+            )
+            if grounded_fallback_eligible:
                 grounded_fallback = self._fallback_answer_from_grounding(
                     text,
                     fallback_context,
@@ -153,6 +155,26 @@ class DirectLLMService:
                     reason=f"prompt_runtime_grounded_fallback:{type(exc).__name__}",
                     preserve_context_order=bool(grounded_context),
                 )
+                if grounded_fallback is None:
+                    response_text = self._render_ready_grounding(kb_packet)
+                    if response_text:
+                        grounded_fallback = {
+                            "response_text": response_text,
+                            "confidence": 0.76,
+                            "reason": f"prompt_runtime_grounded_fallback:{type(exc).__name__}",
+                        }
+            self._active_llm_trace.append(
+                {
+                    "role": "direct_llm",
+                    "step": "grounded_fallback",
+                    "error": type(exc).__name__,
+                    "grounded_fallback_eligible": grounded_fallback_eligible,
+                    "grounded_facts_count": len(grounded_context),
+                    "answer_basis_available": bool(str(kb_packet.get("answer_basis") or "").strip()),
+                    "grounded_fallback_emitted": grounded_fallback is not None,
+                    "grounded_fallback_rejection_reason": None if grounded_fallback is not None else "no_ready_grounding",
+                }
+            )
             if grounded_fallback is not None:
                 return {
                     "route": "answer",
@@ -186,6 +208,19 @@ class DirectLLMService:
                 return context
         answer_basis = str(kb_packet.get("answer_basis") or "").strip()
         return [{"text": answer_basis}] if answer_basis else []
+
+    def _render_ready_grounding(self, kb_packet: dict[str, Any]) -> str:
+        """Last-resort customer answer from KB-agent curated facts only."""
+        facts = kb_packet.get("grounded_facts")
+        if isinstance(facts, list):
+            rendered = " ".join(
+                fact.strip()
+                for fact in facts[:3]
+                if isinstance(fact, str) and fact.strip()
+            )
+            if rendered:
+                return self._sanitize_customer_text(rendered)
+        return self._sanitize_customer_text(str(kb_packet.get("answer_basis") or ""))
 
     def respond_social(self, text: str, *, conversation_context: dict | None = None) -> dict:
         """Finish a planner-approved social turn without KB retrieval or cannot_answer UX."""

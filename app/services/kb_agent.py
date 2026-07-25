@@ -29,6 +29,7 @@ class KBAgentService:
             timeout_seconds=settings.kb_agent_timeout_seconds,
             max_retries=settings.kb_agent_max_retries,
             retry_backoff_seconds=settings.kb_agent_retry_backoff_seconds,
+            retry_deadline_seconds=settings.kb_agent_retry_deadline_seconds,
         )
         self.temperature = settings.kb_agent_temperature
         self.prompt_service = prompt_service or KBAgentPromptService()

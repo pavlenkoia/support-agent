@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import random
 import socket
 import time
 from http.client import IncompleteRead
@@ -25,6 +26,7 @@ class OpenAICompatibleClient(BaseLLMClient):
         timeout_seconds: int = 30,
         max_retries: int = 0,
         retry_backoff_seconds: float = 0.0,
+        retry_deadline_seconds: float | None = None,
     ) -> None:
         self.provider = provider
         self.base_url = base_url.rstrip("/")
@@ -37,6 +39,38 @@ class OpenAICompatibleClient(BaseLLMClient):
         self.timeout_seconds = timeout_seconds
         self.max_retries = max(0, int(max_retries))
         self.retry_backoff_seconds = max(0.0, float(retry_backoff_seconds))
+        self.retry_deadline_seconds = None if retry_deadline_seconds is None else max(0.0, float(retry_deadline_seconds))
+
+    def _retry_delay_seconds(self, retry_attempt: int) -> float:
+        base_delay = self.retry_backoff_seconds * (2 ** retry_attempt)
+        return random.uniform(base_delay * 0.5, base_delay * 1.5) if base_delay else 0.0
+
+    def _retry_allowed(self, *, deadline: float | None, retry_attempt: int) -> bool:
+        if deadline is None:
+            return True
+        remaining = deadline - time.perf_counter()
+        if remaining <= 0:
+            return False
+        delay = min(self._retry_delay_seconds(retry_attempt), remaining)
+        if delay > 0:
+            time.sleep(delay)
+        return time.perf_counter() < deadline
+
+    def _set_retry_deadline_error(self, *, endpoint: str, started: float, total_attempts: int, active_key_index: int, failover_events: list[dict[str, Any]]) -> None:
+        self._set_last_call_info(
+            {
+                "provider": self.provider,
+                "model": self.model,
+                "endpoint": endpoint,
+                "duration_ms": round((time.perf_counter() - started) * 1000, 3),
+                "attempts": total_attempts,
+                "api_key_index": active_key_index,
+                "used_failover": bool(failover_events),
+                "failover_count": len(failover_events),
+                "failover_events": list(failover_events),
+                "error": "retry_deadline_exceeded",
+            }
+        )
 
     def _build_request(self, *, endpoint: str, payload: dict[str, Any], api_key: str) -> request.Request:
         return request.Request(
@@ -84,6 +118,7 @@ class OpenAICompatibleClient(BaseLLMClient):
         response_format: dict[str, Any] | None = None,
     ) -> str:
         started = time.perf_counter()
+        deadline = started + self.retry_deadline_seconds if self.retry_deadline_seconds is not None else None
         endpoint = f"{self.base_url}/chat/completions"
         payload: dict[str, Any] = {
             "model": self.model,
@@ -108,7 +143,21 @@ class OpenAICompatibleClient(BaseLLMClient):
             for retry_attempt in range(self.max_retries + 1):
                 total_attempts += 1
                 try:
-                    with request.urlopen(req, timeout=self.timeout_seconds) as response:
+                    request_timeout = self.timeout_seconds
+                    if deadline is not None:
+                        remaining = deadline - time.perf_counter()
+                        if remaining <= 0 and retry_attempt > 0:
+                            self._set_retry_deadline_error(
+                                endpoint=endpoint,
+                                started=started,
+                                total_attempts=total_attempts,
+                                active_key_index=active_key_index,
+                                failover_events=failover_events,
+                            )
+                            raise RuntimeError("LLM retry deadline exceeded")
+                        if remaining > 0:
+                            request_timeout = min(request_timeout, remaining)
+                    with request.urlopen(req, timeout=request_timeout) as response:
                         data = json.loads(response.read().decode("utf-8"))
                     self._set_last_call_info(
                         {
@@ -136,8 +185,16 @@ class OpenAICompatibleClient(BaseLLMClient):
                     should_retry = (exc.code in {408, 409, 425, 429} or exc.code >= 500) and not should_fail_over
                     if should_retry and retry_attempt < self.max_retries:
                         last_error = RuntimeError(f"LLM HTTP {exc.code}: {detail}")
-                        time.sleep(self.retry_backoff_seconds * (2 ** retry_attempt or 1))
-                        continue
+                        if self._retry_allowed(deadline=deadline, retry_attempt=retry_attempt):
+                            continue
+                        self._set_retry_deadline_error(
+                            endpoint=endpoint,
+                            started=started,
+                            total_attempts=total_attempts,
+                            active_key_index=active_key_index,
+                            failover_events=failover_events,
+                        )
+                        raise RuntimeError("LLM retry deadline exceeded") from exc
                     if should_fail_over and active_key_index + 1 < len(self.api_keys):
                         failover_event = {
                             "from_api_key_index": active_key_index,
@@ -176,8 +233,16 @@ class OpenAICompatibleClient(BaseLLMClient):
                 except (error.URLError, TimeoutError, socket.timeout, IncompleteRead) as exc:  # pragma: no cover - network error path
                     if retry_attempt < self.max_retries:
                         last_error = RuntimeError(f"LLM connection error: {exc}")
-                        time.sleep(self.retry_backoff_seconds * (2 ** retry_attempt or 1))
-                        continue
+                        if self._retry_allowed(deadline=deadline, retry_attempt=retry_attempt):
+                            continue
+                        self._set_retry_deadline_error(
+                            endpoint=endpoint,
+                            started=started,
+                            total_attempts=total_attempts,
+                            active_key_index=active_key_index,
+                            failover_events=failover_events,
+                        )
+                        raise RuntimeError("LLM retry deadline exceeded") from exc
                     self._set_last_call_info(
                         {
                             "provider": self.provider,

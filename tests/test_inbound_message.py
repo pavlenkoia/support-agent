@@ -446,6 +446,48 @@ def test_social_reply_bypasses_kb_and_finishes_as_customer_answer() -> None:
     assert result["response_strategy"]["steps"] == ["social_reply"]
 
 
+def test_out_of_scope_bypasses_kb_and_final_llm_generation() -> None:
+    class OutOfScopePlanner:
+        def assess_request(self, *args, **kwargs):
+            return {
+                "action": "out_of_scope",
+                "confidence": 0.98,
+                "reason": "outside_profile_domain",
+                "llm_trace": [],
+            }
+
+        def respond(self, *args, **kwargs):
+            raise AssertionError("out_of_scope must not call final LLM generation")
+
+    class NoKBRetrieval:
+        def retrieve(self, *args, **kwargs):
+            raise AssertionError("out_of_scope must not retrieve KB")
+
+    class NoKBReader:
+        def read(self, *args, **kwargs):
+            raise AssertionError("out_of_scope must not call KB agent")
+
+    result = OrchestratorService(
+        retrieval=NoKBRetrieval(),
+        kb_agent=NoKBReader(),
+        direct_llm=OutOfScopePlanner(),
+        policy=PolicyService(),
+        tool_runtime=ToolRuntimeService(),
+    ).run(
+        text="Предлагаю услуги SEO-продвижения сайта",
+        context={"recent_messages": [{"role": "user", "content": "Предлагаю услуги SEO-продвижения сайта"}]},
+        knowledge_backend="filesystem",
+        knowledge_root="/unused",
+        knowledge_query="Предлагаю услуги SEO-продвижения сайта",
+    )
+
+    assert result["route"]["route"] == "out_of_scope"
+    assert result["route"]["reply"]["response_text"] == "Я отвечаю только по вопросам этого профиля."
+    assert result["retrieval"]["kb_status"] == "not_started"
+    assert result["kb_result"] == {}
+    assert result["response_strategy"]["steps"] == ["out_of_scope"]
+
+
 def test_social_reply_runtime_error_uses_polite_answer_not_cannot_answer() -> None:
     class BrokenSocialClient:
         def generate(self, **kwargs):

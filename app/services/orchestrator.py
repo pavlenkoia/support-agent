@@ -60,6 +60,17 @@ class OrchestratorService:
                 )
                 break
 
+            if planner_action == "out_of_scope":
+                final_reply = self._finalize_out_of_scope(planner)
+                loop_trace.append(
+                    {
+                        "iteration": iteration,
+                        "action": "out_of_scope",
+                        "reason": final_reply.get("reason", "planner_out_of_scope"),
+                    }
+                )
+                break
+
             if retrieval.get("kb_status") != "found" and planner_action not in {"read_kb", "use_tool"}:
                 planner_action = "read_kb"
                 loop_trace.append(
@@ -298,6 +309,16 @@ class OrchestratorService:
             "response_text": "Пожалуйста!",
             "confidence": 1.0,
             "reason": "social_reply_legacy_fallback",
+            "llm_trace": [],
+        }
+
+    def _finalize_out_of_scope(self, planner: dict[str, Any]) -> dict[str, Any]:
+        """Planner-approved domain boundary must not depend on final LLM generation."""
+        return {
+            "route": "out_of_scope",
+            "response_text": self.policy.render_out_of_scope(),
+            "confidence": float(planner.get("confidence") or 0.0),
+            "reason": str(planner.get("reason") or "planner_out_of_scope"),
             "llm_trace": [],
         }
 

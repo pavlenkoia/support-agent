@@ -176,3 +176,38 @@ def test_openai_compatible_client_retries_incomplete_response_body(monkeypatch) 
 
     assert client.generate(system_prompt="sys", user_prompt="usr") == "ok-after-retry"
     assert calls["count"] == 2
+
+
+def test_openai_compatible_client_stops_transient_retries_when_retry_deadline_is_exhausted(monkeypatch) -> None:
+    calls = {"count": 0}
+
+    class IncompleteBodyResponse(FakeResponse):
+        def read(self) -> bytes:
+            raise IncompleteRead(b'{"choices":', 50)
+
+    def fake_urlopen(req, timeout):
+        _ = (req, timeout)
+        calls["count"] += 1
+        return IncompleteBodyResponse({})
+
+    monkeypatch.setattr("app.integrations.llm.openai_compatible.request.urlopen", fake_urlopen)
+
+    client = OpenAICompatibleClient(
+        provider="mistral",
+        base_url="https://example.test/v1",
+        api_key="token",
+        model="test-model",
+        max_retries=3,
+        retry_backoff_seconds=1.0,
+        retry_deadline_seconds=0.0,
+    )
+
+    try:
+        client.generate(system_prompt="sys", user_prompt="usr")
+    except RuntimeError as exc:
+        assert "retry deadline exceeded" in str(exc)
+    else:
+        raise AssertionError("expected retry deadline failure")
+
+    assert calls["count"] == 1
+    assert client.get_last_call_info()["error"] == "retry_deadline_exceeded"
