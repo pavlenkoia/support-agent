@@ -50,7 +50,7 @@ Current runtime shape:
 uv run pytest -q
 ```
 
-### Start with Docker Compose
+### Start with Docker Compose (local development only)
 ```bash
 mkdir -p /home/tian/support-agent-runtime
 cp deploy/env/app.env.example /home/tian/support-agent-runtime/app.env
@@ -61,6 +61,16 @@ cp deploy/env/app.env.example /home/tian/support-agent-runtime/app.env
 # - optionally enable VIEWER_AUTH_ENABLED=true and set VIEWER_AUTH_KEY for viewer-web access control
 docker compose up --build
 ```
+
+### Production release
+
+Do **not** deploy production by selecting individual Compose services. From a clean, committed checkout use:
+
+```bash
+python3 scripts/release.py
+```
+
+This is the only supported production command: it rebuilds and force-recreates all application-plane services (`app`, `worker`, `vk-worker`, `viewer-web`, `viewer-push-worker`) without recreating PostgreSQL, then writes a non-secret release receipt only after version, source-manifest, health, worker-liveness, and controlled grounded-fallback checks pass. See [production release operations](docs/operations/production-releases.md).
 
 By default the Compose stack reads runtime env from `${SUPPORT_AGENT_RUNTIME_ROOT_HOST:-/home/tian/support-agent-runtime}/app.env` rather than from a repo-local `.env` file.
 

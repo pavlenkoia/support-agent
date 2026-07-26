@@ -1,8 +1,11 @@
 services:
   app:
+    image: support-agent-app:${SUPPORT_AGENT_RELEASE_ID:-dev}
     build:
       context: .
       dockerfile: deploy/compose/app.Dockerfile
+      args:
+        SUPPORT_AGENT_RELEASE_ID: ${SUPPORT_AGENT_RELEASE_ID:-dev}
     restart: unless-stopped
     env_file:
       - ${SUPPORT_AGENT_RUNTIME_ROOT_HOST:-/home/tian/support-agent-runtime}/app.env
@@ -17,9 +20,12 @@ services:
     command: ["uv", "run", "--no-dev", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
 
   viewer-web:
+    image: support-agent-viewer-web:${SUPPORT_AGENT_RELEASE_ID:-dev}
     build:
       context: .
       dockerfile: deploy/compose/viewer-web.Dockerfile
+      args:
+        SUPPORT_AGENT_RELEASE_ID: ${SUPPORT_AGENT_RELEASE_ID:-dev}
     restart: unless-stopped
     depends_on:
       app:
@@ -28,9 +34,12 @@ services:
       - "3002:3000"
 
   worker:
+    image: support-agent-worker:${SUPPORT_AGENT_RELEASE_ID:-dev}
     build:
       context: .
       dockerfile: deploy/compose/worker.Dockerfile
+      args:
+        SUPPORT_AGENT_RELEASE_ID: ${SUPPORT_AGENT_RELEASE_ID:-dev}
     restart: unless-stopped
     env_file:
       - ${SUPPORT_AGENT_RUNTIME_ROOT_HOST:-/home/tian/support-agent-runtime}/app.env
@@ -43,9 +52,12 @@ services:
     command: ["uv", "run", "--no-dev", "python", "-m", "app.workers.main"]
 
   vk-worker:
+    image: support-agent-vk-worker:${SUPPORT_AGENT_RELEASE_ID:-dev}
     build:
       context: .
       dockerfile: deploy/compose/worker.Dockerfile
+      args:
+        SUPPORT_AGENT_RELEASE_ID: ${SUPPORT_AGENT_RELEASE_ID:-dev}
     restart: unless-stopped
     env_file:
       - ${SUPPORT_AGENT_RUNTIME_ROOT_HOST:-/home/tian/support-agent-runtime}/app.env
@@ -58,9 +70,12 @@ services:
     command: ["uv", "run", "--no-dev", "python", "-m", "app.workers.vk_main"]
 
   viewer-push-worker:
+    image: support-agent-viewer-push-worker:${SUPPORT_AGENT_RELEASE_ID:-dev}
     build:
       context: .
       dockerfile: deploy/compose/worker.Dockerfile
+      args:
+        SUPPORT_AGENT_RELEASE_ID: ${SUPPORT_AGENT_RELEASE_ID:-dev}
     restart: unless-stopped
     env_file:
       - ${SUPPORT_AGENT_RUNTIME_ROOT_HOST:-/home/tian/support-agent-runtime}/app.env
