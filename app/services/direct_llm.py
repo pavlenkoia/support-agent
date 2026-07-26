@@ -20,6 +20,9 @@ MAX_SELECTED_WIKI_PAGES = 5
 
 class DirectLLMService:
     def __init__(self, client: BaseLLMClient | None = None, prompt_service: SystemPromptService | None = None) -> None:
+        # An injected client is an explicit runtime/test dependency and must not be
+        # bypassed merely because the process-wide default provider is `stub`.
+        self._client_injected = client is not None
         self.client = client or get_llm_client(
             provider=settings.direct_llm_provider,
             base_url=settings.direct_llm_base_url,
@@ -88,7 +91,7 @@ class DirectLLMService:
             calendar_period_guard["llm_trace"] = []
             return calendar_period_guard
 
-        if settings.direct_llm_provider == "stub":
+        if settings.direct_llm_provider == "stub" and not self._client_injected:
             return self._respond_stub(
                 text,
                 kb_packet,
@@ -329,7 +332,7 @@ class DirectLLMService:
     def classify_turn(self, text: str, *, conversation_context: dict | None = None) -> dict:
         profile = self._load_profile_context()
 
-        if settings.direct_llm_provider == "stub":
+        if settings.direct_llm_provider == "stub" and not self._client_injected:
             return {
                 "turn_type": "knowledge_request",
                 "confidence": 0.0,
@@ -399,7 +402,7 @@ class DirectLLMService:
         kb_status = str(retrieval.get("kb_status") or "not_started")
         kb_hits = retrieval.get("kb_snippets", [])
 
-        if settings.direct_llm_provider == "stub":
+        if settings.direct_llm_provider == "stub" and not self._client_injected:
             return self._assess_request_stub(
                 text,
                 profile=profile,
@@ -522,7 +525,7 @@ class DirectLLMService:
                 "reason": "no_kb_hits",
             }
 
-        if settings.direct_llm_provider == "stub":
+        if settings.direct_llm_provider == "stub" and not self._client_injected:
             return {
                 "direct_status": "insufficient_confidence",
                 "response_text": f"Stub direct answer for: {text}",
