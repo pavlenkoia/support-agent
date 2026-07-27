@@ -7,6 +7,7 @@ import { ViewerAuthError, fetchDialogMessages, fetchDialogs } from '../api/viewe
 import { ChatPanel } from '../components/ChatPanel'
 import { DialogList } from '../components/DialogList'
 import { ViewerHeader } from '../components/ViewerHeader'
+import { selectConversationAfterDialogsReload } from '../utils/dialog-selection'
 import { formatToday } from '../utils/time'
 import { THEME_STORAGE_KEY, applyThemeToDocument, loadInitialTheme } from '../utils/theme'
 
@@ -115,14 +116,17 @@ export function ViewerPage({ onPushToggle, onUnauthorized, pushRefreshToken, pus
         if (cancelled) return
         setDialogs(items)
         const requestedConversationId = notificationConversationIdRef.current
-        const firstConversationId = items[0]?.conversation_id ?? null
-        const nextConversationId = items.some((item) => item.conversation_id === requestedConversationId)
-          ? requestedConversationId
-          : firstConversationId
+        const nextConversationId = selectConversationAfterDialogsReload({
+          dialogs: items,
+          currentConversationId: selectedConversationId,
+          requestedConversationId,
+        })
         setSelectedConversationId(nextConversationId)
         notificationConversationIdRef.current = null
-        hideMobileDetail({ immediate: true })
-        if (!firstConversationId) {
+        if (nextConversationId !== selectedConversationId) {
+          hideMobileDetail({ immediate: true })
+        }
+        if (!nextConversationId) {
           setDialogMessages(null)
         }
       })
