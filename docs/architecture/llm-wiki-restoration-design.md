@@ -1,8 +1,16 @@
 # LLM Wiki restoration — migration design
 
-**Status:** proposed. This document is a design artifact only; it authorizes no runtime, configuration, KB-schema, model, or deployment change.
+**Status:** implemented and deployed to production on 2026-07-28. This document remains the migration and release-evidence record.
 
 **Governing specification:** [`llm-wiki-knowledge-contract.md`](llm-wiki-knowledge-contract.md).
+
+## Delivery record — 2026-07-28
+
+- Approved compiled candidate validated against the production profile's byte-identical `raw/` layer.
+- Production profile now contains `compiled/`, `schema/`, and `index/`; legacy root pages and `raw/` were preserved.
+- Runtime release `d03ca8872233a7ed5bd3ec8fc050c76e77d8ac1d` rebuilt and force-recreated `app`, `worker`, and `vk-worker`; their runtime hashes matched the repository.
+- Isolated and post-deploy internal probes confirmed `llm_wiki → LLM navigation → LLM coverage review → grounded extraction`, with citations and no customer transport.
+- Historical case `439`, previously `cannot_answer`, was replayed only through `internal/probe` and returned a grounded answer citing `compiled/concepts/restrictions-and-safety.md`.
 
 ## 1. Decision and scope
 
@@ -118,7 +126,7 @@ Derived embeddings, chunks, search indexes, summaries, and graph projections are
 | 1. Compatibility compiler | Implement bundle compiler + validator against a copied fixture corpus only. Produce `compiled/`, `schema/`, `index/`, manifest, and migration report. | None. No mounted production KB write. | Lossless/provenance/link/identity tests pass. |
 | 2. Restored runtime in isolated contour | Make catalog loading unconditional for an approved compiled fixture bundle. Enable LLM navigation and LLM coverage review there only, using the current production KB-agent model family/model. | Isolated test contour only; no production flag/model/prompt change. | All architecture contract tests and isolated probes pass. |
 | 3. Shadow evidence | Run the approved internal probe corpus against the candidate bundle/release without customer delivery. Preserve complete traces for review. | No customer transport; test sessions only. | Igor reviews traces, citations, failure behavior, and bundle report. |
-| 4. Controlled production rollout | One approved release changes the production bundle mount/reference and explicitly declares `llm_wiki`, `llm`, `llm`, `grounded` effective modes. | Production change; separate explicit approval required. | Canary probes pass before any wider traffic decision. |
+| 4. Controlled production rollout | One approved release changes the production bundle mount/reference and explicitly declares `llm_wiki`, `llm`, `llm`, `grounded` effective modes. | **Completed 2026-07-28:** production `app`, `worker`, and `vk-worker` rebuilt against the approved compiled bundle; post-deploy internal probe passed. | Future bundle changes still require the same approval and probe evidence. |
 | 5. Post-rollout observation | Review only trace-level conformance and safety outcomes for the agreed observation window. | No heuristic tuning during observation. | Igor accepts evidence or explicitly authorizes a bounded remedial action. |
 
 ### Rollback principle

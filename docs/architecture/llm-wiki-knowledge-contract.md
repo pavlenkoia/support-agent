@@ -142,23 +142,17 @@ A release affecting KB code, prompt, model, runtime config, or compiled KB schem
 
 A correct answer alone is insufficient evidence of conformance: the test must also assert the architecture trace.
 
-## 9. Current-state warning
+## 9. Historical baseline and deployed state
 
-At the time of this specification, production contains temporary retrieval hardening introduced around case #439. The runtime can use lexical selection because its small-wiki catalog threshold is exceeded, and existing flags can enable deterministic navigation and skip coverage review.
+Before the approved 2026-07-28 restoration, production contained temporary retrieval hardening introduced around case #439. That legacy path could use lexical selection after the small-wiki threshold and could enable deterministic navigation or skip coverage review.
 
-This is a **known non-conforming state**, not the approved target architecture. Do not add further lexical, link-expansion, or retry heuristics as a long-term solution. Preserve independently validated transport and grounded-answer safety semantics while designing a controlled restoration of the contract above.
+Production now uses the compiled LLM Wiki path. The deployed runtime detects `index/catalog.json`, exposes the complete catalog to LLM navigation, resolves stable bundle-relative `source_ref` values to selective full-page reads, runs LLM coverage review, and performs grounded extraction. For this compiled architecture, legacy deterministic-navigation and coverage-skip flags are bypassed rather than silently changing the target path.
 
-## 10. Required next-session work
+The former lexical, link-expansion, and retry heuristics remain legacy compatibility behavior only; they are not a permitted normal path for the compiled LLM Wiki.
 
-Before implementation:
+## 10. Historical implementation sequence
 
-1. Read this specification, `docs/architecture/overview.md`, `docs/architecture/kb-agent-hardening.md`, and the current runtime configuration.
-2. Inventory the actual KB bundle, its page cards, frontmatter, index, wikilinks, provenance, and effective runtime modes.
-3. Write a concrete migration design from the current path to the contract in section 2, including an OKF compatibility mapping.
-4. Define fixture-based architecture tests and production-safe internal probe acceptance criteria.
-5. Submit the design for Igor's approval.
-
-Do not modify production retrieval, prompt flags, model selection, KB schema, or deployment before approval of that migration design.
+The 2026-07-28 implementation completed this sequence after Igor's explicit approvals. For any future bundle/schema/runtime change, begin with the governing contract, current runtime configuration, candidate validation, and isolated internal probes; do not change production retrieval, prompt flags, model selection, KB schema, or deployment without a new explicit rollout approval.
 
 ## 11. Decision log
 
