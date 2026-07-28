@@ -132,21 +132,8 @@ class KBAgentService:
         current_terms = self._tokenize_query(text)
         expanded_terms = self._tokenize_query(query)
         context_terms = [term for term in expanded_terms if term not in current_terms]
-        lowered_query = query.lower()
-        topic_rules = [
-            (("сертифик", "подар"), ("сертифик", "подар", "офис", "сайт")),
-            (("цена", "стоим", "сколько", "прайс"), ("цен", "стоим", "прайс", "оплат")),
-            (("распис", "когда", "выход", "будн", "суббот", "воскрес", "завтра", "послезавтра", "дата"), ("распис", "запис", "выход", "будн", "суббот", "воскрес", "анонс", "дат")),
-            (("тандем", "запис", "записаться"), ("тандем", "запис", "форма", "телефон")),
-            (("огранич", "здоров", "безопас", "вес", "давлен"), ("огранич", "здоров", "безопас", "вес", "давлен", "опьян")),
-            (("ан-2", "ан2", "як-52", "полет"), ("ан-2", "ан2", "як-52", "полет", "кабин", "салон")),
-        ]
-        schedule_query = any(marker in lowered_query for marker in ("распис", "когда", "выход", "будн", "суббот", "воскрес", "завтра", "послезавтра", "дата"))
-        certificate_query = any(marker in lowered_query for marker in ("сертифик", "подар"))
-        safety_query = any(marker in lowered_query for marker in ("огранич", "здоров", "безопас", "вес", "давлен"))
 
         scored: list[tuple[int, str]] = []
-        selected_reason = "deterministic_navigation:lexical"
         for item in kb_context:
             source_ref = item.get("source_ref")
             if not source_ref or str(source_ref).endswith("index.md"):
@@ -160,38 +147,34 @@ class KBAgentService:
                     " ".join(str(link) for link in item.get("linked_pages", []) if link),
                 ]
             ).lower()
-            score = 0
-            score += sum(5 for term in current_terms if term in haystack)
+            score = sum(5 for term in current_terms if term in haystack)
             score += sum(2 for term in context_terms if term in haystack)
-            for query_markers, page_markers in topic_rules:
-                if any(marker in lowered_query for marker in query_markers) and any(marker in haystack for marker in page_markers):
-                    score += 8
-            if schedule_query and "сертифик" in haystack and not certificate_query:
-                score -= 6
-            if safety_query and "сертифик" in haystack:
-                score -= 4
-            if schedule_query and "booking-and-schedule" in str(source_ref):
-                score += 12
-            if certificate_query and "certificates" in str(source_ref):
-                score += 12
-            if safety_query and "restrictions-and-safety" in str(source_ref):
-                score += 12
             if score:
                 scored.append((score, str(source_ref)))
 
         scored.sort(key=lambda item: (-item[0], item[1]))
-        selected_refs = [source_ref for _, source_ref in scored[:MAX_CATALOG_SELECTION]]
-        if schedule_query and not certificate_query:
-            filtered = [ref for ref in selected_refs if "certificates" not in ref]
-            if filtered:
-                selected_refs = filtered
-        if safety_query:
-            filtered = [ref for ref in selected_refs if "certificates" not in ref]
-            if filtered:
-                selected_refs = filtered
+        selected_refs = [source_ref for _, source_ref in scored[:MAX_CATALOG_SELECTION - 1]]
+        cards_by_ref = {str(item.get("source_ref")): item for item in kb_context if item.get("source_ref")}
+        for source_ref in list(selected_refs):
+            card = cards_by_ref.get(source_ref, {})
+            for link in card.get("linked_pages", []):
+                resolved = self._resolve_catalog_ref(str(link), cards_by_ref)
+                if resolved and resolved not in selected_refs:
+                    selected_refs.append(resolved)
+                if len(selected_refs) >= MAX_CATALOG_SELECTION:
+                    break
+            if len(selected_refs) >= MAX_CATALOG_SELECTION:
+                break
+        for _, source_ref in scored:
+            if source_ref not in selected_refs:
+                selected_refs.append(source_ref)
+            if len(selected_refs) >= MAX_CATALOG_SELECTION:
+                break
         if not selected_refs:
             selected_refs = self._fallback_select_catalog_refs(query, kb_context, limit=MAX_CATALOG_SELECTION)
             selected_reason = "deterministic_navigation:fallback_lexical"
+        else:
+            selected_reason = "deterministic_navigation:current_turn_weighted_link_expansion"
 
         return {
             "user_intent": text,
@@ -449,6 +432,7 @@ class KBAgentService:
             "Работай как KB agent, а не как клиентский консультант.",
             "Извлекай только подтвержденные факты из предоставленных страниц wiki.",
             "Не дополняй выводы догадками и не отвечай в клиентском стиле.",
+            "Явное общее правило из страницы можно считать подтверждённым для частного случая только когда его формулировка прямо охватывает все или остальные категории; процитируй это правило как факт и укажи страницу.",
             "answer_basis должен быть короткой служебной опорой для финального support-agent ответа.",
         ]
         if minimal_schema:

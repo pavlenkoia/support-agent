@@ -66,6 +66,21 @@ class RetryPendingKBAgentService:
         }
 
 
+class NotGroundedKBAgentService:
+    def read(self, text: str, kb_hits: list[dict], *, conversation_context: dict | None = None) -> dict:
+        _ = (text, conversation_context)
+        return {
+            "kb_status": "found",
+            "kb_mode": "test_stub",
+            "grounding_status": "not_found",
+            "answer_context": kb_hits,
+            "grounded_facts": [],
+            "answer_basis": "",
+            "source_refs": [hit.get("source_ref") for hit in kb_hits if hit.get("source_ref")],
+            "trace": {"extraction": {"reason": "missing_confirmed_fact"}},
+        }
+
+
 class FakeDirectLLMService:
     def __init__(self) -> None:
         self.calls: list[dict] = []
@@ -217,6 +232,24 @@ def test_routing_service_defers_kb_transport_failure_without_customer_reply(tmp_
     assert result["route"]["route"] == "retry_pending"
     assert result["outcome"]["outcome_type"] == "retry_pending"
     assert result["outcome"]["outcome_payload"]["response_text"] == ""
+    assert direct_llm.calls == []
+
+
+def test_routing_service_does_not_allow_final_llm_answer_without_ready_grounding(tmp_path: Path) -> None:
+    direct_llm = FakeDirectLLMService()
+    routing = make_test_routing_service(tmp_path, direct_llm=direct_llm, kb_agent=NotGroundedKBAgentService())
+
+    result = routing.handle_inbound(
+        InboundMessage(
+            channel="vk",
+            external_user_id="u-not-grounded",
+            external_chat_id="c-not-grounded",
+            text="Есть ли ограничения по весу?",
+        )
+    )
+
+    assert result["route"]["route"] == "cannot_answer"
+    assert result["outcome"]["outcome_type"] == "cannot_answer"
     assert direct_llm.calls == []
 
 

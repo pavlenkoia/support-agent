@@ -110,7 +110,12 @@ class OrchestratorService:
 
             if planner_action == "read_kb":
                 retrieval_query = self._augment_query_with_tool_results(knowledge_query or text, tool_observations)
-                retrieval = self.retrieval.retrieve(retrieval_query, knowledge_backend, knowledge_root)
+                retrieval = self.retrieval.retrieve(
+                    retrieval_query,
+                    knowledge_backend,
+                    knowledge_root,
+                    current_query=text,
+                )
                 loop_trace.append(
                     {
                         "iteration": iteration,
@@ -153,6 +158,17 @@ class OrchestratorService:
                 break
 
             kb_result = self._ensure_kb_result(text, context, retrieval, tool_observations, kb_result, loop_trace, iteration)
+            retrieval, kb_result = self._retry_missing_grounding(
+                text=text,
+                context=context,
+                retrieval=retrieval,
+                kb_result=kb_result,
+                knowledge_backend=knowledge_backend,
+                knowledge_root=knowledge_root,
+                tool_observations=tool_observations,
+                loop_trace=loop_trace,
+                iteration=iteration,
+            )
             final_reply = self._finalize_reply(
                 text=text,
                 context=context,
@@ -174,6 +190,17 @@ class OrchestratorService:
 
         if final_reply is None:
             kb_result = self._ensure_kb_result(text, context, retrieval, tool_observations, kb_result, loop_trace, self.max_iterations)
+            retrieval, kb_result = self._retry_missing_grounding(
+                text=text,
+                context=context,
+                retrieval=retrieval,
+                kb_result=kb_result,
+                knowledge_backend=knowledge_backend,
+                knowledge_root=knowledge_root,
+                tool_observations=tool_observations,
+                loop_trace=loop_trace,
+                iteration=self.max_iterations,
+            )
             final_reply = self._finalize_reply(
                 text=text,
                 context=context,
@@ -280,6 +307,14 @@ class OrchestratorService:
                 "reason": str(kb_result.get("reason") or "kb_agent_transport_failure"),
                 "llm_trace": [],
             }
+        if kb_result.get("grounding_status") != "ready":
+            return {
+                "route": "cannot_answer",
+                "response_text": self.policy.render_cannot_answer(),
+                "confidence": 0.0,
+                "reason": str(kb_result.get("reason") or "kb_agent_no_ready_grounding"),
+                "llm_trace": [],
+            }
         if hasattr(self.direct_llm, "respond"):
             return self.direct_llm.respond(
                 text,
@@ -331,6 +366,50 @@ class OrchestratorService:
             "reason": str(planner.get("reason") or "planner_out_of_scope"),
             "llm_trace": [],
         }
+
+    def _retry_missing_grounding(
+        self,
+        *,
+        text: str,
+        context: dict,
+        retrieval: dict,
+        kb_result: dict,
+        knowledge_backend: str,
+        knowledge_root: str,
+        tool_observations: list[dict[str, Any]],
+        loop_trace: list[dict[str, Any]],
+        iteration: int,
+    ) -> tuple[dict, dict]:
+        if kb_result.get("grounding_status") != "not_found":
+            return retrieval, kb_result
+        expanded = self.retrieval.expand_for_grounding(
+            retrieval,
+            current_query=text,
+            knowledge_backend=knowledge_backend,
+            knowledge_root=knowledge_root,
+        )
+        if len(expanded.get("kb_snippets", [])) <= len(retrieval.get("kb_snippets", [])):
+            return retrieval, kb_result
+        retried = self.kb_agent.read(
+            text,
+            expanded.get("kb_snippets", []),
+            conversation_context={**context, "tool_observations": tool_observations},
+        )
+        loop_trace.append(
+            {
+                "iteration": iteration,
+                "action": "kb_agent_grounding_retry",
+                "reason": retried.get("grounding_status", "not_found"),
+                "added_source_refs": [
+                    item.get("source_ref")
+                    for item in expanded.get("kb_snippets", [])
+                    if item.get("source_ref") not in {
+                        source.get("source_ref") for source in retrieval.get("kb_snippets", [])
+                    }
+                ],
+            }
+        )
+        return expanded, retried
 
     def _ensure_kb_result(
         self,

@@ -24,7 +24,14 @@ class PageHit:
 
 
 class RetrievalService:
-    def retrieve(self, query: str, knowledge_backend: str, knowledge_root: str) -> dict:
+    def retrieve(
+        self,
+        query: str,
+        knowledge_backend: str,
+        knowledge_root: str,
+        *,
+        current_query: str | None = None,
+    ) -> dict:
         if knowledge_backend != "filesystem":
             return {"kb_status": "not_found", "kb_snippets": []}
 
@@ -38,28 +45,43 @@ class RetrievalService:
             return {"kb_status": "not_found", "kb_snippets": []}
 
         query_terms = self._tokenize(query)
-        if not query_terms:
+        primary_query = str(current_query or query).strip()
+        primary_terms = self._tokenize(primary_query)
+        if not primary_terms:
             return {"kb_status": "not_found", "kb_snippets": []}
 
         page_texts = {page: page.read_text(encoding="utf-8") for page in pages}
         total_chars = sum(len(text) for text in page_texts.values())
+        retrieval_contract = {
+            "current_query": primary_query,
+            "context_query": str(query or "").strip(),
+            "linked_expansions": [],
+        }
 
         if self._should_use_llm_wiki_catalog(total_chars=total_chars, page_count=len(pages)):
-            return self._build_llm_wiki_catalog(index_path=index_path, page_texts=page_texts, total_chars=total_chars)
+            result = self._build_llm_wiki_catalog(index_path=index_path, page_texts=page_texts, total_chars=total_chars)
+            result["retrieval_contract"] = retrieval_contract
+            return result
 
         hits: list[PageHit] = []
+        context_terms = query_terms - primary_terms
         for page, text in page_texts.items():
-            score = self._score_page(text, query_terms)
+            primary_score = self._score_page(text, primary_terms)
+            context_score = self._score_page(text, context_terms)
+            score = primary_score * 4 + context_score
             if score <= 0:
                 continue
             title = self._extract_title(page, text)
-            snippet = self._extract_snippet(text, query_terms)
+            snippet = self._extract_snippet(text, primary_terms or query_terms)
             hits.append(PageHit(path=page, score=score, title=title, snippet=snippet))
 
         if not hits:
             return {"kb_status": "not_found", "kb_snippets": []}
 
         hits.sort(key=lambda item: (-item.score, str(item.path)))
+        selected_hits = hits[:5]
+        selected_hits, linked_expansions = self._expand_linked_hits(selected_hits, page_texts, primary_terms)
+        retrieval_contract["linked_expansions"] = linked_expansions
         snippets = [
             {
                 "text": hit.snippet,
@@ -67,9 +89,108 @@ class RetrievalService:
                 "source_ref": str(hit.path),
                 "retrieval_notes": f"llm-wiki compiled page match (score={hit.score}, title={hit.title})",
             }
-            for hit in hits[:5]
+            for hit in selected_hits
         ]
-        return {"kb_status": "found", "kb_snippets": snippets, "kb_mode": "lexical_page_match"}
+        return {
+            "kb_status": "found",
+            "kb_snippets": snippets,
+            "kb_mode": "lexical_page_match",
+            "retrieval_contract": retrieval_contract,
+        }
+
+    def expand_for_grounding(
+        self,
+        retrieval: dict,
+        *,
+        current_query: str,
+        knowledge_backend: str,
+        knowledge_root: str,
+        limit: int = 2,
+    ) -> dict:
+        """Load a bounded set of linked pages after an honest missing-fact result."""
+        if knowledge_backend != "filesystem" or retrieval.get("kb_status") != "found":
+            return retrieval
+        existing_hits = list(retrieval.get("kb_snippets") or [])
+        existing_refs = {str(item.get("source_ref")) for item in existing_hits if item.get("source_ref")}
+        wiki_root = Path(knowledge_root)
+        pages = self._discover_pages(wiki_root)
+        page_texts = {page: page.read_text(encoding="utf-8") for page in pages}
+        by_path = {str(page): page for page in pages}
+        by_slug = {page.stem.lower(): page for page in pages}
+        query_terms = self._tokenize(current_query)
+        additions: list[dict] = []
+        expansions: list[dict[str, str]] = []
+        candidates: dict[Path, list[str]] = {}
+        for hit in existing_hits:
+            source_ref = str(hit.get("source_ref") or "")
+            source = by_path.get(source_ref)
+            if source is None:
+                continue
+            for link in self._extract_wikilinks(page_texts[source]):
+                target = by_slug.get(link.strip().lower())
+                if target is None or str(target) in existing_refs:
+                    continue
+                candidates.setdefault(target, []).append(source_ref)
+        ranked_candidates = sorted(
+            candidates,
+            key=lambda target: (-self._score_page(page_texts[target], query_terms), str(target)),
+        )
+        for target in ranked_candidates[:limit]:
+            target_text = page_texts[target]
+            additions.append(
+                {
+                    "text": self._extract_snippet(target_text, query_terms),
+                    "source_type": "wiki_page",
+                    "source_ref": str(target),
+                    "retrieval_notes": "linked-page grounding expansion after missing critical fact",
+                }
+            )
+            expansions.append(
+                {"from_source_ref": candidates[target][0], "source_ref": str(target)}
+            )
+        if not additions:
+            return retrieval
+        contract = dict(retrieval.get("retrieval_contract") or {})
+        contract["grounding_expansion"] = expansions
+        return {**retrieval, "kb_snippets": [*existing_hits, *additions], "retrieval_contract": contract}
+
+    def _expand_linked_hits(
+        self,
+        selected_hits: list[PageHit],
+        page_texts: dict[Path, str],
+        query_terms: set[str],
+        *,
+        limit: int = 2,
+    ) -> tuple[list[PageHit], list[dict[str, str]]]:
+        """Boundedly follow wiki links from the initially relevant pages.
+
+        Links are authored KB relations, so this is a generic completeness expansion,
+        not a query-topic rule.  The original ranked hits stay first; related pages
+        are only appended and remain provenance-labelled in the returned context.
+        """
+        by_slug = {page.stem.lower(): page for page in page_texts}
+        selected_paths = {hit.path for hit in selected_hits}
+        expansions: list[dict[str, str]] = []
+        expanded_hits: list[PageHit] = list(selected_hits)
+        for hit in selected_hits:
+            for link in self._extract_wikilinks(page_texts[hit.path]):
+                target = by_slug.get(link.strip().lower())
+                if target is None or target in selected_paths:
+                    continue
+                text = page_texts[target]
+                expanded_hits.append(
+                    PageHit(
+                        path=target,
+                        score=self._score_page(text, query_terms),
+                        title=self._extract_title(target, text),
+                        snippet=self._extract_snippet(text, query_terms),
+                    )
+                )
+                selected_paths.add(target)
+                expansions.append({"from_source_ref": str(hit.path), "source_ref": str(target)})
+                if len(expansions) >= limit:
+                    return expanded_hits, expansions
+        return expanded_hits, expansions
 
     def _discover_pages(self, wiki_root: Path) -> list[Path]:
         pages: list[Path] = []
@@ -178,14 +299,25 @@ class RetrievalService:
 
     def _score_page(self, text: str, query_terms: set[str]) -> int:
         lowered = text.lower()
+        page_terms = self._tokenize(lowered)
         score = 0
         for term in query_terms:
             count = lowered.count(term)
+            if not count:
+                count = sum(self._terms_share_stem(term, page_term) for page_term in page_terms)
             if count:
                 score += min(count, 6)
         if "## summary" in lowered or "## краткий вывод" in lowered:
             score += 1
         return score
+
+    @staticmethod
+    def _terms_share_stem(query_term: str, page_term: str) -> bool:
+        """Small language-neutral inflection tolerance without a topic vocabulary."""
+        if query_term == page_term:
+            return True
+        prefix_length = 3 if len(query_term) <= 5 else 4
+        return len(page_term) >= prefix_length and query_term[:prefix_length] == page_term[:prefix_length]
 
     def _extract_title(self, page: Path, text: str) -> str:
         title_match = re.search(r"^title:\s*(.+)$", text, flags=re.MULTILINE)
@@ -200,8 +332,11 @@ class RetrievalService:
         lines = [line.strip() for line in text.splitlines() if line.strip() and not line.strip().startswith("---")]
         matched: list[str] = []
         for line in lines:
-            lowered = line.lower()
-            if any(term in lowered for term in query_terms):
+            line_terms = self._tokenize(line)
+            if any(
+                term in line.lower() or any(self._terms_share_stem(term, line_term) for line_term in line_terms)
+                for term in query_terms
+            ):
                 matched.append(line)
         if not matched:
             matched = lines[:6]
