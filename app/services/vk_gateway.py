@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from sqlalchemy import select
@@ -10,6 +10,8 @@ from app.core.db import SessionLocal
 from app.integrations.vk.client import VKAPIClient
 from app.integrations.vk.sender import VKSender
 from app.models.conversation import Conversation
+from app.models.case import SupportCase
+from app.models.transport_event import TransportEvent
 from app.models.user import User
 from app.schemas.message import InboundMessage
 from app.services.case_resolution import ensure_conversation, resolve_case
@@ -21,10 +23,12 @@ from app.services.persistence import (
     is_override_active,
     mark_transport_event_failed,
     mark_transport_event_processed,
+    mark_transport_event_retry_pending,
     persist_human_outbound_message,
     persist_inbound_message,
     persist_outbound_transport_send,
     persist_transport_event,
+    persist_workflow_event,
     reconcile_outbound_transport_send,
     set_last_bot_reply,
     set_last_inbound_message,
@@ -131,6 +135,20 @@ class VKGatewayService:
                 session.commit()
             raise
 
+        if self._is_retry_pending(result):
+            with self.session_factory() as session:
+                stored_event = find_transport_event(session, dedupe_key)
+                if stored_event is not None:
+                    self._schedule_retry_pending(session, stored_event, result)
+                session.commit()
+            return {
+                "ok": True,
+                "ignored": False,
+                "event_type": "message_new",
+                "retry_pending": True,
+                "app_result": result,
+            }
+
         reply_text = self._build_reply_text(result)
         if not reply_text:
             with self.session_factory() as session:
@@ -206,6 +224,163 @@ class VKGatewayService:
             "app_result": result,
             "suppressed": False,
         }
+
+    def process_due_retries(self, *, now: datetime | None = None) -> dict[str, int]:
+        due_at = now or datetime.now(UTC)
+        with self.session_factory() as session:
+            event_ids = list(
+                session.scalars(
+                    select(TransportEvent.id)
+                    .where(
+                        TransportEvent.platform == "vk",
+                        TransportEvent.event_type == "message_new",
+                        TransportEvent.status == "retry_pending",
+                        TransportEvent.available_at <= due_at,
+                    )
+                    .order_by(TransportEvent.available_at, TransportEvent.id)
+                )
+            )
+
+        processed = 0
+        for event_id in event_ids:
+            self._process_retry_event(event_id, now=due_at)
+            processed += 1
+        return {"processed": processed}
+
+    def _process_retry_event(self, event_id: int, *, now: datetime) -> None:
+        with self.session_factory() as session:
+            event = session.get(TransportEvent, event_id)
+            if event is None or event.status != "retry_pending":
+                return
+            if event.retry_attempts >= 1 + settings.kb_agent_deferred_retry_max_attempts:
+                mark_transport_event_processed(session, event, status="waiting_human")
+                event.error_text = "kb_agent_retry_exhausted"
+                conversation = session.scalar(
+                    select(Conversation).where(Conversation.external_id == event.conversation_external_id)
+                )
+                if conversation is not None:
+                    support_case = session.scalar(
+                        select(SupportCase)
+                        .where(SupportCase.conversation_id == conversation.id)
+                        .order_by(SupportCase.id.desc())
+                    )
+                    if support_case is not None:
+                        support_case.status = "waiting_human"
+                        support_case.route_mode = "kb_agent_retry_exhausted"
+                        persist_workflow_event(
+                            session,
+                            support_case.id,
+                            {"reason": "kb_agent_retry_exhausted", "retry_attempts": event.retry_attempts},
+                            event_type="kb_retry_exhausted",
+                            actor="system:vk_retry",
+                        )
+                session.commit()
+                return
+            inbound = self._inbound_from_event(event.payload_json)
+
+        try:
+            result = self.routing.handle_inbound(inbound, persist_inbound=False)
+        except Exception as exc:
+            with self.session_factory() as session:
+                event = session.get(TransportEvent, event_id)
+                if event is not None:
+                    self._schedule_retry_pending(session, event, {"route": {"route_reason": f"retry_runtime_error:{type(exc).__name__}"}}, now=now)
+                session.commit()
+            return
+
+        if self._is_retry_pending(result):
+            with self.session_factory() as session:
+                event = session.get(TransportEvent, event_id)
+                if event is not None:
+                    self._schedule_retry_pending(session, event, result, now=now)
+                session.commit()
+            return
+
+        reply_text = self._build_reply_text(result)
+        with self.session_factory() as session:
+            event = session.get(TransportEvent, event_id)
+            if event is None:
+                return
+            if not reply_text:
+                mark_transport_event_failed(session, event, "retry_completed_without_customer_reply")
+                session.commit()
+                return
+
+            peer_id = self._string_id(self._extract_message(event.payload_json).get("peer_id"))
+            conversation_id = (result.get("case") or {}).get("conversation_id")
+            if conversation_id is None:
+                conversation = session.scalar(select(Conversation).where(Conversation.external_id == self._conversation_external_id(peer_id)))
+                conversation_id = conversation.id if conversation is not None else None
+            if conversation_id is not None:
+                state = get_or_create_conversation_transport_state(session, conversation_id=conversation_id, platform="vk")
+                if is_override_active(state, now=now):
+                    mark_transport_event_processed(session, event, status="suppressed")
+                    session.commit()
+                    return
+            session.commit()
+
+        delivery = self.sender.send_message(peer_id=peer_id, text=reply_text)
+        sent = delivery.get("sent")
+        if sent is None:
+            sent = bool(delivery.get("ok"))
+        with self.session_factory() as session:
+            event = session.get(TransportEvent, event_id)
+            if event is None:
+                return
+            mark_transport_event_processed(session, event, status="processed" if sent else "failed")
+            if not sent:
+                event.error_text = self._format_delivery_error(delivery)
+            elif conversation_id is not None:
+                case_id = (result.get("case") or {}).get("case_id")
+                state = get_or_create_conversation_transport_state(session, conversation_id=conversation_id, platform="vk")
+                persist_outbound_transport_send(
+                    session,
+                    platform="vk",
+                    conversation_id=conversation_id,
+                    case_id=case_id,
+                    peer_external_id=peer_id,
+                    random_id=str(delivery["random_id"]),
+                    content_text=reply_text,
+                    external_message_id=delivery.get("external_message_id"),
+                    sent_at=delivery.get("sent_at"),
+                )
+                set_last_bot_reply(session, state, replied_at=delivery.get("sent_at"))
+            session.commit()
+        if sent and (case_id := (result.get("case") or {}).get("case_id")) is not None:
+            self.routing.record_outbound_message(case_id, reply_text)
+
+    def _schedule_retry_pending(self, session, event: TransportEvent, result: dict[str, Any], *, now: datetime | None = None) -> None:
+        route = result.get("route") or {}
+        reason = str(route.get("route_reason") or "kb_agent_transport_failure")
+        mark_transport_event_retry_pending(
+            session,
+            event,
+            error_text=reason,
+            available_at=(now or datetime.now(UTC)) + timedelta(seconds=settings.kb_agent_deferred_retry_delay_seconds),
+        )
+
+    @staticmethod
+    def _is_retry_pending(result: dict[str, Any]) -> bool:
+        outcome = result.get("outcome") or {}
+        return str(outcome.get("outcome_type") or "") == "retry_pending"
+
+    def _inbound_from_event(self, event: dict[str, Any]) -> InboundMessage:
+        message = self._extract_message(event)
+        peer_id = self._string_id(message.get("peer_id"))
+        from_id = self._string_id(message.get("from_id"))
+        message_id = self._string_id(message.get("id"))
+        return InboundMessage(
+            channel="vk",
+            external_user_id=from_id,
+            external_chat_id=peer_id,
+            text=str(message.get("text") or "").strip(),
+            external_message_id=message_id,
+            external_event_type="message_new",
+            external_event_id=f"vk:message_new:{peer_id}:{message_id}",
+            received_at=self._event_time(message),
+            raw_event=event,
+            metadata={"group_id": event.get("group_id"), "peer_id": peer_id, "from_id": from_id},
+        )
 
     def _handle_message_reply(self, event: dict[str, Any]) -> dict[str, Any]:
         message = self._extract_message(event)

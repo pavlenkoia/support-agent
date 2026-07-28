@@ -20,6 +20,8 @@ class TransportEvent(Base):
     conversation_external_id: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
     dedupe_key: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="received", server_default="received")
+    retry_attempts: Mapped[int] = mapped_column(nullable=False, default=0, server_default="0")
+    available_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), index=True)
     payload_json: Mapped[dict[str, Any]] = mapped_column(JSON(), nullable=False)
     received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

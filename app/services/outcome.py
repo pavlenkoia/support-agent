@@ -29,6 +29,15 @@ class OutcomeService:
                 "outcome_payload": reply,
             }
 
+        if route_name == "retry_pending":
+            case["case_status"] = "retry_pending"
+            context["case_state"]["case_status"] = "retry_pending"
+            return {
+                "outcome_type": "retry_pending",
+                "outcome_status": "retry_pending",
+                "outcome_payload": reply,
+            }
+
         if route_name == "out_of_scope":
             case["case_status"] = "resolved"
             context["case_state"]["case_status"] = "resolved"

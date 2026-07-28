@@ -11,6 +11,7 @@ from app.models.conversation import Conversation
 from app.models.conversation_transport_state import ConversationTransportState
 from app.models.message import Message
 from app.models.outbound_transport_send import OutboundTransportSend
+from app.models.transport_event import TransportEvent
 from app.models.user import User
 from app.services.persistence import activate_human_override, get_or_create_conversation_transport_state
 from app.services.vk_gateway import VKGatewayService
@@ -101,6 +102,35 @@ class StubRouting:
         self.recorded_outbound.append((case_id, text))
 
 
+class AlwaysRetryRouting(StubRouting):
+    def handle_inbound(self, payload, *, persist_inbound: bool = True) -> dict:
+        _ = (payload, persist_inbound)
+        return {
+            "case": {"conversation_id": 1, "case_id": 1, "case_status": "retry_pending"},
+            "outcome": {"outcome_type": "retry_pending", "outcome_payload": {"response_text": ""}},
+        }
+
+
+class DeferredRetryRouting(StubRouting):
+    def __init__(self) -> None:
+        super().__init__()
+        self.calls = 0
+        self.persist_flags: list[bool] = []
+
+    def handle_inbound(self, payload, *, persist_inbound: bool = True) -> dict:
+        self.calls += 1
+        self.persist_flags.append(persist_inbound)
+        if self.calls == 1:
+            return {
+                "case": {"conversation_id": 1, "case_id": 1, "case_status": "retry_pending"},
+                "outcome": {"outcome_type": "retry_pending", "outcome_payload": {"response_text": ""}},
+            }
+        return {
+            "case": {"conversation_id": 1, "case_id": 1, "case_status": "resolved"},
+            "outcome": {"outcome_type": "answer", "outcome_payload": {"response_text": "Ответ после повтора"}},
+        }
+
+
 class RaceRouting(StubRouting):
     def __init__(self, session_factory, *, response_text: str = "Готовый ответ") -> None:
         super().__init__(response_text=response_text)
@@ -128,6 +158,62 @@ def make_service(tmp_path: Path, *, routing=None, sender=None, client=None) -> t
         override_silence_seconds=3600,
     )
     return service, session_factory
+
+
+def test_vk_gateway_retries_pending_kb_transport_failure_without_intermediate_customer_reply(tmp_path: Path) -> None:
+    sender = RecordingVKSender()
+    routing = DeferredRetryRouting()
+    service, session_factory = make_service(tmp_path, routing=routing, sender=sender)
+    event = {
+        "type": "message_new",
+        "group_id": 55,
+        "object": {"message": {"id": 100, "peer_id": 2000, "from_id": 3000, "text": "Есть ли ограничения по весу?", "date": 1780000000}},
+    }
+
+    first = service.handle_event(event)
+
+    assert first["retry_pending"] is True
+    assert sender.calls == []
+    with session_factory() as session:
+        stored = session.scalar(select(TransportEvent).where(TransportEvent.dedupe_key == "vk:message_new:2000:100"))
+        assert stored is not None
+        assert stored.status == "retry_pending"
+        assert stored.retry_attempts == 1
+        due_at = stored.available_at
+
+    retried = service.process_due_retries(now=due_at + timedelta(seconds=1))
+
+    assert retried["processed"] == 1
+    assert sender.calls == [("2000", "Ответ после повтора")]
+    assert routing.persist_flags == [True, False]
+    with session_factory() as session:
+        stored = session.scalar(select(TransportEvent).where(TransportEvent.dedupe_key == "vk:message_new:2000:100"))
+        assert stored is not None
+        assert stored.status == "processed"
+
+
+def test_vk_gateway_marks_exhausted_kb_retry_for_human_handling(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr("app.services.vk_gateway.settings.kb_agent_deferred_retry_max_attempts", 0)
+    service, session_factory = make_service(tmp_path, routing=AlwaysRetryRouting())
+    event = {
+        "type": "message_new",
+        "group_id": 55,
+        "object": {"message": {"id": 99, "peer_id": 1999, "from_id": 2999, "text": "Есть ли ограничения по весу?", "date": 1780000000}},
+    }
+
+    service.handle_event(event)
+    with session_factory() as session:
+        stored = session.scalar(select(TransportEvent).where(TransportEvent.dedupe_key == "vk:message_new:1999:99"))
+        assert stored is not None
+        due_at = stored.available_at
+
+    service.process_due_retries(now=due_at + timedelta(seconds=1))
+
+    with session_factory() as session:
+        stored = session.scalar(select(TransportEvent).where(TransportEvent.dedupe_key == "vk:message_new:1999:99"))
+        assert stored is not None
+        assert stored.status == "waiting_human"
+        assert stored.error_text == "kb_agent_retry_exhausted"
 
 
 def test_vk_gateway_populates_missing_user_display_name_from_vk_profile(tmp_path: Path) -> None:

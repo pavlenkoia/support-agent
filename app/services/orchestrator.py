@@ -197,7 +197,9 @@ class OrchestratorService:
             "route_reason": str(final_reply.get("reason") or "prompt_runtime"),
             "route_confidence": float(final_reply.get("confidence", 0.0)),
             "reply": {
-                "response_text": str(final_reply.get("response_text") or self.policy.render_cannot_answer()),
+                "response_text": ""
+                if str(final_reply.get("route") or "") == "retry_pending"
+                else str(final_reply.get("response_text") or self.policy.render_cannot_answer()),
                 "reason": str(final_reply.get("reason") or "prompt_runtime"),
                 "tool_observations": tool_observations,
             },
@@ -270,6 +272,14 @@ class OrchestratorService:
         planner_action: str,
         planner_reason: str,
     ) -> dict[str, Any]:
+        if kb_result.get("grounding_status") == "retry_pending":
+            return {
+                "route": "retry_pending",
+                "response_text": "",
+                "confidence": 0.0,
+                "reason": str(kb_result.get("reason") or "kb_agent_transport_failure"),
+                "llm_trace": [],
+            }
         if hasattr(self.direct_llm, "respond"):
             return self.direct_llm.respond(
                 text,

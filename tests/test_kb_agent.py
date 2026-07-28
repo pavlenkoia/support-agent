@@ -32,6 +32,32 @@ class RawSequentialClient(BaseLLMClient):
         return self.responses.pop(0)
 
 
+class BrokenExtractionClient(BaseLLMClient):
+    def generate(self, *, system_prompt: str, user_prompt: str, temperature: float = 0.0, response_format=None) -> str:
+        _ = (system_prompt, user_prompt, temperature, response_format)
+        raise RuntimeError("IncompleteRead")
+
+
+def test_kb_agent_marks_transport_failure_retry_pending_without_reusing_unrelated_context() -> None:
+    service = KBAgentService(client=BrokenExtractionClient())
+
+    result = service.read(
+        "Есть ли ограничения по весу?",
+        [
+            {
+                "source_ref": "/kb/pricing.md",
+                "source_type": "snippet",
+                "text": "Скидки предусмотрены только для школьников и студентов.",
+            }
+        ],
+    )
+
+    assert result["grounding_status"] == "retry_pending"
+    assert result["grounded_facts"] == []
+    assert result["answer_basis"] == ""
+    assert result["trace"]["extraction"]["reason"] == "grounding_error:RuntimeError"
+
+
 def test_kb_agent_navigates_reviews_and_extracts_grounded_facts_from_selected_pages(tmp_path: Path) -> None:
     booking = tmp_path / "booking-and-schedule.md"
     booking.write_text("# Booking and Schedule\n\nПолет лучше согласовать заранее.\n", encoding="utf-8")

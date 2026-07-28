@@ -149,6 +149,22 @@ def mark_transport_event_processed(session: Session, event: TransportEvent, *, s
     return event
 
 
+def mark_transport_event_retry_pending(
+    session: Session,
+    event: TransportEvent,
+    *,
+    error_text: str,
+    available_at: datetime,
+) -> TransportEvent:
+    event.status = "retry_pending"
+    event.retry_attempts += 1
+    event.available_at = normalize_timestamp(available_at)
+    event.error_text = error_text
+    event.processed_at = None
+    session.flush()
+    return event
+
+
 def mark_transport_event_failed(session: Session, event: TransportEvent, error_text: str) -> TransportEvent:
     event.status = "failed"
     event.error_text = error_text

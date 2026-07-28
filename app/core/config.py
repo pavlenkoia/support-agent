@@ -48,6 +48,8 @@ class Settings(BaseSettings):
     kb_agent_skip_coverage_review: bool = False
     kb_agent_deterministic_navigation: bool = False
     kb_agent_minimal_extraction_schema: bool = False
+    kb_agent_deferred_retry_delay_seconds: int = 45
+    kb_agent_deferred_retry_max_attempts: int = 2
 
     summary_llm_provider: str = "stub"
     summary_llm_base_url: str | None = None

@@ -484,9 +484,14 @@ class KBAgentService:
             self._record_llm_call('grounded_extraction')
         except Exception as exc:
             self._record_llm_call('grounded_extraction')
-            fallback = self._fallback_grounded_facts(answer_context, reason=f"grounding_error:{type(exc).__name__}")
-            fallback["reason"] = f"grounding_error:{type(exc).__name__}"
-            return fallback
+            return {
+                "grounding_status": "retry_pending",
+                "answer_basis": "",
+                "grounded_facts": [],
+                "missing_information": [],
+                "cited_source_refs": [],
+                "reason": f"grounding_error:{type(exc).__name__}",
+            }
 
         if not parsed.get("cited_source_refs"):
             parsed["cited_source_refs"] = self._extract_source_refs(answer_context)

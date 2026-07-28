@@ -51,6 +51,21 @@ class FakeKBAgentService:
         return packet
 
 
+class RetryPendingKBAgentService:
+    def read(self, text: str, kb_hits: list[dict], *, conversation_context: dict | None = None) -> dict:
+        _ = (text, kb_hits, conversation_context)
+        return {
+            "kb_status": "found",
+            "kb_mode": "test_stub",
+            "grounding_status": "retry_pending",
+            "answer_context": [],
+            "grounded_facts": [],
+            "answer_basis": "",
+            "source_refs": [],
+            "trace": {"extraction": {"reason": "grounding_error:IncompleteRead"}},
+        }
+
+
 class FakeDirectLLMService:
     def __init__(self) -> None:
         self.calls: list[dict] = []
@@ -184,6 +199,25 @@ def test_inbound_message_uses_prompt_driven_runtime_and_mandatory_kb_lookup(tmp_
     respond_calls = [call for call in routing.direct_llm.calls if call["method"] == "respond"]
     assert respond_calls[-1]["first_reply_in_dialogue"] is True
     assert respond_calls[-1]["kb_result"]["answer_context"]
+
+
+def test_routing_service_defers_kb_transport_failure_without_customer_reply(tmp_path: Path) -> None:
+    direct_llm = FakeDirectLLMService()
+    routing = make_test_routing_service(tmp_path, direct_llm=direct_llm, kb_agent=RetryPendingKBAgentService())
+
+    result = routing.handle_inbound(
+        InboundMessage(
+            channel="vk",
+            external_user_id="u-retry",
+            external_chat_id="c-retry",
+            text="Есть ли ограничения по весу?",
+        )
+    )
+
+    assert result["route"]["route"] == "retry_pending"
+    assert result["outcome"]["outcome_type"] == "retry_pending"
+    assert result["outcome"]["outcome_payload"]["response_text"] == ""
+    assert direct_llm.calls == []
 
 
 def test_routing_service_marks_out_of_scope_request(tmp_path: Path) -> None:

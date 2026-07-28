@@ -75,10 +75,11 @@ class RoutingService:
             session.commit()
             return reset_result
 
-    def handle_inbound(self, payload: InboundMessage) -> dict:
+    def handle_inbound(self, payload: InboundMessage, *, persist_inbound: bool = True) -> dict:
         with self.session_factory() as session:
             case = resolve_case(session, payload)
-            persist_inbound_message(session, case["case_id"], payload)
+            if persist_inbound:
+                persist_inbound_message(session, case["case_id"], payload)
             context = build_context(session, payload, case, summary_service=self.summary_service)
             knowledge_query = self._build_knowledge_query(context)
             turn_classification = {
