@@ -4,7 +4,15 @@ import logging
 from http.client import IncompleteRead
 from urllib import error
 
+import pytest
+
 from app.integrations.llm.openai_compatible import OpenAICompatibleClient
+
+
+@pytest.fixture(autouse=True)
+def reset_openai_compatible_pool_state() -> None:
+    with OpenAICompatibleClient._pool_lock:
+        OpenAICompatibleClient._pool_active_key_indexes.clear()
 
 
 class FakeResponse:
@@ -104,6 +112,85 @@ def test_openai_compatible_client_fails_over_to_next_api_key_on_auth_error(monke
         }
     ]
     assert "llm api key failover triggered" in caplog.text
+
+
+def test_openai_compatible_client_keeps_last_successful_pool_slot_until_it_fails(monkeypatch) -> None:
+    seen_auth_headers: list[str] = []
+    calls_by_authorization: dict[str, int] = {}
+
+    def fake_urlopen(req, timeout):
+        _ = timeout
+        authorization = req.headers["Authorization"]
+        seen_auth_headers.append(authorization)
+        calls_by_authorization[authorization] = calls_by_authorization.get(authorization, 0) + 1
+        should_fail = (
+            authorization == "Bearer rotation-primary-token" and calls_by_authorization[authorization] == 1
+        ) or (
+            authorization == "Bearer rotation-secondary-token" and calls_by_authorization[authorization] == 2
+        )
+        if should_fail:
+            raise error.HTTPError(
+                req.full_url,
+                401,
+                "quota unavailable",
+                hdrs=None,
+                fp=io.BytesIO(b'{"error":"quota unavailable"}'),
+            )
+        return FakeResponse({"choices": [{"message": {"content": authorization}}]})
+
+    monkeypatch.setattr("app.integrations.llm.openai_compatible.request.urlopen", fake_urlopen)
+    client = OpenAICompatibleClient(
+        provider="mistral",
+        base_url="https://example.test/v1",
+        api_key="rotation-primary-token",
+        api_keys=["rotation-primary-token", "rotation-secondary-token"],
+        model="test-model",
+        max_retries=0,
+    )
+
+    assert client.generate(system_prompt="sys", user_prompt="first") == "Bearer rotation-secondary-token"
+    assert client.generate(system_prompt="sys", user_prompt="second") == "Bearer rotation-primary-token"
+    assert client.generate(system_prompt="sys", user_prompt="third") == "Bearer rotation-primary-token"
+
+    assert seen_auth_headers == [
+        "Bearer rotation-primary-token",
+        "Bearer rotation-secondary-token",
+        "Bearer rotation-secondary-token",
+        "Bearer rotation-primary-token",
+        "Bearer rotation-primary-token",
+    ]
+
+
+def test_openai_compatible_clients_share_last_successful_pool_slot(monkeypatch) -> None:
+    seen_auth_headers: list[str] = []
+
+    def fake_urlopen(req, timeout):
+        _ = timeout
+        authorization = req.headers["Authorization"]
+        seen_auth_headers.append(authorization)
+        if authorization == "Bearer shared-primary-token":
+            raise error.HTTPError(
+                req.full_url,
+                401,
+                "quota unavailable",
+                hdrs=None,
+                fp=io.BytesIO(b'{"error":"quota unavailable"}'),
+            )
+        return FakeResponse({"choices": [{"message": {"content": authorization}}]})
+
+    monkeypatch.setattr("app.integrations.llm.openai_compatible.request.urlopen", fake_urlopen)
+    first_client = OpenAICompatibleClient(
+        provider="mistral", base_url="https://example.test/v1", api_key="shared-primary-token",
+        api_keys=["shared-primary-token", "shared-secondary-token"], model="test-model", max_retries=0,
+    )
+    second_client = OpenAICompatibleClient(
+        provider="mistral", base_url="https://example.test/v1", api_key="shared-primary-token",
+        api_keys=["shared-primary-token", "shared-secondary-token"], model="other-model", max_retries=0,
+    )
+
+    assert first_client.generate(system_prompt="sys", user_prompt="first") == "Bearer shared-secondary-token"
+    assert second_client.generate(system_prompt="sys", user_prompt="second") == "Bearer shared-secondary-token"
+    assert seen_auth_headers == ["Bearer shared-primary-token", "Bearer shared-secondary-token", "Bearer shared-secondary-token"]
 
 
 def test_openai_compatible_client_retries_transient_http_error_on_same_api_key(monkeypatch) -> None:

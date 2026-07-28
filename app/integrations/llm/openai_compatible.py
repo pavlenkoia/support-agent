@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import random
 import socket
+import threading
 import time
 from http.client import IncompleteRead
 from typing import Any
@@ -15,6 +17,9 @@ logger = logging.getLogger(__name__)
 
 
 class OpenAICompatibleClient(BaseLLMClient):
+    _pool_active_key_indexes: dict[tuple[str, str, tuple[str, ...]], int] = {}
+    _pool_lock = threading.Lock()
+
     def __init__(
         self,
         *,
@@ -35,11 +40,26 @@ class OpenAICompatibleClient(BaseLLMClient):
             normalized_keys.insert(0, api_key)
         self.api_keys = normalized_keys or [api_key]
         self.api_key = self.api_keys[0]
+        self._pool_key = (
+            self.provider,
+            self.base_url,
+            tuple(hashlib.sha256(key.encode("utf-8")).hexdigest() for key in self.api_keys),
+        )
+        with self._pool_lock:
+            self._pool_active_key_indexes.setdefault(self._pool_key, 0)
         self.model = model
         self.timeout_seconds = timeout_seconds
         self.max_retries = max(0, int(max_retries))
         self.retry_backoff_seconds = max(0.0, float(retry_backoff_seconds))
         self.retry_deadline_seconds = None if retry_deadline_seconds is None else max(0.0, float(retry_deadline_seconds))
+
+    def _get_active_key_index(self) -> int:
+        with self._pool_lock:
+            return self._pool_active_key_indexes.get(self._pool_key, 0)
+
+    def _set_active_key_index(self, index: int) -> None:
+        with self._pool_lock:
+            self._pool_active_key_indexes[self._pool_key] = index
 
     def _retry_delay_seconds(self, retry_attempt: int) -> float:
         base_delay = self.retry_backoff_seconds * (2 ** retry_attempt)
@@ -132,12 +152,18 @@ class OpenAICompatibleClient(BaseLLMClient):
             payload["response_format"] = response_format
 
         total_attempts = 0
-        active_key_index = 0
+        key_indexes = [
+            (self._get_active_key_index() + offset) % len(self.api_keys)
+            for offset in range(len(self.api_keys))
+        ]
+        active_key_position = 0
+        active_key_index = key_indexes[active_key_position]
         data: dict[str, Any] | None = None
         last_error: Exception | None = None
         failover_events: list[dict[str, Any]] = []
 
-        while active_key_index < len(self.api_keys):
+        while active_key_position < len(key_indexes):
+            active_key_index = key_indexes[active_key_position]
             active_api_key = self.api_keys[active_key_index]
             req = self._build_request(endpoint=endpoint, payload=payload, api_key=active_api_key)
             for retry_attempt in range(self.max_retries + 1):
@@ -159,6 +185,7 @@ class OpenAICompatibleClient(BaseLLMClient):
                             request_timeout = min(request_timeout, remaining)
                     with request.urlopen(req, timeout=request_timeout) as response:
                         data = json.loads(response.read().decode("utf-8"))
+                    self._set_active_key_index(active_key_index)
                     self._set_last_call_info(
                         {
                             "provider": self.provider,
@@ -195,14 +222,16 @@ class OpenAICompatibleClient(BaseLLMClient):
                             failover_events=failover_events,
                         )
                         raise RuntimeError("LLM retry deadline exceeded") from exc
-                    if should_fail_over and active_key_index + 1 < len(self.api_keys):
+                    if should_fail_over and active_key_position + 1 < len(key_indexes):
+                        next_key_index = key_indexes[active_key_position + 1]
                         failover_event = {
                             "from_api_key_index": active_key_index,
-                            "to_api_key_index": active_key_index + 1,
+                            "to_api_key_index": next_key_index,
                             "http_status": exc.code,
                             "reason": self._summarize_http_detail(detail),
                         }
                         failover_events.append(failover_event)
+                        self._set_active_key_index(next_key_index)
                         logger.warning(
                             "llm api key failover triggered provider=%s model=%s from_slot=%s to_slot=%s http_status=%s reason=%s",
                             self.provider,
@@ -213,7 +242,7 @@ class OpenAICompatibleClient(BaseLLMClient):
                             failover_event["reason"],
                         )
                         last_error = RuntimeError(f"LLM HTTP {exc.code}: {detail}")
-                        active_key_index += 1
+                        active_key_position += 1
                         break
                     self._set_last_call_info(
                         {
@@ -263,7 +292,7 @@ class OpenAICompatibleClient(BaseLLMClient):
 
             if data is not None:
                 break
-            if active_key_index >= len(self.api_keys):
+            if active_key_position >= len(key_indexes):
                 break
         else:  # pragma: no cover - defensive
             raise last_error or RuntimeError("LLM request failed")
