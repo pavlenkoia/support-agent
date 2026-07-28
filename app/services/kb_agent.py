@@ -205,11 +205,21 @@ class KBAgentService:
 
         kb_context, kb_mode = self._prepare_kb_context(kb_hits)
         trace: dict[str, Any] = {"kb_mode": kb_mode}
+        if any(item.get("kb_architecture") == "llm_wiki" for item in kb_context):
+            trace.update(
+                {
+                    "kb_architecture": "llm_wiki",
+                    "navigation_mode": "llm",
+                    "coverage_review_mode": "llm",
+                    "extraction_mode": "grounded",
+                }
+            )
         answer_context = kb_context
         answer_mode = kb_mode
 
         if kb_mode == "llm_wiki_catalog":
-            if settings.kb_agent_deterministic_navigation:
+            is_compiled_llm_wiki = trace.get("kb_architecture") == "llm_wiki"
+            if settings.kb_agent_deterministic_navigation and not is_compiled_llm_wiki:
                 navigation = self._deterministic_navigation(text, kb_context, conversation_context=conversation_context)
             else:
                 navigation = self._plan_navigation(text, kb_context, conversation_context=conversation_context)
@@ -219,9 +229,11 @@ class KBAgentService:
                 limit=MAX_CATALOG_SELECTION,
             )
             if not selected_refs:
+                if trace.get("kb_architecture") == "llm_wiki":
+                    return self._retry_pending_catalog_read(trace, navigation, "navigation_unavailable")
                 selected_refs = self._fallback_select_catalog_refs(text, kb_context, limit=MAX_CATALOG_SELECTION)
             loaded_pages = self._load_catalog_pages(kb_context, selected_refs)
-            if settings.kb_agent_skip_coverage_review:
+            if settings.kb_agent_skip_coverage_review and not is_compiled_llm_wiki:
                 review = {
                     "coverage_status": "enough",
                     "missing_facts": [],
@@ -236,6 +248,8 @@ class KBAgentService:
                     navigation,
                     conversation_context=conversation_context,
                 )
+            if trace.get("kb_architecture") == "llm_wiki" and review.get("coverage_status") == "error":
+                return self._retry_pending_catalog_read(trace, navigation, "coverage_review_unavailable", review=review)
             if review.get("coverage_status") == "need_more_pages":
                 additional_refs = self._normalize_catalog_refs(
                     review.get("additional_source_refs", []),
@@ -273,6 +287,33 @@ class KBAgentService:
             "missing_information": extraction.get("missing_information", []),
             "source_refs": source_refs,
             "trace": trace | {"extraction": extraction, "llm_trace": list(self._active_llm_trace)},
+        }
+
+    def _retry_pending_catalog_read(
+        self,
+        trace: dict[str, Any],
+        navigation: dict[str, Any],
+        reason: str,
+        *,
+        review: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        return {
+            "kb_status": "found",
+            "kb_mode": "llm_wiki_selected_pages",
+            "grounding_status": "retry_pending",
+            "answer_context": [],
+            "grounded_facts": [],
+            "answer_basis": "",
+            "missing_information": [],
+            "source_refs": [],
+            "trace": trace
+            | {
+                "navigation": navigation,
+                "review": review or {"coverage_status": "not_run", "reason": reason},
+                "selected_source_refs": [],
+                "extraction": {"reason": reason},
+                "llm_trace": list(self._active_llm_trace),
+            },
         }
 
     def _plan_navigation(
@@ -327,7 +368,7 @@ class KBAgentService:
             return {
                 "user_intent": text,
                 "information_needs": [],
-                "selected_source_refs": self._fallback_select_catalog_refs(text, kb_context, limit=MAX_CATALOG_SELECTION),
+                "selected_source_refs": [],
                 "reason": f"navigation_error:{type(exc).__name__}",
             }
 
@@ -391,7 +432,7 @@ class KBAgentService:
         except Exception as exc:
             self._record_llm_call('coverage_review')
             return {
-                "coverage_status": "enough",
+                "coverage_status": "error",
                 "missing_facts": [],
                 "additional_source_refs": [],
                 "reason": f"coverage_review_error:{type(exc).__name__}",
@@ -502,7 +543,12 @@ class KBAgentService:
             kb_context.append(
                 {
                     "source_ref": hit.get("source_ref"),
+                    "source_path": hit.get("source_path"),
                     "source_type": hit.get("source_type"),
+                    "kb_architecture": hit.get("kb_architecture"),
+                    "navigation_mode": hit.get("navigation_mode"),
+                    "coverage_review_mode": hit.get("coverage_review_mode"),
+                    "extraction_mode": hit.get("extraction_mode"),
                     "page_title": hit.get("page_title"),
                     "linked_pages": hit.get("linked_pages", []),
                     "page_summary": hit.get("page_summary"),
@@ -562,12 +608,12 @@ class KBAgentService:
         cards_by_ref = {item.get("source_ref"): item for item in kb_context if item.get("source_ref")}
         loaded: list[dict] = []
         for ref in selected_refs[:MAX_SELECTED_WIKI_PAGES]:
-            path = Path(ref)
+            card = cards_by_ref.get(ref, {})
+            path = Path(str(card.get("source_path") or ref))
             if not path.exists() or not path.is_file():
                 continue
             raw_text = path.read_text(encoding="utf-8")
             body = self._strip_frontmatter(raw_text).strip()
-            card = cards_by_ref.get(ref, {})
             loaded.append(
                 {
                     "source_ref": ref,

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -36,6 +37,9 @@ class RetrievalService:
             return {"kb_status": "not_found", "kb_snippets": []}
 
         wiki_root = Path(knowledge_root)
+        compiled_catalog_path = wiki_root / "index" / "catalog.json"
+        if compiled_catalog_path.is_file():
+            return self._build_compiled_llm_wiki_catalog(wiki_root, compiled_catalog_path)
         index_path = wiki_root / "index.md"
         if not index_path.exists():
             return {"kb_status": "not_found", "kb_snippets": []}
@@ -203,6 +207,67 @@ class RetrievalService:
 
     def _should_use_llm_wiki_catalog(self, *, total_chars: int, page_count: int) -> bool:
         return page_count <= SMALL_WIKI_MAX_PAGES and total_chars <= SMALL_WIKI_MAX_TOTAL_CHARS
+
+    def _build_compiled_llm_wiki_catalog(self, wiki_root: Path, catalog_path: Path) -> dict:
+        """Expose every validated compiled page to LLM navigation without query scoring."""
+        raw_catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
+        cards = raw_catalog.get("pages") if isinstance(raw_catalog, dict) else None
+        if not isinstance(cards, list):
+            return {"kb_status": "not_found", "kb_snippets": []}
+
+        snippets: list[dict] = [
+            {
+                "text": "# Compiled Wiki Catalog\n\nAll compiled page cards follow.",
+                "source_type": "wiki_index",
+                "source_ref": "index/catalog.json",
+                "source_path": str(catalog_path),
+                "retrieval_notes": "complete compiled-wiki catalog for LLM navigation",
+                "retrieval_mode": "llm_wiki_catalog",
+                "kb_architecture": "llm_wiki",
+                "navigation_mode": "llm",
+                "coverage_review_mode": "llm",
+                "extraction_mode": "grounded",
+            }
+        ]
+        for card in cards:
+            if not isinstance(card, dict):
+                return {"kb_status": "not_found", "kb_snippets": []}
+            source_ref = str(card.get("source_ref") or "")
+            source_path = wiki_root / source_ref
+            if not source_ref or not source_path.is_file():
+                return {"kb_status": "not_found", "kb_snippets": []}
+            title = str(card.get("title") or Path(source_ref).stem)
+            summary = str(card.get("description") or "")
+            linked_pages = [str(link) for link in card.get("linked_source_refs", []) if str(link)]
+            snippets.append(
+                {
+                    "text": self._format_page_card(title=title, summary=summary, preview="", linked_pages=linked_pages),
+                    "source_type": "wiki_page_card",
+                    "source_ref": source_ref,
+                    "source_path": str(source_path),
+                    "retrieval_notes": "compiled-wiki page card for LLM navigation before selective full-page reading",
+                    "retrieval_mode": "llm_wiki_catalog",
+                    "kb_architecture": "llm_wiki",
+                    "navigation_mode": "llm",
+                    "coverage_review_mode": "llm",
+                    "extraction_mode": "grounded",
+                    "page_title": title,
+                    "linked_pages": linked_pages,
+                    "page_summary": summary,
+                    "page_preview": "",
+                }
+            )
+        return {
+            "kb_status": "found",
+            "kb_snippets": snippets,
+            "kb_mode": "llm_wiki_catalog",
+            "kb_architecture": "llm_wiki",
+            "navigation_mode": "llm",
+            "coverage_review_mode": "llm",
+            "extraction_mode": "grounded",
+            "kb_total_pages": len(cards),
+            "kb_total_chars": sum(len(str(item.get("text") or "")) for item in snippets),
+        }
 
     def _build_llm_wiki_catalog(self, *, index_path: Path, page_texts: dict[Path, str], total_chars: int) -> dict:
         snippets: list[dict] = [
