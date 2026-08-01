@@ -38,6 +38,17 @@ To refresh the code graph after edits:
 graphify update .
 ```
 
+## Python quality checks
+
+Ruff is a pinned development dependency and is configured in `pyproject.toml`; use the repository command rather than an ambient Ruff configuration:
+
+```bash
+uv run ruff check .
+uv run pytest -q
+```
+
+The configuration intentionally ignores `B008` because `FastAPI Depends(...)` is the expected dependency-injection pattern, and `RUF001` because legitimate Cyrillic user-facing text must not be treated as ambiguous Latin characters. Existing lint findings that require behaviour review remain visible. Do not run a repository-wide `ruff --fix`; use an approved, explicit file/rule scope.
+
 ## Scope rule for this project
 
 - Graphify is a **must-have companion tool for agent work with the repo**.

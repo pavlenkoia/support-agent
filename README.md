@@ -45,10 +45,13 @@ Current runtime shape:
 
 ## Quick start
 
-### Local test run
+### Local quality checks
 ```bash
+uv run ruff check .
 uv run pytest -q
 ```
+
+Ruff is a pinned development dependency. The project configuration intentionally ignores FastAPI's `B008` dependency-injection pattern and `RUF001` for legitimate Cyrillic text. Existing review-required warnings remain visible; do not run a repository-wide `ruff --fix` without an approved scope.
 
 ### Start with Docker Compose (local development only)
 ```bash
