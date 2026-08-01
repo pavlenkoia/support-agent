@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 import re
-from datetime import UTC, datetime, date, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
-
 
 MONTHS_RU = {
     "января": 1,
@@ -280,7 +279,7 @@ class ToolRuntimeService:
         before = text[max(0, start - 6):start].lower()
         after = text[end:end + 12].lower()
         stripped_after = after.lstrip()
-        return stripped_after.startswith(":") or stripped_after.startswith("час") or before.endswith("к ")
+        return stripped_after.startswith((":", "час")) or before.endswith("к ")
 
     @staticmethod
     def _is_jump_schedule_request(text: str, conversation_context: dict | None = None) -> bool:
@@ -303,7 +302,7 @@ class ToolRuntimeService:
 
     @staticmethod
     def _nearest_day_only_date(current_date: date, day: int) -> date | None:
-        for month_offset in range(0, 13):
+        for month_offset in range(13):
             year = current_date.year + ((current_date.month - 1 + month_offset) // 12)
             month = ((current_date.month - 1 + month_offset) % 12) + 1
             candidate = ToolRuntimeService._safe_date(year, month, day)

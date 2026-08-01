@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from urllib import error, parse, request
+from urllib import error, request
 
 
 class TelegramBotClient:

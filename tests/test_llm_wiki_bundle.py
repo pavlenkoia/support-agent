@@ -7,7 +7,11 @@ from pathlib import Path
 from app.core.config import settings
 from app.integrations.llm.base import BaseLLMClient
 from app.services.kb_agent import KBAgentService
-from app.services.knowledge_bundle import BundleValidationError, compile_legacy_bundle, validate_compiled_bundle
+from app.services.knowledge_bundle import (
+    BundleValidationError,
+    compile_legacy_bundle,
+    validate_compiled_bundle,
+)
 from app.services.retrieval import RetrievalService
 
 
@@ -141,8 +145,8 @@ def test_compiler_records_legacy_external_hash_and_taxonomy_extension_without_mu
     assert (compiled_root / "raw" / "policy.md").read_bytes() == original_raw_bytes
     resource = manifest["raw_resources"][0]
     assert resource["source_ref"] == "raw/policy.md"
-    assert resource["declared_source_sha256"] == "legacy-external-" + hashlib.sha256("# Source\n\nOriginal policy source.\n".encode()).hexdigest()
-    assert resource["content_sha256"] == hashlib.sha256("# Source\n\nOriginal policy source.\n".encode()).hexdigest()
+    assert resource["declared_source_sha256"] == "legacy-external-" + hashlib.sha256(b"# Source\n\nOriginal policy source.\n").hexdigest()
+    assert resource["content_sha256"] == hashlib.sha256(b"# Source\n\nOriginal policy source.\n").hexdigest()
     taxonomy = json.loads((compiled_root / "schema" / "compatibility-taxonomy.json").read_text(encoding="utf-8"))
     assert taxonomy["legacy_undeclared_tags"] == ["legacy-extra"]
 

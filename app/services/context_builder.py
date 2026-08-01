@@ -8,7 +8,6 @@ from app.schemas.message import InboundMessage
 from app.workers.summarizer import SummaryService
 
 
-
 def build_context(
     session: Session,
     payload: InboundMessage,

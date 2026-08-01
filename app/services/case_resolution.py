@@ -9,7 +9,6 @@ from app.models.conversation import Conversation
 from app.models.user import User
 from app.schemas.message import InboundMessage
 
-
 PROBE_MARKER_KEYS = ("is_test", "source", "session_type", "scenario_name", "requested_by")
 
 

@@ -5,9 +5,8 @@ Revises: 0003_vk_transport_state
 Create Date: 2026-07-01
 """
 
-from alembic import op
 import sqlalchemy as sa
-
+from alembic import op
 
 revision = "0004_probe_session_markers"
 down_revision = "0003_vk_transport_state"

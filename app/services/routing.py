@@ -13,7 +13,11 @@ from app.services.direct_llm import DirectLLMService
 from app.services.kb_agent import KBAgentService
 from app.services.orchestrator import OrchestratorService
 from app.services.outcome import OutcomeService
-from app.services.persistence import persist_inbound_message, persist_outbound_message, persist_workflow_event
+from app.services.persistence import (
+    persist_inbound_message,
+    persist_outbound_message,
+    persist_workflow_event,
+)
 from app.services.policy import PolicyService
 from app.services.retrieval import RetrievalService
 from app.services.tool_runtime import ToolRuntimeService

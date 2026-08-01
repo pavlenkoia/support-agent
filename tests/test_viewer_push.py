@@ -1,12 +1,13 @@
-from datetime import UTC, datetime, timedelta
 import sys
 import types
+from datetime import UTC, datetime, timedelta
 
 from fastapi.testclient import TestClient
 
 from app.api.deps import get_viewer_push_service
 from app.core.config import settings
-from app.core.db import Base, make_session_factory as make_db_session_factory
+from app.core.db import Base
+from app.core.db import make_session_factory as make_db_session_factory
 from app.main import app
 from app.models.case import SupportCase
 from app.models.conversation import Conversation
@@ -16,7 +17,6 @@ from app.models.viewer_push_subscription import ViewerPushSubscription
 from app.schemas.message import InboundMessage
 from app.services.persistence import persist_inbound_message
 from app.services.viewer_push_service import ViewerPushService
-
 
 client = TestClient(app)
 

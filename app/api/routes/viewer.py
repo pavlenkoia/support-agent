@@ -12,6 +12,7 @@ from app.api.viewer_auth import (
     set_viewer_auth_cookie,
     verify_viewer_key,
 )
+from app.core.config import settings
 from app.schemas.viewer import (
     ViewerAuthStatus,
     ViewerDialogItem,
@@ -20,7 +21,6 @@ from app.schemas.viewer import (
     ViewerPushConfig,
     ViewerPushSubscriptionRequest,
 )
-from app.core.config import settings
 from app.services.viewer_push_service import ViewerPushService
 from app.services.viewer_service import ViewerService
 

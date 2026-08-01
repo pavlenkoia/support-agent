@@ -9,8 +9,8 @@ from app.core.config import settings
 from app.core.db import SessionLocal
 from app.integrations.vk.client import VKAPIClient
 from app.integrations.vk.sender import VKSender
-from app.models.conversation import Conversation
 from app.models.case import SupportCase
+from app.models.conversation import Conversation
 from app.models.transport_event import TransportEvent
 from app.models.user import User
 from app.schemas.message import InboundMessage

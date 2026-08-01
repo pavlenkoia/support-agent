@@ -1,9 +1,9 @@
 import json
 from pathlib import Path
 
+from app.core.config import settings
 from app.integrations.llm.base import BaseLLMClient
 from app.services.kb_agent import KBAgentService
-from app.core.config import settings
 
 
 class SequentialClient(BaseLLMClient):

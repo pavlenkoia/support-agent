@@ -9,7 +9,6 @@ from app.services.policy import PolicyService
 from app.services.retrieval import RetrievalService
 from app.services.tool_runtime import ToolRuntimeService
 
-
 CURRENT_WEIGHT_QUESTION = "Есть ли ограничения по весу?"
 PREVIOUS_DISCOUNT_CONTEXT = """Recent conversation context:
 - user: Здравствуйте! Меня заинтересовала эта услуга. Подскажите для лиц с ВБД есть какие-то скидки?

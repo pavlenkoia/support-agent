@@ -10,7 +10,6 @@ from fastapi import Cookie, Depends, HTTPException, Response, status
 
 from app.core.config import settings
 
-
 AUTH_REQUIRED_DETAIL = "Viewer authentication required."
 INVALID_KEY_DETAIL = "Invalid viewer access key."
 MISCONFIGURED_DETAIL = "Viewer authentication is misconfigured."

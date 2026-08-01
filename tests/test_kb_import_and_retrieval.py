@@ -3,7 +3,6 @@ from pathlib import Path
 from app.services.retrieval import RetrievalService
 from scripts.import_kb import compile_profile
 
-
 RAW_FILES = {
     "certificates-source.md": "# Certificates\n",
     "general-info-source.md": "# General info\n",

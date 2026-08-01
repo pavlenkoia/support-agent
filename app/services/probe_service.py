@@ -80,7 +80,7 @@ class ProbeService:
         )
         result = self.routing.handle_inbound(payload)
         case_id = int((result.get("case") or {}).get("case_id"))
-        reply_text = str((((result.get("outcome") or {}).get("outcome_payload") or {}).get("response_text") or "")).strip()
+        reply_text = str(((result.get("outcome") or {}).get("outcome_payload") or {}).get("response_text") or "").strip()
         if reply_text:
             self.routing.record_outbound_message(case_id, reply_text)
 

@@ -1,5 +1,5 @@
-from pathlib import Path
 import json
+from pathlib import Path
 
 from fastapi.testclient import TestClient
 from sqlalchemy import text
@@ -11,10 +11,9 @@ from app.schemas.message import InboundMessage
 from app.services.direct_llm import DirectLLMService
 from app.services.orchestrator import OrchestratorService
 from app.services.policy import PolicyService
+from app.services.routing import RoutingService
 from app.services.system_prompt import SystemPromptService
 from app.services.tool_runtime import ToolRuntimeService
-from app.services.routing import RoutingService
-
 
 client = TestClient(app)
 

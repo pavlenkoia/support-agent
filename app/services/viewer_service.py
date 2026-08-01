@@ -13,7 +13,11 @@ from app.models.case import SupportCase
 from app.models.conversation import Conversation
 from app.models.message import Message
 from app.models.user import User
-from app.schemas.viewer import ViewerDialogItem, ViewerDialogMessagesResponse, ViewerMessageItem
+from app.schemas.viewer import (
+    ViewerDialogItem,
+    ViewerDialogMessagesResponse,
+    ViewerMessageItem,
+)
 
 
 @dataclass(slots=True)

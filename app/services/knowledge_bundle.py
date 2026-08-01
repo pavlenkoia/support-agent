@@ -9,7 +9,6 @@ from typing import Any
 
 import yaml
 
-
 PAGE_DIRS = ("concepts", "entities", "comparisons", "queries")
 REQUIRED_PAGE_FIELDS = ("title", "created", "updated", "type", "tags", "sources")
 WIKILINK_RE = re.compile(r"\[\[([^\]]+)\]\]")

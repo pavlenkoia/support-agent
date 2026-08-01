@@ -5,7 +5,6 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-
 TOKEN_RE = re.compile(r"[a-zA-Zа-яА-ЯёЁ0-9]{3,}")
 WIKILINK_RE = re.compile(r"\[\[([^\]]+)\]\]")
 PAGE_DIRS = ("concepts", "entities", "comparisons", "queries")

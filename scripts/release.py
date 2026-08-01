@@ -146,7 +146,7 @@ def verify_http_health() -> dict[str, object]:
     error: str | None = None
     while time.monotonic() < deadline:
         try:
-            with urlopen("http://127.0.0.1:8000/health", timeout=5) as response:  # noqa: S310
+            with urlopen("http://127.0.0.1:8000/health", timeout=5) as response:
                 payload = json.loads(response.read())
             if payload.get("status") == "ok":
                 return payload

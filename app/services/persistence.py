@@ -7,14 +7,14 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
+from app.models.case import SupportCase
 from app.models.conversation_transport_state import ConversationTransportState
 from app.models.message import Message
 from app.models.outbound_transport_send import OutboundTransportSend
 from app.models.transport_event import TransportEvent
-from app.models.workflow_event import WorkflowEvent
-from app.models.case import SupportCase
 from app.models.viewer_notification_outbox import ViewerNotificationOutbox
-from app.core.config import settings
+from app.models.workflow_event import WorkflowEvent
 from app.schemas.message import InboundMessage
 
 

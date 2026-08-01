@@ -2,7 +2,6 @@ from app.integrations.llm.base import BaseLLMClient
 from app.integrations.llm.openai_compatible import OpenAICompatibleClient, StubLLMClient
 
 
-
 def get_llm_client(
     *,
     provider: str,

@@ -12,7 +12,6 @@ from app.integrations.llm.base import BaseLLMClient
 from app.integrations.llm.factory import get_llm_client
 from app.services.system_prompt import SystemPromptService
 
-
 MAX_CATALOG_SELECTION = 3
 MAX_REVIEW_ADDITIONS = 2
 MAX_SELECTED_WIKI_PAGES = 5
@@ -1027,7 +1026,7 @@ class DirectLLMService:
         if weekend_obs and any(token in combined_text for token in ("выходн", "суббот", "воскрес")) and self._is_jump_schedule_request(text, conversation_context):
             weekday_obs = next((item for item in tool_observations if item.get("kind") == "calendar_weekday"), None)
             weekday_ru = (((weekday_obs or {}).get("structured") or {}).get("weekday_ru")) or "этот день"
-            is_weekend = bool((((weekday_obs or {}).get("structured") or {}).get("is_weekend")))
+            is_weekend = bool(((weekday_obs or {}).get("structured") or {}).get("is_weekend"))
             if is_weekend:
                 response_text = (
                     f"Прыжки обычно проходят по выходным, а указанная дата приходится на {weekday_ru}. "

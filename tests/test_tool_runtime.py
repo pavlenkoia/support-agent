@@ -3,8 +3,8 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from app.services import direct_llm as direct_llm_module
-from app.services.direct_llm import DirectLLMService
 from app.services import tool_runtime as tool_runtime_module
+from app.services.direct_llm import DirectLLMService
 from app.services.tool_runtime import ToolRuntimeService
 
 

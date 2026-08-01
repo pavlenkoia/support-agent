@@ -33,4 +33,4 @@ engine = make_engine(settings.database_url)
 SessionLocal = make_session_factory(settings.database_url)
 
 # Import model modules so Base.metadata is populated for create_all/tests.
-import app.models  # noqa: E402,F401
+import app.models  # noqa: F401

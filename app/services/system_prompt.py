@@ -5,7 +5,6 @@ from pathlib import Path
 
 from app.core.config import settings
 
-
 DEFAULT_CANNOT_ANSWER = "Я не могу точно ответить по этому вопросу. Пожалуйста, позвоните в офис в будние дни по телефону +7 (351) 214-30-30."
 DEFAULT_SYSTEM_PROMPT = (
     "Ты консультант службы поддержки. Отвечай только по данным из базы знаний текущего ответа "

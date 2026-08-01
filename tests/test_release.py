@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import pytest
 
-from scripts.release import APP_SERVICES, ReleaseVerificationError, verify_release_evidence
+from scripts.release import (
+    APP_SERVICES,
+    ReleaseVerificationError,
+    verify_release_evidence,
+)
 
 
 def evidence(*, release_id: str = "a" * 40, started_at: float = 200.0) -> dict[str, dict[str, object]]:
