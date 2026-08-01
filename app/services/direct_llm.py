@@ -180,7 +180,10 @@ class DirectLLMService:
             if grounded_fallback is not None:
                 return {
                     "route": "answer",
-                    "response_text": grounded_fallback["response_text"],
+                    "response_text": self._prepend_standard_greeting_if_missing(
+                        grounded_fallback["response_text"],
+                        first_reply_in_dialogue=first_reply_in_dialogue,
+                    ),
                     "confidence": grounded_fallback["confidence"],
                     "reason": grounded_fallback["reason"],
                     "llm_trace": list(self._active_llm_trace),
@@ -194,6 +197,10 @@ class DirectLLMService:
             }
 
         normalized = self._normalize_prompt_reply(parsed, fallback_text=fallback_text)
+        normalized["response_text"] = self._prepend_standard_greeting_if_missing(
+            normalized["response_text"],
+            first_reply_in_dialogue=first_reply_in_dialogue,
+        )
         normalized["llm_trace"] = list(self._active_llm_trace)
         return normalized
 
@@ -227,19 +234,26 @@ class DirectLLMService:
     def respond_social(self, text: str, *, conversation_context: dict | None = None) -> dict:
         """Finish a planner-approved social turn without KB retrieval or cannot_answer UX."""
         self._reset_llm_trace()
+        first_reply_in_dialogue = self._is_first_reply_in_context(conversation_context)
         social = self._answer_social_turn(text, conversation_context=conversation_context)
         response_text = self._sanitize_customer_text(str(social.get("response_text") or ""))
         if not response_text or self._contains_forbidden_output(response_text):
             return {
                 "route": "answer",
-                "response_text": "Пожалуйста!",
+                "response_text": self._prepend_standard_greeting_if_missing(
+                    "Пожалуйста!",
+                    first_reply_in_dialogue=first_reply_in_dialogue,
+                ),
                 "confidence": 1.0,
                 "reason": str(social.get("reason") or "social_reply_runtime_fallback"),
                 "llm_trace": list(self._active_llm_trace),
             }
         return {
             "route": "answer",
-            "response_text": response_text,
+            "response_text": self._prepend_standard_greeting_if_missing(
+                response_text,
+                first_reply_in_dialogue=first_reply_in_dialogue,
+            ),
             "confidence": max(float(social.get("confidence") or 0.0), 0.7),
             "reason": str(social.get("reason") or "social_reply"),
             "llm_trace": list(self._active_llm_trace),
@@ -270,6 +284,29 @@ class DirectLLMService:
         cleaned = re.sub(r"\s+", " ", text).strip()
         cleaned = cleaned.replace("**", "").replace("__", "")
         return cleaned[:1000]
+
+    @staticmethod
+    def _prepend_standard_greeting_if_missing(text: str, *, first_reply_in_dialogue: bool) -> str:
+        if not first_reply_in_dialogue:
+            return text
+        greeting_pattern = re.compile(
+            r"^\s*(?:здравствуй(?:те)?|добрый\s+(?:день|вечер)|доброе\s+утро|привет(?:ствую)?|"
+            r"доброго\s+времени\s+суток|рад(?:а)?\s+(?:вас\s+)?приветствовать)\b",
+            flags=re.IGNORECASE,
+        )
+        if greeting_pattern.search(text):
+            return text
+        return f"Здравствуйте! {text}"
+
+    @staticmethod
+    def _is_first_reply_in_context(conversation_context: dict | None) -> bool:
+        if not conversation_context:
+            return False
+        recent_messages = conversation_context.get("recent_messages", [])
+        return isinstance(recent_messages, list) and not any(
+            isinstance(item, dict) and str(item.get("role") or "") == "assistant"
+            for item in recent_messages
+        )
 
     def _contains_forbidden_output(self, text: str) -> bool:
         lowered = text.lower()

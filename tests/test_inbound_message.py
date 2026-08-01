@@ -336,6 +336,58 @@ def test_routing_service_persists_entities_and_workflow_events(tmp_path: Path) -
         assert payload["response_strategy"]["loop_mode"] == "agentic_bounded_loop_with_kb_agent"
 
 
+def test_direct_llm_adds_standard_greeting_to_first_body_only_reply(tmp_path: Path) -> None:
+    class BodyOnlyClient:
+        def generate(self, **kwargs):
+            return json.dumps(
+                {
+                    "route": "answer",
+                    "response_text": "Все актуальные цены доступны по ссылке https://vk.cc/cYzS5j.",
+                    "confidence": 0.9,
+                    "reason": "grounded_pricing",
+                },
+                ensure_ascii=False,
+            )
+
+    prompt_path = tmp_path / "SYSTEM_PROMPT.md"
+    prompt_path.write_text(TEST_PROMPT, encoding="utf-8")
+    service = DirectLLMService(client=BodyOnlyClient(), prompt_service=SystemPromptService(str(prompt_path)))
+
+    result = service.respond(
+        "Сколько стоит прыжок в тандеме?",
+        {"kb_status": "found", "grounding_status": "ready", "answer_context": []},
+        first_reply_in_dialogue=True,
+    )
+
+    assert result["response_text"] == "Здравствуйте! Все актуальные цены доступны по ссылке https://vk.cc/cYzS5j."
+
+
+def test_direct_llm_does_not_duplicate_recognised_model_greeting_on_first_reply(tmp_path: Path) -> None:
+    class GreetingClient:
+        def generate(self, **kwargs):
+            return json.dumps(
+                {
+                    "route": "answer",
+                    "response_text": "Добрый день! Все актуальные цены доступны по ссылке https://vk.cc/cYzS5j.",
+                    "confidence": 0.9,
+                    "reason": "grounded_pricing",
+                },
+                ensure_ascii=False,
+            )
+
+    prompt_path = tmp_path / "SYSTEM_PROMPT.md"
+    prompt_path.write_text(TEST_PROMPT, encoding="utf-8")
+    service = DirectLLMService(client=GreetingClient(), prompt_service=SystemPromptService(str(prompt_path)))
+
+    result = service.respond(
+        "Сколько стоит прыжок в тандеме?",
+        {"kb_status": "found", "grounding_status": "ready", "answer_context": []},
+        first_reply_in_dialogue=True,
+    )
+
+    assert result["response_text"] == "Добрый день! Все актуальные цены доступны по ссылке https://vk.cc/cYzS5j."
+
+
 def test_direct_llm_keeps_model_answer_without_forced_greeting_in_any_dialogue_turn(tmp_path: Path) -> None:
     class BodyOnlyClient:
         def generate(self, **kwargs):
@@ -365,8 +417,31 @@ def test_direct_llm_keeps_model_answer_without_forced_greeting_in_any_dialogue_t
         first_reply_in_dialogue=False,
     )
 
-    assert first["response_text"] == "Все актуальные цены доступны по ссылке https://vk.cc/cYzS5j."
+    assert first["response_text"] == "Здравствуйте! Все актуальные цены доступны по ссылке https://vk.cc/cYzS5j."
     assert followup["response_text"] == "Все актуальные цены доступны по ссылке https://vk.cc/cYzS5j."
+
+
+def test_direct_llm_adds_standard_greeting_to_first_body_only_social_reply() -> None:
+    class SocialBodyClient:
+        def generate(self, **kwargs):
+            return json.dumps(
+                {
+                    "direct_status": "ready",
+                    "decision": "answer",
+                    "response_text": "Чем могу помочь?",
+                    "confidence": 0.9,
+                    "reason": "neutral_social_opening",
+                },
+                ensure_ascii=False,
+            )
+
+    service = DirectLLMService(client=SocialBodyClient())
+    result = service.respond_social(
+        "Добрый день",
+        conversation_context={"recent_messages": [{"role": "user", "content": "Добрый день"}]},
+    )
+
+    assert result["response_text"] == "Здравствуйте! Чем могу помочь?"
 
 
 def test_direct_llm_keeps_model_social_opening_without_forced_greeting() -> None:
@@ -390,7 +465,7 @@ def test_direct_llm_keeps_model_social_opening_without_forced_greeting() -> None
         conversation_context={"recent_messages": [{"role": "user", "content": "Добрый день"}]},
     )
 
-    assert result["response_text"] == "Чем могу помочь?"
+    assert result["response_text"] == "Здравствуйте! Чем могу помочь?"
 
 
 def test_prompt_runtime_falls_back_when_model_leaks_service_markers(tmp_path: Path) -> None:

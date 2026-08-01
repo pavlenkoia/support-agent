@@ -24,7 +24,7 @@ It is not a ticket router and not an escalation-first bot.
 14. Channel-specific transport workers must reuse the same application runtime rather than creating a second support agent.
 15. VK transport-level manual-admin intervention must silence auto-replies for 1 hour from the last unmatched `message_reply`.
 16. Transport-level override must be re-checked immediately before a VK reply is sent.
-17. Greeting wording is model-owned: the runtime must not require, inject, strip, or normalize greetings based on dialogue position.
+17. The first customer-facing reply in a dialogue must begin with exactly one standard `Здравствуйте!`. The final-answer model is instructed not to add a greeting itself; the runtime prepends the standard greeting only when `first_reply_in_dialogue` is true and the reply does not already begin with a recognised greeting. Later replies are not changed by the runtime.
 
 ## Decision loop
 
