@@ -49,6 +49,18 @@ class OrchestratorService:
             planner_action = str(planner.get("action") or "cannot_answer")
             planner_trace.append({"iteration": iteration, **planner})
 
+            if planner_action == "out_of_scope" and self._has_prior_assistant_reply(context):
+                planner_action = "read_kb"
+                loop_trace.append(
+                    {
+                        "iteration": iteration,
+                        "action": "planner_override",
+                        "reason": "contextual_followup_requires_kb",
+                        "requested_action": planner.get("action"),
+                        "effective_action": planner_action,
+                    }
+                )
+
             if planner_action == "social_reply":
                 final_reply = self._finalize_social_reply(text, context)
                 loop_trace.append(
@@ -219,14 +231,18 @@ class OrchestratorService:
                 }
             )
 
+        final_route = str(final_reply.get("route") or "cannot_answer")
+        raw_response_text = "" if final_route == "retry_pending" else str(final_reply.get("response_text") or self.policy.render_cannot_answer())
+        response_text = "" if final_route == "retry_pending" else self.policy.finalize_customer_text(
+            raw_response_text,
+            first_reply_in_dialogue=self._is_first_reply(context),
+        )
         route = {
-            "route": str(final_reply.get("route") or "cannot_answer"),
+            "route": final_route,
             "route_reason": str(final_reply.get("reason") or "prompt_runtime"),
             "route_confidence": float(final_reply.get("confidence", 0.0)),
             "reply": {
-                "response_text": ""
-                if str(final_reply.get("route") or "") == "retry_pending"
-                else str(final_reply.get("response_text") or self.policy.render_cannot_answer()),
+                "response_text": response_text,
                 "reason": str(final_reply.get("reason") or "prompt_runtime"),
                 "tool_observations": tool_observations,
             },
@@ -438,7 +454,11 @@ class OrchestratorService:
         return kb_result
 
     def _is_first_reply(self, context: dict) -> bool:
-        return not any(
+        return not self._has_prior_assistant_reply(context)
+
+    @staticmethod
+    def _has_prior_assistant_reply(context: dict) -> bool:
+        return any(
             str(item.get("role") or "") == "assistant"
             for item in context.get("recent_messages", [])
             if isinstance(item, dict)

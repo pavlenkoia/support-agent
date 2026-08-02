@@ -14,30 +14,31 @@ It is not a ticket router and not an escalation-first bot.
 4. The customer-facing support agent and the KB agent must use separate external prompt files.
 5. The agent must not fabricate facts when KB/tool evidence is missing.
 6. A planner-approved `social_reply` (greeting, acknowledgement, thanks) is not a substantive request: it must finish immediately without retrieval or KB-agent work and always return a short polite `answer`, including when its model call fails.
-7. A planner-approved `out_of_scope` is also terminal: it must render the policy-defined out-of-scope text directly, without retrieval, KB-agent work, or final answer-model generation.
-8. If a substantive answer cannot be grounded, the final outcome must be `cannot_answer`.
-9. If the request is outside the domain, the final outcome must be `out_of_scope`.
-10. If a critical ambiguity blocks a safe answer, the final outcome must be `clarification_requested`.
-11. The main runtime flow must not silently switch into human or Hermes escalation.
-12. A transient LLM-provider failure must not discard already gathered KB facts when a short grounded fallback answer is still possible.
-13. Broad but clearly in-domain openers should prefer a safe overview answer over unnecessary clarification.
-14. When the KB agent returns `grounding_status=ready`, final-answer generation must preserve the contextual customer answer, but cannot downgrade the turn to `clarification_requested`; if it does, the runtime emits a grounded fallback from curated `grounded_facts` or `answer_basis`.
-15. Channel-specific transport workers must reuse the same application runtime rather than creating a second support agent.
-16. VK transport-level manual-admin intervention must silence auto-replies for 1 hour from the last unmatched `message_reply`.
-17. Transport-level override must be re-checked immediately before a VK reply is sent.
-18. The first customer-facing reply in a dialogue must begin with exactly one standard `Здравствуйте!`. The final-answer model is instructed not to add a greeting itself; the runtime prepends the standard greeting only when `first_reply_in_dialogue` is true and the reply does not already begin with a recognised greeting. Later replies are not changed by the runtime.
+7. A planner-approved `out_of_scope` is terminal only on the first customer turn. For a follow-up after an assistant reply, it must first attempt KB reading so a contextual post-service request cannot be discarded as unrelated.
+8. Every customer-visible terminal route passes through one output boundary: first replies begin with exactly one `Здравствуйте!`, and texts containing internal mechanics (`profile`, KB/tool/route terms, traces, JSON/brackets) are replaced with the approved customer fallback.
+9. If a substantive answer cannot be grounded, the final outcome must be `cannot_answer`.
+10. If the first request is outside the domain, the final outcome must be `out_of_scope`.
+11. If a critical ambiguity blocks a safe answer, the final outcome must be `clarification_requested`.
+12. The main runtime flow must not silently switch into human or Hermes escalation.
+13. A transient LLM-provider failure must not discard already gathered KB facts when a short grounded fallback answer is still possible.
+14. Broad but clearly in-domain openers should prefer a safe overview answer over unnecessary clarification.
+15. When the KB agent returns `grounding_status=ready`, final-answer generation must preserve the contextual customer answer, but cannot downgrade the turn to `clarification_requested`; if it does, the runtime emits a grounded fallback from curated `grounded_facts` or `answer_basis`.
+16. Channel-specific transport workers must reuse the same application runtime rather than creating a second support agent.
+17. VK transport-level manual-admin intervention must silence auto-replies for 1 hour from the last unmatched `message_reply`.
+18. Transport-level override must be re-checked immediately before a VK reply is sent.
 
 ## Decision loop
 
 Per inbound turn:
 1. classify social vs substantive turn
-2. for a planner-approved `social_reply` or `out_of_scope`, finalize the policy-defined terminal response without KB lookup or final answer-model generation
-3. for substantive in-domain turns, assess the next action
-4. optionally gather runtime tool observations
-5. optionally gather KB facts
-6. run the dedicated KB agent over the compiled wiki material already gathered
-7. re-assess / finalize
-8. emit one of the allowed outcomes
+2. finalize a planner-approved `social_reply` without KB lookup or final answer-model generation; only a first-turn `out_of_scope` may finalize directly
+3. force a KB read before accepting `out_of_scope` on a contextual follow-up
+4. for substantive in-domain turns, assess the next action
+5. optionally gather runtime tool observations
+6. optionally gather KB facts
+7. run the dedicated KB agent over the compiled wiki material already gathered
+8. re-assess / finalize through the customer-output boundary
+9. emit one of the allowed outcomes
 
 ## Tool-aware reasoning
 

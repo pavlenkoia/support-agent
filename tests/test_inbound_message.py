@@ -638,7 +638,7 @@ def test_social_reply_bypasses_kb_and_finishes_as_customer_answer() -> None:
     )
 
     assert result["route"]["route"] == "answer"
-    assert result["route"]["reply"]["response_text"] == "Пожалуйста!"
+    assert result["route"]["reply"]["response_text"] == "Здравствуйте! Пожалуйста!"
     assert result["retrieval"]["kb_status"] == "not_started"
     assert result["kb_result"] == {}
     assert result["response_strategy"]["steps"] == ["social_reply"]
@@ -680,10 +680,84 @@ def test_out_of_scope_bypasses_kb_and_final_llm_generation() -> None:
     )
 
     assert result["route"]["route"] == "out_of_scope"
-    assert result["route"]["reply"]["response_text"] == "Я отвечаю только по вопросам этого профиля."
+    assert result["route"]["reply"]["response_text"] == "Здравствуйте! К сожалению, по этому вопросу я не смогу подсказать."
+    assert "профил" not in result["route"]["reply"]["response_text"].lower()
     assert result["retrieval"]["kb_status"] == "not_started"
     assert result["kb_result"] == {}
     assert result["response_strategy"]["steps"] == ["out_of_scope"]
+
+
+def test_terminal_first_reply_is_greeted_and_never_leaks_internal_profile_name() -> None:
+    class MissingGroundingKBAgent:
+        def read(self, *args, **kwargs):
+            return {
+                "kb_status": "found", "grounding_status": "not_found", "answer_context": [],
+                "grounded_facts": [], "answer_basis": "", "trace": {},
+            }
+
+    class ReadKBPlanner:
+        def assess_request(self, *args, **kwargs):
+            return {"action": "read_kb", "confidence": 1.0, "reason": "test", "llm_trace": []}
+
+    class FoundRetrieval:
+        def retrieve(self, *args, **kwargs):
+            return {"kb_status": "found", "kb_snippets": []}
+
+        def expand_for_grounding(self, retrieval, **kwargs):
+            return retrieval
+
+    result = OrchestratorService(
+        retrieval=FoundRetrieval(), kb_agent=MissingGroundingKBAgent(), direct_llm=ReadKBPlanner(),
+        policy=PolicyService(), tool_runtime=ToolRuntimeService(),
+    ).run(
+        text="Доброго времени суток! После прыжка произошла ошибка.",
+        context={"recent_messages": [{"role": "user", "content": "Доброго времени суток! После прыжка произошла ошибка."}]},
+        knowledge_backend="filesystem", knowledge_root="/unused",
+        knowledge_query="Доброго времени суток! После прыжка произошла ошибка.",
+    )
+
+    response_text = result["route"]["reply"]["response_text"]
+    assert result["route"]["route"] == "cannot_answer"
+    assert response_text.startswith("Здравствуйте!")
+    assert "профил" not in response_text.lower()
+
+
+def test_followup_after_in_domain_terminal_answer_cannot_be_short_circuited_as_out_of_scope() -> None:
+    class OutOfScopePlanner:
+        def assess_request(self, *args, **kwargs):
+            return {"action": "out_of_scope", "confidence": 1.0, "reason": "bad_planner", "llm_trace": []}
+
+    class NotGroundedKBAgent:
+        def read(self, *args, **kwargs):
+            return {
+                "kb_status": "found", "grounding_status": "not_found", "answer_context": [],
+                "grounded_facts": [], "answer_basis": "", "trace": {},
+            }
+
+    class FoundRetrieval:
+        def retrieve(self, *args, **kwargs):
+            return {"kb_status": "found", "kb_snippets": []}
+
+        def expand_for_grounding(self, retrieval, **kwargs):
+            return retrieval
+
+    result = OrchestratorService(
+        retrieval=FoundRetrieval(), kb_agent=NotGroundedKBAgent(), direct_llm=OutOfScopePlanner(),
+        policy=PolicyService(), tool_runtime=ToolRuntimeService(),
+    ).run(
+        text="Потеряли все скачанные видео. Можно повторно отправить?",
+        context={"recent_messages": [
+            {"role": "user", "content": "После прыжка произошла ошибка на устройстве."},
+            {"role": "assistant", "content": "Я не могу точно ответить по этому вопросу. Позвоните в офис."},
+            {"role": "user", "content": "Потеряли все скачанные видео. Можно повторно отправить?"},
+        ]},
+        knowledge_backend="filesystem", knowledge_root="/unused",
+        knowledge_query="Потеряли все скачанные видео. Можно повторно отправить?",
+    )
+
+    assert result["route"]["route"] == "cannot_answer"
+    assert result["response_strategy"]["steps"][:2] == ["planner_override", "read_kb"]
+    assert "профил" not in result["route"]["reply"]["response_text"].lower()
 
 
 def test_social_reply_runtime_error_uses_polite_answer_not_cannot_answer() -> None:

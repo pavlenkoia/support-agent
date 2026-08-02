@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
@@ -10,6 +11,18 @@ from app.services.system_prompt import SystemPromptService
 
 
 class PolicyService:
+    _GREETING_PATTERN = re.compile(
+        r"^\s*(?:здравствуй(?:те)?|добрый\s+(?:день|вечер)|доброе\s+утро|привет(?:ствую)?|"
+        r"доброго\s+времени\s+суток|рад(?:а)?\s+(?:вас\s+)?приветствовать)\b",
+        flags=re.IGNORECASE,
+    )
+    _INTERNAL_OUTPUT_PATTERN = re.compile(
+        r"(?:\bprofile\b|\bknowledgebase\b|\bdatetime\b|\btool\b|\bresult\b|\binput\b|\boutput\b|\bjson\b|"
+        r"\broute\b|\bconfidence\b|\bпрофил\w*|баз[аы]\s+знани\w*|служебн\w*|"
+        r"внутренн\w*|инструмент\w*|ход\s+рассужден\w*)",
+        flags=re.IGNORECASE,
+    )
+
     def __init__(self, profile_root: str | None = None, prompt_service: SystemPromptService | None = None) -> None:
         self.profile_root = Path(profile_root or settings.support_agent_profile_root)
         self.prompt_service = prompt_service or SystemPromptService()
@@ -42,18 +55,16 @@ class PolicyService:
         message = templates.get("out_of_scope") if isinstance(templates, dict) else None
         if isinstance(message, str) and message.strip():
             return message.strip()
+        return "К сожалению, по этому вопросу я не смогу подсказать."
 
-        in_scope = []
-        scope = profile.get("scope", {}) if isinstance(profile, dict) else {}
-        if isinstance(scope, dict):
-            raw_in_scope = scope.get("in_scope", [])
-            if isinstance(raw_in_scope, list):
-                in_scope = [str(item).strip() for item in raw_in_scope if str(item).strip()]
-
-        if in_scope:
-            short_list = ", ".join(in_scope[:3])
-            return f"Я отвечаю только по вопросам этого профиля: {short_list}."
-        return "Я отвечаю только по вопросам этого профиля."
+    def finalize_customer_text(self, text: str, *, first_reply_in_dialogue: bool) -> str:
+        """Apply one customer-facing boundary to every terminal route."""
+        cleaned = re.sub(r"\s+", " ", str(text or "")).strip().replace("**", "").replace("__", "")
+        if not cleaned or self._INTERNAL_OUTPUT_PATTERN.search(cleaned) or any(char in cleaned for char in "[]{}"):
+            cleaned = self.render_cannot_answer()
+        if first_reply_in_dialogue and not self._GREETING_PATTERN.search(cleaned):
+            cleaned = f"Здравствуйте! {cleaned}"
+        return cleaned[:1000]
 
     def render_clarification(self, question: str | None = None) -> str:
         cleaned = str(question or "").strip()

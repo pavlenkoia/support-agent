@@ -195,4 +195,4 @@ def test_routing_service_performs_mandatory_kb_read_before_answer(tmp_path: Path
     assert result["retrieval"]["kb_status"] == "found"
     assert result["audit"]["response_strategy"]["steps"][0] == "read_kb"
     assert result["route"]["route"] == "answer"
-    assert result["outcome"]["outcome_payload"]["response_text"] == "Подготовка обязательна."
+    assert result["outcome"]["outcome_payload"]["response_text"] == "Здравствуйте! Подготовка обязательна."

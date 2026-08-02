@@ -98,15 +98,15 @@ def test_telegram_gateway_sends_runtime_reply_and_persists_outbound_message(tmp_
         },
     })
 
-    assert first["reply_text"] == "Подготовка обязательна даже для первого прыжка."
+    assert first["reply_text"] == "Здравствуйте! Подготовка обязательна даже для первого прыжка."
     assert second["reply_text"] == "Подготовка обязательна даже для первого прыжка."
-    assert sender.calls[1] == ("message", "12345", "Подготовка обязательна даже для первого прыжка.")
+    assert sender.calls[1] == ("message", "12345", "Здравствуйте! Подготовка обязательна даже для первого прыжка.")
 
     with routing.session_factory() as session:
         roles = session.execute(text("select role from messages order by id")).scalars().all()
         assert roles == ["user", "assistant", "user", "assistant"]
         contents = session.execute(text("select content from messages order by id")).scalars().all()
-        assert contents[1] == "Подготовка обязательна даже для первого прыжка."
+        assert contents[1] == "Здравствуйте! Подготовка обязательна даже для первого прыжка."
         assert contents[2] == "Я офицер вдв"
 
 
