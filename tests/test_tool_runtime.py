@@ -102,31 +102,30 @@ def test_ready_grounding_cannot_finish_as_clarification(monkeypatch) -> None:
     assert "Какой именно вариант" not in result["response_text"]
 
 
-def test_ready_grounding_does_not_emit_final_model_invented_facts(monkeypatch) -> None:
-    class InventingClient:
+def test_ready_grounding_preserves_contextual_final_model_answer(monkeypatch) -> None:
+    class ContextAwareClient:
         def generate(self, **kwargs):
-            return '{"route":"answer","response_text":"Прыжки проводятся каждый день в 10:00 и стоят 500 рублей.","confidence":0.9,"reason":"model_answer"}'
+            return '{"route":"answer","response_text":"Сегодня офис уже не работает. Если не дозваниваетесь, попробуйте позвонить в понедельник утром.","confidence":0.9,"reason":"contextual_answer"}'
 
     monkeypatch.setattr(direct_llm_module.settings, "direct_llm_provider", "mistral")
-    result = DirectLLMService(client=InventingClient()).respond(
-        "Можно записаться на следующую неделю?",
+    result = DirectLLMService(client=ContextAwareClient()).respond(
+        "Дозвониться не могу (",
         {
             "kb_status": "found",
             "grounding_status": "ready",
-            "answer_basis": "Прыжки обычно проходят по выходным и зависят от погоды и анонсов. Записаться можно по телефону 214-30-30.",
-            "grounded_facts": [
-                "Прыжки обычно проходят по выходным.",
-                "Проведение зависит от погоды и анонсов.",
-                "Записаться можно по телефону 214-30-30.",
-            ],
+            "answer_basis": "Офис работает по будням с 09:00 до 17:00. Перед визитом рекомендовано звонить.",
+            "grounded_facts": ["Офис работает по будням с 09:00 до 17:00."],
         },
-        conversation_context={"recent_messages": [{"role": "user", "content": "Можно записаться на следующую неделю?"}]},
+        conversation_context={"recent_messages": [
+            {"role": "user", "content": "А сегодня офис работает?"},
+            {"role": "assistant", "content": "Сегодня офис уже не работает."},
+            {"role": "user", "content": "Дозвониться не могу ("},
+        ]},
     )
 
     assert result["route"] == "answer"
-    assert "обычно проходят по выходным" in result["response_text"]
-    assert "каждый день" not in result["response_text"]
-    assert result["reason"] == "ready_grounding_authoritative_render"
+    assert result["response_text"].startswith("Сегодня офис уже не работает")
+    assert result["reason"] == "contextual_answer"
 
 
 def test_direct_llm_runtime_error_returns_grounded_kb_answer(monkeypatch) -> None:
@@ -181,8 +180,8 @@ def test_direct_llm_ready_grounding_never_degrades_to_cannot_answer_when_seconda
 
     assert result["route"] == "answer"
     assert "до 85 кг" in result["response_text"]
-    assert result["reason"] == "ready_grounding_authoritative_render"
-    assert result["llm_trace"] == []
+    assert result["reason"] == "prompt_runtime_grounded_fallback:RuntimeError"
+    assert any(item.get("step") == "grounded_fallback" for item in result["llm_trace"])
 
 
 def test_direct_llm_runtime_error_uses_only_kb_grounded_facts(monkeypatch) -> None:
