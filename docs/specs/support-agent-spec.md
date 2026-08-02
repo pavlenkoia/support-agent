@@ -21,7 +21,7 @@ It is not a ticket router and not an escalation-first bot.
 11. The main runtime flow must not silently switch into human or Hermes escalation.
 12. A transient LLM-provider failure must not discard already gathered KB facts when a short grounded fallback answer is still possible.
 13. Broad but clearly in-domain openers should prefer a safe overview answer over unnecessary clarification.
-14. When the KB agent returns `grounding_status=ready`, final-answer generation may shape wording but must not downgrade the turn to `clarification_requested`; the runtime emits a grounded `answer` from `answer_basis` or `grounded_facts` if needed.
+14. When the KB agent returns `grounding_status=ready`, the runtime must emit a grounded `answer` from `answer_basis` or `grounded_facts`; final-answer LLM output is not used for that turn and cannot add facts or downgrade the outcome.
 15. Channel-specific transport workers must reuse the same application runtime rather than creating a second support agent.
 16. VK transport-level manual-admin intervention must silence auto-replies for 1 hour from the last unmatched `message_reply`.
 17. Transport-level override must be re-checked immediately before a VK reply is sent.
