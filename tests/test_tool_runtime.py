@@ -76,6 +76,32 @@ def test_direct_llm_grounded_fallback_ignores_weekend_kb_for_office_question() -
     assert "офисе по будням" in result["response_text"]
 
 
+def test_ready_grounding_cannot_finish_as_clarification(monkeypatch) -> None:
+    class ClarifyingClient:
+        def generate(self, **kwargs):
+            return '{"route":"clarification_requested","response_text":"Какой именно вариант услуги вас интересует?","confidence":0.9,"reason":"model_requested_clarification"}'
+
+    monkeypatch.setattr(direct_llm_module.settings, "direct_llm_provider", "mistral")
+    result = DirectLLMService(client=ClarifyingClient()).respond(
+        "Можно записаться на следующую неделю?",
+        {
+            "kb_status": "found",
+            "grounding_status": "ready",
+            "answer_basis": "Прыжки обычно проходят по выходным и зависят от погоды и анонсов. Записаться можно по телефону 214-30-30: добавочный 1 для самостоятельного прыжка и добавочный 2 для тандема.",
+            "grounded_facts": [
+                "Прыжки обычно проходят по выходным.",
+                "Проведение зависит от погоды и анонсов.",
+                "Записаться можно по телефону 214-30-30: добавочный 1 для самостоятельного прыжка и добавочный 2 для тандема.",
+            ],
+        },
+        conversation_context={"recent_messages": [{"role": "user", "content": "Можно записаться на следующую неделю?"}]},
+    )
+
+    assert result["route"] == "answer"
+    assert "Прыжки обычно проходят по выходным" in result["response_text"]
+    assert "Какой именно вариант" not in result["response_text"]
+
+
 def test_direct_llm_runtime_error_returns_grounded_kb_answer(monkeypatch) -> None:
     class BrokenClient:
         def generate(self, **kwargs):

@@ -197,6 +197,21 @@ class DirectLLMService:
             }
 
         normalized = self._normalize_prompt_reply(parsed, fallback_text=fallback_text)
+        if (
+            normalized["route"] == "clarification_requested"
+            and kb_packet.get("kb_status") == "found"
+            and kb_packet.get("grounding_status") == "ready"
+        ):
+            grounded_response = self._sanitize_customer_text(str(kb_packet.get("answer_basis") or ""))
+            if not grounded_response:
+                grounded_response = self._render_ready_grounding(kb_packet)
+            if grounded_response:
+                normalized = {
+                    "route": "answer",
+                    "response_text": grounded_response,
+                    "confidence": max(float(normalized["confidence"]), 0.76),
+                    "reason": "ready_grounding_overrode_clarification",
+                }
         normalized["response_text"] = self._prepend_standard_greeting_if_missing(
             normalized["response_text"],
             first_reply_in_dialogue=first_reply_in_dialogue,

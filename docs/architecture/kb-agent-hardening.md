@@ -2,9 +2,9 @@
 
 ## Purpose
 
-This note documents the KB-agent hardening work that made the current production model safer to run and reduced the main blocker for future experiments with alternative KB-agent models such as `gemma4:12b`.
+This note documents the KB-agent hardening work that made the current production Mistral model safer to run.
 
-The goal is not to replace the LLM Wiki approach. The goal is to keep selective wiki reading while moving the most failure-prone parts behind deterministic or narrower contracts.
+The goal is not to replace the LLM Wiki approach. The goal is to keep selective wiki reading while moving the most failure-prone parts behind deterministic or narrower contracts. The former `gemma4:12b` OpenRouter experiment is retired; no runnable Gemma test contour remains.
 
 ## Problem that triggered the hardening
 
@@ -72,17 +72,11 @@ Observed outcome from the rollout gate:
 
 Because the hardening is feature-flagged, production could adopt the new architecture without changing the deployed model family.
 
-## Why this matters for future Gemma experiments
+## Retired Gemma experiment
 
-The hardening did not make `gemma4:12b` production-ready by itself.
+`gemma4:12b` was evaluated historically because weaker or less JSON-disciplined models exposed the structured-output failure modes described above. That experiment was concluded and its runtime root, backup env files, and stopped Docker project were removed on 2026-08-02.
 
-What it did accomplish:
-- remove the largest navigation-format blocker
-- shorten the structured path
-- make extraction the primary remaining reliability question
-- preserve an isolated test contour where Gemma can continue to evolve without touching production
-
-That means Gemma now has a clearer path for future evaluation, but it should still be treated as a test candidate until its extraction reliability and latency are good enough on a broader live probe set.
+It must not be restarted from the production-parity contour. Any future model evaluation requires a separately approved, explicitly named configuration and cannot be cited as production-equivalent evidence.
 
 ## Operational guidance
 
@@ -93,13 +87,8 @@ For the current production Mistral KB-agent model, the hardened mode is an accep
 - minimal extraction schema: enabled
 - bounded timeout/retry/backoff: enabled
 
-### Recommended test posture for alternative models
-For experimental KB-agent models, keep a separate contour and evaluate:
-- follow-up handling
-- strict schedule/policy answers
-- out-of-scope behavior
-- extraction stability
-- latency under live probe traffic
+### Production-parity test posture for program changes
+For program-change validation and customer-case replay, use only the production-parity contour and require `python3 tools/prodlike_parity.py` to pass before rebuilding or probing. It must match production provider/model/auth settings; experimental models are not a valid substitute.
 
 ## Files to inspect when changing this area
 

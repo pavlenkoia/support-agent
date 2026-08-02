@@ -41,7 +41,7 @@ The migration is a **representation compatibility migration plus a separately ga
 | Surface | Observed state | Conformance implication |
 |---|---|---|
 | Production app container | `mistral-medium-latest`; `KB_AGENT_DETERMINISTIC_NAVIGATION=true`; `KB_AGENT_SKIP_COVERAGE_REVIEW=true`; minimal extraction enabled | Known non-conforming temporary mode under the governing contract. |
-| Isolated OpenRouter test app | `gemma4:12b` with the same deterministic-navigation and coverage-skip flags | Experimental contour only; it is not a promotion candidate for this restoration. |
+| Retired historical OpenRouter experiment | `gemma4:12b` was used with the same deterministic-navigation and coverage-skip flags | The runtime root and Docker project were removed on 2026-08-02. It is historical evidence only, not a runnable test contour or promotion candidate. |
 | KB mount | Read-only `/home/tian/support-agent-profiles/parachute` → `/data/profile` | Existing runtime source remains untouched until an approved rollout. |
 | Current bundle | 17 Markdown files: 4 `raw/` files, 10 runtime pages (8 concepts, 2 entities), root `SCHEMA.md`, `index.md`, and legacy runtime folders | It has useful LLM-Wiki content, but not the required `compiled/`, `schema/`, `index/` layer separation. |
 | Metadata / relations | All 10 runtime pages have frontmatter; 42 authored wikilinks; raw sources have `source_url`, `ingested`, `sha256` | A lossless compiler/validator migration is feasible. |
