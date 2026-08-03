@@ -233,7 +233,7 @@ class KBAgentService:
                     return self._retry_pending_catalog_read(trace, navigation, "navigation_unavailable")
                 selected_refs = self._fallback_select_catalog_refs(text, kb_context, limit=MAX_CATALOG_SELECTION)
             loaded_pages = self._load_catalog_pages(kb_context, selected_refs)
-            if settings.kb_agent_skip_coverage_review and not is_compiled_llm_wiki:
+            if settings.kb_agent_skip_coverage_review:
                 review = {
                     "coverage_status": "enough",
                     "missing_facts": [],
