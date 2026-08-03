@@ -18,6 +18,8 @@ logger = logging.getLogger(__name__)
 
 class OpenAICompatibleClient(BaseLLMClient):
     _pool_active_key_indexes: dict[tuple[str, str, tuple[str, ...]], int] = {}
+    _pool_disabled_key_indexes: dict[tuple[str, str, tuple[str, ...]], set[int]] = {}
+    _pool_cooldown_until: dict[tuple[str, str, tuple[str, ...]], dict[int, float]] = {}
     _pool_lock = threading.Lock()
 
     def __init__(
@@ -32,6 +34,7 @@ class OpenAICompatibleClient(BaseLLMClient):
         max_retries: int = 0,
         retry_backoff_seconds: float = 0.0,
         retry_deadline_seconds: float | None = None,
+        rate_limit_cooldown_seconds: float = 60.0,
     ) -> None:
         self.provider = provider
         self.base_url = base_url.rstrip("/")
@@ -47,11 +50,14 @@ class OpenAICompatibleClient(BaseLLMClient):
         )
         with self._pool_lock:
             self._pool_active_key_indexes.setdefault(self._pool_key, 0)
+            self._pool_disabled_key_indexes.setdefault(self._pool_key, set())
+            self._pool_cooldown_until.setdefault(self._pool_key, {})
         self.model = model
         self.timeout_seconds = timeout_seconds
         self.max_retries = max(0, int(max_retries))
         self.retry_backoff_seconds = max(0.0, float(retry_backoff_seconds))
         self.retry_deadline_seconds = None if retry_deadline_seconds is None else max(0.0, float(retry_deadline_seconds))
+        self.rate_limit_cooldown_seconds = max(0.0, float(rate_limit_cooldown_seconds))
 
     def _get_active_key_index(self) -> int:
         with self._pool_lock:
@@ -60,6 +66,28 @@ class OpenAICompatibleClient(BaseLLMClient):
     def _set_active_key_index(self, index: int) -> None:
         with self._pool_lock:
             self._pool_active_key_indexes[self._pool_key] = index
+
+    def _available_key_indexes(self) -> list[int]:
+        now = time.monotonic()
+        with self._pool_lock:
+            disabled = self._pool_disabled_key_indexes.get(self._pool_key, set())
+            cooldowns = self._pool_cooldown_until.setdefault(self._pool_key, {})
+            expired = [index for index, until in cooldowns.items() if until <= now]
+            for index in expired:
+                del cooldowns[index]
+            active = self._pool_active_key_indexes.get(self._pool_key, 0)
+            ordered = [(active + offset) % len(self.api_keys) for offset in range(len(self.api_keys))]
+            return [index for index in ordered if index not in disabled and index not in cooldowns]
+
+    def _disable_key_index(self, index: int) -> None:
+        with self._pool_lock:
+            self._pool_disabled_key_indexes.setdefault(self._pool_key, set()).add(index)
+
+    def _cool_down_key_index(self, index: int) -> None:
+        if self.rate_limit_cooldown_seconds <= 0:
+            return
+        with self._pool_lock:
+            self._pool_cooldown_until.setdefault(self._pool_key, {})[index] = time.monotonic() + self.rate_limit_cooldown_seconds
 
     def _retry_delay_seconds(self, retry_attempt: int) -> float:
         base_delay = self.retry_backoff_seconds * (2 ** retry_attempt)
@@ -125,6 +153,11 @@ class OpenAICompatibleClient(BaseLLMClient):
         return False
 
     @staticmethod
+    def _is_temporary_key_unavailable(detail: str) -> bool:
+        normalized_detail = detail.lower()
+        return any(marker in normalized_detail for marker in ("quota unavailable", "temporarily unavailable", "exhausted"))
+
+    @staticmethod
     def _summarize_http_detail(detail: str) -> str:
         compact = " ".join(str(detail or "").split())
         return compact[:200]
@@ -152,10 +185,9 @@ class OpenAICompatibleClient(BaseLLMClient):
             payload["response_format"] = response_format
 
         total_attempts = 0
-        key_indexes = [
-            (self._get_active_key_index() + offset) % len(self.api_keys)
-            for offset in range(len(self.api_keys))
-        ]
+        key_indexes = self._available_key_indexes()
+        if not key_indexes:
+            raise RuntimeError("All LLM API key slots are temporarily unavailable")
         active_key_position = 0
         active_key_index = key_indexes[active_key_position]
         data: dict[str, Any] | None = None
@@ -209,6 +241,13 @@ class OpenAICompatibleClient(BaseLLMClient):
                 except error.HTTPError as exc:  # pragma: no cover - network error path
                     detail = exc.read().decode("utf-8", errors="ignore")
                     should_fail_over = self._should_fail_over_on_http_error(exc, detail)
+                    if exc.code in {401, 403}:
+                        if self._is_temporary_key_unavailable(detail):
+                            self._cool_down_key_index(active_key_index)
+                        else:
+                            self._disable_key_index(active_key_index)
+                    elif exc.code == 429 and should_fail_over:
+                        self._cool_down_key_index(active_key_index)
                     should_retry = (exc.code in {408, 409, 425, 429} or exc.code >= 500) and not should_fail_over
                     if should_retry and retry_attempt < self.max_retries:
                         last_error = RuntimeError(f"LLM HTTP {exc.code}: {detail}")

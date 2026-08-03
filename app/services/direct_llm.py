@@ -79,6 +79,7 @@ class DirectLLMService:
         fallback_text = self.prompt_service.render_cannot_answer()
         system_prompt = self.prompt_service.load_system_prompt()
         kb_packet = self._coerce_kb_result(kb_result)
+        finalization_kb_packet = self._build_finalization_kb_packet(kb_packet)
         calendar_period_guard = self._fallback_answer_from_grounding(
             text,
             kb_packet.get("answer_context", []),
@@ -113,10 +114,12 @@ class DirectLLMService:
                 "first_reply_in_dialogue": first_reply_in_dialogue,
                 "conversation_context": conversation_context or {},
                 "tool_results": tool_observations,
-                "kb_agent_result": kb_packet,
+                "kb_agent_result": finalization_kb_packet,
                 "output_rules": [
                     "Верни только JSON-объект по указанной схеме.",
                     "response_text должен быть готовым текстом для клиента без служебных пояснений.",
+                    "Переформулируй подтверждённые данные в естественный готовый ответ клиенту: сначала ответь на его практический вопрос; объяснение причины добавляй только если без него ответ неполон или клиент прямо спрашивает «почему».",
+                    "Не превращай внутренние основания решения, результаты инструментов или процесс проверки в объяснение хода вывода для клиента.",
                     "Используй только facts и answer_basis из KB agent result, результаты инструментов и правила системного промпта.",
                     "Если есть tool result kind=calendar_period_weekends, не выводи клиенту точные календарные даты; сохрани исходный период и укажи, что проведение зависит от анонса и погоды.",
                     "В calendar-period fallback сохрани исходный период пользователя; не заменяй его относительными конструкциями вроде 'после этих месяцев'.",
@@ -353,6 +356,28 @@ class DirectLLMService:
             "grounded_facts": [],
             "answer_basis": "",
             "source_refs": self._extract_source_refs(answer_context),
+        }
+
+    @staticmethod
+    def _build_finalization_kb_packet(kb_packet: dict[str, Any]) -> dict[str, Any]:
+        """Expose grounded customer facts to the final writer, never workflow traces."""
+        supporting_context: list[str] = []
+        for item in kb_packet.get("answer_context", []):
+            if not isinstance(item, dict):
+                continue
+            text = str(item.get("text") or "").strip()
+            if text:
+                supporting_context.append(text)
+        return {
+            "kb_status": kb_packet.get("kb_status"),
+            "grounding_status": kb_packet.get("grounding_status"),
+            "answer_basis": str(kb_packet.get("answer_basis") or "").strip(),
+            "grounded_facts": [
+                fact.strip()
+                for fact in kb_packet.get("grounded_facts", [])
+                if isinstance(fact, str) and fact.strip()
+            ],
+            "supporting_context": supporting_context,
         }
 
     def _respond_stub(

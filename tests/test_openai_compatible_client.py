@@ -13,6 +13,8 @@ from app.integrations.llm.openai_compatible import OpenAICompatibleClient
 def reset_openai_compatible_pool_state() -> None:
     with OpenAICompatibleClient._pool_lock:
         OpenAICompatibleClient._pool_active_key_indexes.clear()
+        OpenAICompatibleClient._pool_disabled_key_indexes.clear()
+        OpenAICompatibleClient._pool_cooldown_until.clear()
 
 
 class FakeResponse:
@@ -114,7 +116,37 @@ def test_openai_compatible_client_fails_over_to_next_api_key_on_auth_error(monke
     assert "llm api key failover triggered" in caplog.text
 
 
-def test_openai_compatible_client_keeps_last_successful_pool_slot_until_it_fails(monkeypatch) -> None:
+def test_openai_compatible_client_skips_invalid_and_rate_limited_slots_on_next_request(monkeypatch) -> None:
+    seen_auth_headers: list[str] = []
+
+    def fake_urlopen(req, timeout):
+        _ = timeout
+        seen_auth_headers.append(req.headers["Authorization"])
+        if req.headers["Authorization"] == "Bearer invalid-token":
+            raise error.HTTPError(req.full_url, 401, "unauthorized", hdrs=None, fp=io.BytesIO(b'{"detail":"Unauthorized"}'))
+        raise error.HTTPError(req.full_url, 429, "rate limited", hdrs=None, fp=io.BytesIO(b'{"message":"Rate limit exceeded"}'))
+
+    monkeypatch.setattr("app.integrations.llm.openai_compatible.request.urlopen", fake_urlopen)
+    client = OpenAICompatibleClient(
+        provider="mistral",
+        base_url="https://example.test/v1",
+        api_key="invalid-token",
+        api_keys=["invalid-token", "limited-token"],
+        model="test-model",
+        max_retries=0,
+        rate_limit_cooldown_seconds=60,
+    )
+
+    with pytest.raises(RuntimeError, match="HTTP 429"):
+        client.generate(system_prompt="sys", user_prompt="first")
+    assert seen_auth_headers == ["Bearer invalid-token", "Bearer limited-token"]
+
+    with pytest.raises(RuntimeError, match="temporarily unavailable"):
+        client.generate(system_prompt="sys", user_prompt="second")
+    assert seen_auth_headers == ["Bearer invalid-token", "Bearer limited-token"]
+
+
+def test_openai_compatible_client_cools_down_temporarily_unavailable_pool_slots(monkeypatch) -> None:
     seen_auth_headers: list[str] = []
     calls_by_authorization: dict[str, int] = {}
 
@@ -149,15 +181,15 @@ def test_openai_compatible_client_keeps_last_successful_pool_slot_until_it_fails
     )
 
     assert client.generate(system_prompt="sys", user_prompt="first") == "Bearer rotation-secondary-token"
-    assert client.generate(system_prompt="sys", user_prompt="second") == "Bearer rotation-primary-token"
-    assert client.generate(system_prompt="sys", user_prompt="third") == "Bearer rotation-primary-token"
+    with pytest.raises(RuntimeError, match="HTTP 401"):
+        client.generate(system_prompt="sys", user_prompt="second")
+    with pytest.raises(RuntimeError, match="temporarily unavailable"):
+        client.generate(system_prompt="sys", user_prompt="third")
 
     assert seen_auth_headers == [
         "Bearer rotation-primary-token",
         "Bearer rotation-secondary-token",
         "Bearer rotation-secondary-token",
-        "Bearer rotation-primary-token",
-        "Bearer rotation-primary-token",
     ]
 
 
