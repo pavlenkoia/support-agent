@@ -177,7 +177,6 @@ def test_final_response_receives_customer_facing_kb_packet_without_internal_trac
     assert client.payload is not None
     evidence = client.payload["grounding_evidence"]
     assert evidence == {
-        "candidate_synthesis": "В этот день прыжки не проводятся.",
         "facts": [
             "Прыжки обычно проходят по выходным.",
             "Дата 2026-08-04 — вторник, будний день.",
