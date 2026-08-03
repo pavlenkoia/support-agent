@@ -79,7 +79,7 @@ class DirectLLMService:
         fallback_text = self.prompt_service.render_cannot_answer()
         system_prompt = self.prompt_service.load_system_prompt()
         kb_packet = self._coerce_kb_result(kb_result)
-        finalization_kb_packet = self._build_finalization_kb_packet(kb_packet)
+        grounding_evidence = self._build_finalization_evidence(kb_packet)
         calendar_period_guard = self._fallback_answer_from_grounding(
             text,
             kb_packet.get("answer_context", []),
@@ -103,7 +103,7 @@ class DirectLLMService:
 
         user_prompt = json.dumps(
             {
-                "task": "Сформируй итоговый ответ клиенту строго по системному промпту, истории, данным KB agent и результатам инструментов.",
+                "task": "Прими клиентское решение по вопросу и сформулируй итоговый ответ только из подтверждённых доказательств.",
                 "required_json_schema": {
                     "route": "answer|cannot_answer|out_of_scope|clarification_requested",
                     "response_text": "string",
@@ -113,17 +113,17 @@ class DirectLLMService:
                 "user_message": text,
                 "first_reply_in_dialogue": first_reply_in_dialogue,
                 "conversation_context": conversation_context or {},
-                "tool_results": tool_observations,
-                "kb_agent_result": finalization_kb_packet,
+                "grounding_evidence": grounding_evidence,
                 "output_rules": [
                     "Верни только JSON-объект по указанной схеме.",
-                    "response_text должен быть готовым текстом для клиента без служебных пояснений.",
-                    "Переформулируй подтверждённые данные в естественный готовый ответ клиенту: сначала ответь на его практический вопрос; объяснение причины добавляй только если без него ответ неполон или клиент прямо спрашивает «почему».",
-                    "Не превращай внутренние основания решения, результаты инструментов или процесс проверки в объяснение хода вывода для клиента.",
-                    "Используй только facts и answer_basis из KB agent result, результаты инструментов и правила системного промпта.",
-                    "Если есть tool result kind=calendar_period_weekends, не выводи клиенту точные календарные даты; сохрани исходный период и укажи, что проведение зависит от анонса и погоды.",
-                    "В calendar-period fallback сохрани исходный период пользователя; не заменяй его относительными конструкциями вроде 'после этих месяцев'.",
-                    "Если информации недостаточно, используй обязательный ответ из системного промпта.",
+                    "Сначала сам прими клиентское решение по фактам из grounding_evidence; candidate_synthesis — это служебная гипотеза KB-agent, а не самостоятельный факт и не готовый ответ.",
+                    "Используй candidate_synthesis только в той части, которая прямо подтверждена facts или системным промптом; при расхождении приоритет имеют точные facts и правила системного промпта.",
+                    "Сохраняй точную модальность подтверждённых фактов: «обычно», «может», «зависит», «рекомендуется» нельзя усиливать до «только», «всегда», «точно», «обязательно» или другого более сильного утверждения.",
+                    "Общее вероятностное правило не доказывает исход конкретного случая: если evidence говорит «обычно» или оставляет условия/исключения, не отвечай категорическим «да» или «нет» о конкретной дате; сообщи об общем правиле и безопасном способе уточнить конкретный случай.",
+                    "После прямого ответа добавь только нужные клиенту подтверждённые условия, ограничения или следующий шаг.",
+                    "Не добавляй новые факты и не показывай внутренний процесс, инструменты, источники или причины выбора ответа.",
+                    "Если клиент прямо спрашивает «почему», объясни результат только подтверждёнными фактами.",
+                    "Если доказательств недостаточно для уверенного решения, используй обязательный ответ при отсутствии информации.",
                 ],
             },
             ensure_ascii=False,
@@ -359,25 +359,15 @@ class DirectLLMService:
         }
 
     @staticmethod
-    def _build_finalization_kb_packet(kb_packet: dict[str, Any]) -> dict[str, Any]:
-        """Expose grounded customer facts to the final writer, never workflow traces."""
-        supporting_context: list[str] = []
-        for item in kb_packet.get("answer_context", []):
-            if not isinstance(item, dict):
-                continue
-            text = str(item.get("text") or "").strip()
-            if text:
-                supporting_context.append(text)
+    def _build_finalization_evidence(kb_packet: dict[str, Any]) -> dict[str, Any]:
+        """Pass only the compact, client-relevant grounded evidence to the final LLM."""
         return {
-            "kb_status": kb_packet.get("kb_status"),
-            "grounding_status": kb_packet.get("grounding_status"),
-            "answer_basis": str(kb_packet.get("answer_basis") or "").strip(),
-            "grounded_facts": [
+            "candidate_synthesis": str(kb_packet.get("answer_basis") or "").strip(),
+            "facts": [
                 fact.strip()
                 for fact in kb_packet.get("grounded_facts", [])
                 if isinstance(fact, str) and fact.strip()
             ],
-            "supporting_context": supporting_context,
         }
 
     def _respond_stub(

@@ -223,7 +223,7 @@ def test_compiled_bundle_runs_llm_navigation_then_coverage_review_before_extract
     assert len(client.calls) == 3
 
 
-def test_compiled_bundle_ignores_legacy_deterministic_and_coverage_skip_flags(tmp_path: Path) -> None:
+def test_compiled_bundle_applies_coverage_skip_setting(tmp_path: Path) -> None:
     legacy_root = _legacy_bundle(tmp_path)
     compiled_root = tmp_path / "compiled"
     compile_legacy_bundle(legacy_root, compiled_root)
@@ -235,12 +235,6 @@ def test_compiled_bundle_ignores_legacy_deterministic_and_coverage_skip_flags(tm
                 "information_needs": ["booking"],
                 "selected_source_refs": ["compiled/concepts/booking.md"],
                 "reason": "LLM navigation",
-            },
-            {
-                "coverage_status": "enough",
-                "missing_facts": [],
-                "additional_source_refs": [],
-                "reason": "LLM coverage review",
             },
             {
                 "grounding_status": "ready",
@@ -264,8 +258,8 @@ def test_compiled_bundle_ignores_legacy_deterministic_and_coverage_skip_flags(tm
 
     assert result["grounding_status"] == "ready"
     assert result["trace"]["navigation"]["reason"] == "LLM navigation"
-    assert result["trace"]["review"]["reason"] == "LLM coverage review"
-    assert len(client.calls) == 3
+    assert result["trace"]["review"]["reason"] == "skip_coverage_review:settings"
+    assert len(client.calls) == 2
 
 
 def test_compiled_bundle_navigation_failure_is_retry_pending_without_lexical_selection(tmp_path: Path) -> None:

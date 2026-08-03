@@ -134,8 +134,10 @@ def test_final_response_receives_customer_facing_kb_packet_without_internal_trac
     class CapturingClient(BaseLLMClient):
         def __init__(self) -> None:
             self.payload: dict | None = None
+            self.system_prompt: str | None = None
 
         def generate(self, **kwargs):
+            self.system_prompt = kwargs["system_prompt"]
             self.payload = json.loads(kwargs["user_prompt"])
             return (
                 '{"route":"answer","response_text":"Завтра прыжки не проводятся. '
@@ -144,7 +146,8 @@ def test_final_response_receives_customer_facing_kb_packet_without_internal_trac
 
     client = CapturingClient()
     monkeypatch.setattr(direct_llm_module.settings, "direct_llm_provider", "mistral")
-    result = DirectLLMService(client=client).respond(
+    service = DirectLLMService(client=client)
+    result = service.respond(
         "Можно ли завтра прыгнуть с парашютом?",
         {
             "kb_status": "found",
@@ -160,22 +163,34 @@ def test_final_response_receives_customer_facing_kb_packet_without_internal_trac
                 "review": {"reason": "Внутренняя проверка покрытия."},
             },
         },
+        conversation_context={
+            "recent_messages": [
+                {"role": "user", "content": "А в субботу можно?"},
+                {"role": "assistant", "content": "Прыжки обычно проходят по выходным."},
+                {"role": "user", "content": "А завтра?"},
+            ]
+        },
         tool_observations=[{"kind": "calendar_weekday", "summary": "Дата 2026-08-04 приходится на вторник."}],
     )
 
     assert result["route"] == "answer"
     assert client.payload is not None
-    final_kb_packet = client.payload["kb_agent_result"]
-    assert final_kb_packet["answer_basis"] == "В этот день прыжки не проводятся."
-    assert final_kb_packet["grounded_facts"] == [
-        "Прыжки обычно проходят по выходным.",
-        "Дата 2026-08-04 — вторник, будний день.",
-    ]
-    assert final_kb_packet["supporting_context"] == [
-        "Прыжки обычно проходят по выходным и зависят от погоды и анонса."
-    ]
-    assert "trace" not in final_kb_packet
-    assert "reason" not in json.dumps(final_kb_packet, ensure_ascii=False)
+    evidence = client.payload["grounding_evidence"]
+    assert evidence == {
+        "candidate_synthesis": "В этот день прыжки не проводятся.",
+        "facts": [
+            "Прыжки обычно проходят по выходным.",
+            "Дата 2026-08-04 — вторник, будний день.",
+        ],
+    }
+    serialized = json.dumps(client.payload, ensure_ascii=False)
+    assert client.payload["conversation_context"]["recent_messages"][-1]["content"] == "А завтра?"
+    assert client.system_prompt == service.prompt_service.load_system_prompt()
+    assert "Прыжки обычно проходят по выходным и зависят от погоды и анонса." not in serialized
+    assert "Внутреннее обоснование" not in serialized
+    assert "Внутренняя проверка" not in serialized
+    assert "tool_results" not in serialized
+    assert len(serialized) < 2500
 
 
 def test_direct_llm_runtime_error_returns_grounded_kb_answer(monkeypatch) -> None:
