@@ -750,13 +750,21 @@ class DirectLLMService:
             selected_refs = self._fallback_select_catalog_refs(text, kb_context, limit=MAX_CATALOG_SELECTION)
 
         loaded_pages = self._load_catalog_pages(kb_context, selected_refs)
-        review = self._review_llm_wiki_coverage(
-            text,
-            kb_context,
-            loaded_pages,
-            navigation,
-            conversation_context=conversation_context,
-        )
+        if settings.kb_agent_skip_coverage_review:
+            review = {
+                "coverage_status": "enough",
+                "missing_facts": [],
+                "additional_source_refs": [],
+                "reason": "coverage_review_skipped_by_config",
+            }
+        else:
+            review = self._review_llm_wiki_coverage(
+                text,
+                kb_context,
+                loaded_pages,
+                navigation,
+                conversation_context=conversation_context,
+            )
 
         if review.get("coverage_status") == "need_more_pages":
             additional_refs = self._normalize_catalog_refs(
