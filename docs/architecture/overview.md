@@ -98,8 +98,8 @@ The application-level outcomes are now:
 2. **Customer-visible terminal responses use one output boundary.** `social_reply` finalizes without retrieval/KB work; a social-model failure returns a neutral polite answer. A first reply receives exactly one standard greeting, while internal mechanics (profile/scope, KB/tool/route/trace terms, and structured-output delimiters) are rejected before transport. `out_of_scope` may finalize directly only for the first customer turn: an out-of-scope decision after an assistant reply must first perform KB processing so contextual post-service follow-ups are not discarded. Neither terminal action may be replaced by `cannot_answer` because of an `IncompleteRead` in an unrelated final-generation path.
 3. **Key-specific provider failures can fail over** at the same client layer:
    - `DIRECT_LLM_API_KEYS`, `KB_AGENT_API_KEYS`, and `SUMMARY_LLM_API_KEYS` accept ordered CSV key pools
-   - transient/network/5xx failures retry on the current key
-   - auth/quota/key-specific failures fail over to the next key slot when available
+   - transient/network/5xx and ordinary `429` rate-limit failures retry on the current key within the bounded retry deadline
+   - auth and explicit quota/credit/billing/exhaustion failures fail over to the next key slot when available
    - legacy single-key vars remain valid and are treated as the primary key
 3. **Planner over-clarification is constrained**:
    - if KB has not been read yet and the opener is broad but clearly in-domain, prefer `read_kb`

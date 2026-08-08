@@ -65,6 +65,39 @@ def test_openai_compatible_client_retries_transient_http_errors(monkeypatch) -> 
     assert calls["count"] == 2
 
 
+def test_openai_compatible_client_retries_transient_rate_limit_on_same_slot(monkeypatch) -> None:
+    calls = {"count": 0}
+
+    def fake_urlopen(req, timeout):
+        _ = timeout
+        calls["count"] += 1
+        if calls["count"] == 1:
+            raise error.HTTPError(
+                req.full_url,
+                429,
+                "rate limited",
+                hdrs=None,
+                fp=io.BytesIO(b'{"message":"Rate limit exceeded"}'),
+            )
+        return FakeResponse({"choices": [{"message": {"content": "ok after retry"}}]})
+
+    monkeypatch.setattr("app.integrations.llm.openai_compatible.request.urlopen", fake_urlopen)
+    monkeypatch.setattr("app.integrations.llm.openai_compatible.time.sleep", lambda _: None)
+    client = OpenAICompatibleClient(
+        provider="mistral",
+        base_url="https://example.test/v1",
+        api_key="only-token",
+        model="test-model",
+        max_retries=1,
+        retry_backoff_seconds=0.01,
+    )
+
+    assert client.generate(system_prompt="sys", user_prompt="usr") == "ok after retry"
+    assert calls["count"] == 2
+    assert client.get_last_call_info()["attempts"] == 2
+    assert client.get_last_call_info()["used_failover"] is False
+
+
 def test_openai_compatible_client_fails_over_to_next_api_key_on_auth_error(monkeypatch, caplog) -> None:
     seen_auth_headers: list[str] = []
 
@@ -116,7 +149,7 @@ def test_openai_compatible_client_fails_over_to_next_api_key_on_auth_error(monke
     assert "llm api key failover triggered" in caplog.text
 
 
-def test_openai_compatible_client_skips_invalid_and_rate_limited_slots_on_next_request(monkeypatch) -> None:
+def test_openai_compatible_client_skips_invalid_and_quota_exhausted_slots_on_next_request(monkeypatch) -> None:
     seen_auth_headers: list[str] = []
 
     def fake_urlopen(req, timeout):
@@ -124,7 +157,7 @@ def test_openai_compatible_client_skips_invalid_and_rate_limited_slots_on_next_r
         seen_auth_headers.append(req.headers["Authorization"])
         if req.headers["Authorization"] == "Bearer invalid-token":
             raise error.HTTPError(req.full_url, 401, "unauthorized", hdrs=None, fp=io.BytesIO(b'{"detail":"Unauthorized"}'))
-        raise error.HTTPError(req.full_url, 429, "rate limited", hdrs=None, fp=io.BytesIO(b'{"message":"Rate limit exceeded"}'))
+        raise error.HTTPError(req.full_url, 429, "quota exhausted", hdrs=None, fp=io.BytesIO(b'{"message":"Quota exhausted"}'))
 
     monkeypatch.setattr("app.integrations.llm.openai_compatible.request.urlopen", fake_urlopen)
     client = OpenAICompatibleClient(

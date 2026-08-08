@@ -145,8 +145,6 @@ class OpenAICompatibleClient(BaseLLMClient):
                 "credit",
                 "billing",
                 "exhausted",
-                "rate limit",
-                "rate_limit",
             )
         ):
             return True
