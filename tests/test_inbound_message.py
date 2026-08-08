@@ -187,6 +187,41 @@ def make_test_routing_service(tmp_path: Path, direct_llm=None, kb_agent=None) ->
     )
 
 
+def test_unavailable_planner_tool_advances_to_kb_without_retrying_or_refusing(tmp_path: Path) -> None:
+    class UnavailableToolPlanner(FakeDirectLLMService):
+        def __init__(self) -> None:
+            super().__init__()
+            self.planner_calls = 0
+
+        def assess_request(self, *args, **kwargs) -> dict:
+            self.planner_calls += 1
+            return {
+                "action": "use_tool",
+                "scope_status": "in_scope",
+                "confidence": 0.9,
+                "reason": "needs_unavailable_contact_check",
+                "clarification_question": "",
+            }
+
+    direct_llm = UnavailableToolPlanner()
+    routing = make_test_routing_service(tmp_path, direct_llm=direct_llm)
+
+    result = routing.handle_inbound(
+        InboundMessage(
+            channel="vk",
+            external_user_id="case-551",
+            external_chat_id="case-551",
+            text="Не могу дозвониться",
+        )
+    )
+
+    actions = [item["action"] for item in result["audit"]["response_strategy"]["loop_trace"]]
+    assert direct_llm.planner_calls == 1
+    assert actions == ["planner_action_rejected", "read_kb", "kb_agent_read", "answer"]
+    assert result["route"]["route"] == "answer"
+    assert result["outcome"]["outcome_type"] == "answer"
+
+
 def test_inbound_message_uses_prompt_driven_runtime_and_mandatory_kb_lookup(tmp_path: Path) -> None:
     routing = make_test_routing_service(tmp_path)
     app.dependency_overrides[get_routing_service] = lambda: routing

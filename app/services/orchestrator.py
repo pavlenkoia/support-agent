@@ -45,6 +45,7 @@ class OrchestratorService:
         final_reply: dict[str, Any] | None = None
 
         for iteration in range(1, self.max_iterations + 1):
+            force_finalize_after_kb = False
             planner = self._plan_next_action(text, context, retrieval, tool_observations)
             planner_action = str(planner.get("action") or "cannot_answer")
             planner_trace.append({"iteration": iteration, **planner})
@@ -83,6 +84,19 @@ class OrchestratorService:
                 )
                 break
 
+            if planner_action == "use_tool" and not self.tool_runtime.matches_calendar_query(text):
+                planner_action = "read_kb"
+                force_finalize_after_kb = True
+                loop_trace.append(
+                    {
+                        "iteration": iteration,
+                        "action": "planner_action_rejected",
+                        "reason": "requested_tool_not_in_runtime_capability_set",
+                        "requested_action": planner.get("action"),
+                        "effective_action": planner_action,
+                    }
+                )
+
             if retrieval.get("kb_status") != "found" and planner_action not in {"read_kb", "use_tool"}:
                 planner_action = "read_kb"
                 loop_trace.append(
@@ -110,15 +124,18 @@ class OrchestratorService:
                             "reason": planner.get("reason", "planner_use_tool"),
                         }
                     )
+                    continue
                 else:
                     loop_trace.append(
                         {
                             "iteration": iteration,
-                            "action": "use_tool_skipped",
-                            "reason": "planner_requested_but_no_tool_match",
+                            "action": "tool_unavailable",
+                            "reason": "planner_requested_but_no_runtime_capability",
+                            "requested_reason": planner.get("reason", "planner_use_tool"),
                         }
                     )
-                continue
+                    planner_action = "read_kb"
+                    force_finalize_after_kb = True
 
             if planner_action == "read_kb":
                 retrieval_query = self._augment_query_with_tool_results(knowledge_query or text, tool_observations)
@@ -151,7 +168,8 @@ class OrchestratorService:
                             "reason": "post_kb_tool_check",
                         }
                     )
-                continue
+                if not force_finalize_after_kb:
+                    continue
 
             if planner_action == "ask_clarification":
                 final_reply = {
@@ -297,6 +315,7 @@ class OrchestratorService:
                 conversation_context={**context, "tool_observations": tool_observations},
                 retrieval=retrieval,
                 tool_observations=tool_observations,
+                runtime_capabilities=self.tool_runtime.planner_capabilities(),
             )
         if retrieval.get("kb_status") != "found":
             if self.tool_runtime.collect(text=text, kb_hits=retrieval.get("kb_snippets", []), conversation_context=context).get("tool_status") == "used" and not tool_observations:

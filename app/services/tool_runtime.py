@@ -38,6 +38,15 @@ SEASONS_RU = {
 
 
 class ToolRuntimeService:
+    def planner_capabilities(self) -> list[dict[str, str]]:
+        """Return the complete closed set of planner-visible runtime capabilities."""
+        return [
+            {
+                "name": "calendar",
+                "supports": "weekday and calendar-period calculations for dates explicitly present in the customer turn",
+            }
+        ]
+
     def matches_calendar_query(self, text: str) -> bool:
         return self._extract_calendar_period(text) is not None or self._extract_date(text) is not None
 

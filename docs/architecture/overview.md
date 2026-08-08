@@ -40,7 +40,10 @@ Allowed actions inside the loop:
 - `social_reply`
 
 Operational rule:
+- planner-visible runtime capabilities are a closed, explicit set; `use_tool` is legal only when a listed capability applies
 - once `tool_observations` already contains the needed runtime fact, the planner must advance to `read_kb` or `answer_from_kb` instead of repeating `use_tool`
+- a planner `use_tool` request outside the advertised capability set is rejected before tool execution, recorded as internal `planner_action_rejected`, then deterministically advances to KB/finalization in the same iteration; it cannot repeat or become a customer refusal solely because the requested capability does not exist
+- `tool_unavailable` remains a defensive invariant-violation path for a capability/runtime mismatch and uses the same terminal safe transition
 
 Hard limits:
 - max 3 loop iterations per turn

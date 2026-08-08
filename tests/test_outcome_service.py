@@ -43,7 +43,9 @@ class FakeDirectLLMService:
         conversation_context: dict | None = None,
         retrieval: dict | None = None,
         tool_observations: list[dict] | None = None,
+        runtime_capabilities: list[dict[str, str]] | None = None,
     ) -> dict:
+        _ = runtime_capabilities
         retrieval = retrieval or {"kb_status": "not_started", "kb_snippets": []}
         if retrieval.get("kb_status") == "not_started":
             return {

@@ -16,6 +16,41 @@ class FrozenDateTime(datetime):
         return cls(2026, 7, 13, 7, 9, 21, tzinfo=tz or UTC)
 
 
+def test_planner_receives_closed_runtime_capability_set() -> None:
+    class CapturingClient(BaseLLMClient):
+        def __init__(self) -> None:
+            self.payload: dict | None = None
+
+        def generate(self, **kwargs):
+            self.payload = json.loads(kwargs["user_prompt"])
+            return json.dumps(
+                {
+                    "action": "read_kb",
+                    "scope_status": "in_scope",
+                    "confidence": 1.0,
+                    "reason": "test",
+                    "clarification_question": "",
+                }
+            )
+
+    client = CapturingClient()
+    result = DirectLLMService(client=client).assess_request(
+        "Не могу дозвониться",
+        retrieval={"kb_status": "not_started", "kb_snippets": []},
+        runtime_capabilities=ToolRuntimeService().planner_capabilities(),
+    )
+
+    assert result["action"] == "read_kb"
+    assert client.payload is not None
+    assert client.payload["runtime_capabilities"] == [
+        {
+            "name": "calendar",
+            "supports": "weekday and calendar-period calculations for dates explicitly present in the customer turn",
+        }
+    ]
+    assert any("no other tool" in rule for rule in client.payload["rules"])
+
+
 def test_tool_runtime_resolves_relative_dates_from_runtime_context(monkeypatch) -> None:
     monkeypatch.setattr(tool_runtime_module, "datetime", FrozenDateTime)
     service = ToolRuntimeService()

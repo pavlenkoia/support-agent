@@ -26,6 +26,8 @@ It is not a ticket router and not an escalation-first bot.
 16. Channel-specific transport workers must reuse the same application runtime rather than creating a second support agent.
 17. VK transport-level manual-admin intervention must silence auto-replies for 1 hour from the last unmatched `message_reply`.
 18. Transport-level override must be re-checked immediately before a VK reply is sent.
+19. Planner actions are capability-bound: `use_tool` is valid only for an explicitly advertised runtime capability. A request outside that set is rejected before tool execution as internal `planner_action_rejected`, never customer-facing `cannot_answer` by itself.
+20. A defensive runtime capability mismatch (`tool_unavailable`) must immediately advance to KB/finalization; neither it nor a rejected planner action may repeat `use_tool` or consume another bounded-loop iteration.
 
 ## Decision loop
 

@@ -457,11 +457,13 @@ class DirectLLMService:
         conversation_context: dict | None = None,
         retrieval: dict | None = None,
         tool_observations: list[dict] | None = None,
+        runtime_capabilities: list[dict[str, str]] | None = None,
     ) -> dict:
         self._reset_llm_trace()
         profile = self._load_profile_context()
         retrieval = retrieval or {"kb_status": "not_started", "kb_snippets": []}
         tool_observations = tool_observations or []
+        runtime_capabilities = runtime_capabilities or []
         kb_status = str(retrieval.get("kb_status") or "not_started")
         kb_hits = retrieval.get("kb_snippets", [])
 
@@ -494,10 +496,12 @@ class DirectLLMService:
                 "conversation_context": conversation_context or {},
                 "retrieval": retrieval,
                 "tool_observations": tool_observations,
+                "runtime_capabilities": runtime_capabilities,
                 "rules": [
+                    "`use_tool` is permitted only when one of runtime_capabilities explicitly supports the requested fact; no other tool, external lookup, contact check, web search, or live-data source exists.",
                     "Use read_kb only when support-domain information may exist in the KB and it has not been gathered yet.",
                     "If retrieval.kb_status is found, do not choose read_kb again because the KB has already been gathered for this loop; choose answer_from_kb, use_tool, ask_clarification, or cannot_answer.",
-                    "Use use_tool when the answer depends on runtime computation like date, weekday, calendar month/season period, current year, arithmetic, or other live facts.",
+                    "Use use_tool only for an explicitly supported calendar calculation: date, weekday, calendar month/season period, or current year.",
                     "For a calendar month, month range, or season request, preserve the user's stated period in any fallback; never rewrite it as a relative period such as 'after these months'.",
                     "Use answer_from_kb when the gathered KB/tool context is already sufficient for a grounded answer.",
                     "Use the conversation context to resolve short follow-up turns like 'почему', 'как', 'а если', 'то есть', pronouns, or yes/no follow-ups.",
