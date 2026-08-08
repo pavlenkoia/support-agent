@@ -10,6 +10,7 @@ import yaml
 from app.core.config import settings
 from app.integrations.llm.base import BaseLLMClient
 from app.integrations.llm.factory import get_llm_client
+from app.integrations.llm.openai_compatible import LLMRecoveryExhausted
 from app.services.system_prompt import SystemPromptService
 
 MAX_CATALOG_SELECTION = 3
@@ -189,6 +190,17 @@ class DirectLLMService:
                     ),
                     "confidence": grounded_fallback["confidence"],
                     "reason": grounded_fallback["reason"],
+                    "llm_trace": list(self._active_llm_trace),
+                }
+            if isinstance(exc, LLMRecoveryExhausted):
+                return {
+                    "route": "answer",
+                    "response_text": self._prepend_standard_greeting_if_missing(
+                        "Сейчас не удаётся подготовить ответ. Пожалуйста, повторите попытку немного позже.",
+                        first_reply_in_dialogue=first_reply_in_dialogue,
+                    ),
+                    "confidence": 0.0,
+                    "reason": "llm_recovery_exhausted",
                     "llm_trace": list(self._active_llm_trace),
                 }
             return {

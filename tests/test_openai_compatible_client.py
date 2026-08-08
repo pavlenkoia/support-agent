@@ -98,6 +98,45 @@ def test_openai_compatible_client_retries_transient_rate_limit_on_same_slot(monk
     assert client.get_last_call_info()["used_failover"] is False
 
 
+def test_openai_compatible_client_uses_retry_after_then_cools_down_and_fails_over(monkeypatch) -> None:
+    seen_auth_headers: list[str] = []
+    sleep_delays: list[float] = []
+
+    def fake_urlopen(req, timeout):
+        _ = timeout
+        seen_auth_headers.append(req.headers["Authorization"])
+        if req.headers["Authorization"] == "Bearer primary-token":
+            raise error.HTTPError(
+                req.full_url,
+                429,
+                "rate limited",
+                hdrs={"Retry-After": "7"},
+                fp=io.BytesIO(b'{"message":"Rate limit exceeded"}'),
+            )
+        return FakeResponse({"choices": [{"message": {"content": "ok-secondary"}}]})
+
+    monkeypatch.setattr("app.integrations.llm.openai_compatible.request.urlopen", fake_urlopen)
+    monkeypatch.setattr("app.integrations.llm.openai_compatible.time.sleep", sleep_delays.append)
+    client = OpenAICompatibleClient(
+        provider="mistral",
+        base_url="https://example.test/v1",
+        api_key="primary-token",
+        api_keys=["primary-token", "secondary-token"],
+        model="test-model",
+        max_retries=1,
+        retry_backoff_seconds=0.01,
+        rate_limit_cooldown_seconds=60,
+    )
+
+    assert client.generate(system_prompt="sys", user_prompt="usr") == "ok-secondary"
+    assert seen_auth_headers == ["Bearer primary-token", "Bearer primary-token", "Bearer secondary-token"]
+    assert sleep_delays == [7.0]
+    info = client.get_last_call_info()
+    assert info["used_failover"] is True
+    assert info["failover_events"][0]["reason_class"] == "rate_limited"
+    assert info["failover_events"][0]["retry_after_seconds"] == 7.0
+
+
 def test_openai_compatible_client_fails_over_to_next_api_key_on_auth_error(monkeypatch, caplog) -> None:
     seen_auth_headers: list[str] = []
 
@@ -144,6 +183,8 @@ def test_openai_compatible_client_fails_over_to_next_api_key_on_auth_error(monke
             "to_api_key_index": 1,
             "http_status": 401,
             "reason": '{"error":"invalid_api_key"}',
+            "reason_class": "authentication_failed",
+            "retry_after_seconds": None,
         }
     ]
     assert "llm api key failover triggered" in caplog.text

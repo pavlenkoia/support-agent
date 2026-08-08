@@ -57,6 +57,11 @@ class PolicyService:
             return message.strip()
         return "К сожалению, по этому вопросу я не смогу подсказать."
 
+    @staticmethod
+    def render_llm_unavailable() -> str:
+        """Single non-technical terminal answer for exhausted LLM recovery."""
+        return "Сейчас не удаётся подготовить ответ. Пожалуйста, повторите попытку немного позже."
+
     def finalize_customer_text(self, text: str, *, first_reply_in_dialogue: bool) -> str:
         """Apply one customer-facing boundary to every terminal route."""
         cleaned = re.sub(r"\s+", " ", str(text or "")).strip().replace("**", "").replace("__", "")

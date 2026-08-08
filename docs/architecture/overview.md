@@ -94,14 +94,14 @@ The application-level outcomes are now:
 
 ## Reliability and degradation rules
 
-1. **Transient provider failures are retried** with a bounded total deadline at the LLM client layer, including incomplete HTTP response bodies (`IncompleteRead`). The direct/KB defaults are four total attempts (initial + three retries), exponential jittered pauses based on 0.75 seconds, and a 45-second total retry deadline.
-2. **Customer-visible terminal responses use one output boundary.** `social_reply` finalizes without retrieval/KB work; a social-model failure returns a neutral polite answer. A first reply receives exactly one standard greeting, while internal mechanics (profile/scope, KB/tool/route/trace terms, and structured-output delimiters) are rejected before transport. `out_of_scope` may finalize directly only for the first customer turn: an out-of-scope decision after an assistant reply must first perform KB processing so contextual post-service follow-ups are not discarded. Neither terminal action may be replaced by `cannot_answer` because of an `IncompleteRead` in an unrelated final-generation path.
-3. **Key-specific provider failures can fail over** at the same client layer:
-   - `DIRECT_LLM_API_KEYS`, `KB_AGENT_API_KEYS`, and `SUMMARY_LLM_API_KEYS` accept ordered CSV key pools
-   - transient/network/5xx and ordinary `429` rate-limit failures retry on the current key within the bounded retry deadline
-   - auth and explicit quota/credit/billing/exhaustion failures fail over to the next key slot when available
-   - legacy single-key vars remain valid and are treated as the primary key
-3. **Planner over-clarification is constrained**:
+1. **Every OpenAI-compatible LLM call uses one bounded recovery contour.** On a transient transport/`408`/`409`/`425`/ordinary `429`/`5xx` failure, the client retries the active slot using `Retry-After` when present or exponential jittered backoff, within the role deadline. After that budget is exhausted, it cools down the failing slot and tries the next eligible key. Auth and explicit quota/credit/billing exhaustion still enter immediate slot disable/cooldown and failover. The contour covers direct, KB-agent, and summary roles.
+2. **Full LLM-recovery exhaustion has one safe terminal outcome.** The customer receives one neutral retry-later answer (`answer` route), never a provider exception, raw KB text, blank `retry_pending` response, or `cannot_answer` caused by an API outage. Honest missing-grounding remains `cannot_answer`; it is not conflated with provider unavailability.
+3. **Customer-visible terminal responses use one output boundary.** `social_reply` finalizes without retrieval/KB work; a social-model failure returns a neutral polite answer. A first reply receives exactly one standard greeting, while internal mechanics (profile/scope, KB/tool/route/trace terms, and structured-output delimiters) are rejected before transport. `out_of_scope` may finalize directly only for the first customer turn: an out-of-scope decision after an assistant reply must first perform KB processing so contextual post-service follow-ups are not discarded.
+4. **Key-pool continuity is observable without secrets**:
+   - `DIRECT_LLM_API_KEYS`, `KB_AGENT_API_KEYS`, and `SUMMARY_LLM_API_KEYS` accept ordered CSV key pools; legacy single-key vars remain valid as the primary slot
+   - `last_call_info` / LLM trace preserve `api_key_index`, `used_failover`, `failover_count`, and failover events including non-secret reason class and `Retry-After`
+   - warning logs and LLM-usage summaries show reserve-key use
+5. **Planner over-clarification is constrained**:
    - if KB has not been read yet and the opener is broad but clearly in-domain, prefer `read_kb`
    - if KB is already found and a short safe overview is possible, prefer `answer_from_kb`
 4. **The KB agent is the heavy reasoning step**. The stronger model should be allocated to page selection / selective reading / coverage review, while the final customer-facing answer step can use a lighter model.

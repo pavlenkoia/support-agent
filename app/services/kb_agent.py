@@ -8,6 +8,7 @@ from typing import Any
 from app.core.config import settings
 from app.integrations.llm.base import BaseLLMClient
 from app.integrations.llm.factory import get_llm_client
+from app.integrations.llm.openai_compatible import LLMRecoveryExhausted
 from app.services.system_prompt import KBAgentPromptService
 
 MAX_CATALOG_SELECTION = 3
@@ -297,15 +298,24 @@ class KBAgentService:
         *,
         review: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        recovery_exhausted = any(
+            "LLMRecoveryExhausted" in str(value)
+            for value in (
+                reason,
+                navigation.get("reason"),
+                (review or {}).get("reason"),
+            )
+        )
         return {
             "kb_status": "found",
             "kb_mode": "llm_wiki_selected_pages",
-            "grounding_status": "retry_pending",
+            "grounding_status": "llm_unavailable" if recovery_exhausted else "retry_pending",
             "answer_context": [],
             "grounded_facts": [],
             "answer_basis": "",
             "missing_information": [],
             "source_refs": [],
+            "reason": "llm_recovery_exhausted:LLMRecoveryExhausted" if recovery_exhausted else reason,
             "trace": trace
             | {
                 "navigation": navigation,
@@ -507,6 +517,16 @@ class KBAgentService:
             )
             parsed = self._parse_json_response(raw)
             self._record_llm_call('grounded_extraction')
+        except LLMRecoveryExhausted as exc:
+            self._record_llm_call('grounded_extraction')
+            return {
+                "grounding_status": "llm_unavailable",
+                "answer_basis": "",
+                "grounded_facts": [],
+                "missing_information": [],
+                "cited_source_refs": [],
+                "reason": f"llm_recovery_exhausted:{type(exc).__name__}",
+            }
         except Exception as exc:
             self._record_llm_call('grounded_extraction')
             return {

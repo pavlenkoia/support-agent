@@ -58,10 +58,10 @@ Example class of task:
 
 ## Provider failure handling
 
-- LLM clients must support bounded timeout / retry / backoff settings for transient network or upstream-provider failures, including an incomplete HTTP response body (`IncompleteRead`).
-- Mistral/openai-compatible roles must also support ordered multi-key pools via `DIRECT_LLM_API_KEYS`, `KB_AGENT_API_KEYS`, and `SUMMARY_LLM_API_KEYS` with backward-compatible single-key aliases.
-- Transient/network/5xx and ordinary `429` rate-limit failures must retry on the current key within the bounded retry deadline; auth and explicit quota/credit/billing/exhaustion failures should fail over to the next key when available.
-- The runtime must expose non-secret failover observability: warning logs on key-slot switches plus `api_key_index` / `used_failover` / `failover_count` / `failover_events` in LLM trace metadata.
+- Every OpenAI-compatible call (direct, KB-agent, and summary) must use one bounded shared recovery contour: transient network/upstream/ordinary-`429` error → `Retry-After` or exponential backoff retry on the active slot → cooldown after that slot's retry budget is exhausted → failover to the next eligible slot.
+- Mistral/openai-compatible roles support ordered multi-key pools via `DIRECT_LLM_API_KEYS`, `KB_AGENT_API_KEYS`, and `SUMMARY_LLM_API_KEYS` with backward-compatible single-key aliases. Auth and explicit quota/credit/billing exhaustion can fail over immediately; all key transitions are non-secret trace events.
+- After complete recovery exhaustion, the customer-facing outcome must be one neutral retry-later `answer`, never a provider exception, empty text, raw KB material, deferred empty reply, or `cannot_answer` caused by LLM API failure. `cannot_answer` remains reserved for genuinely insufficient grounding.
+- The runtime must expose non-secret failover observability: warning logs on key-slot switches plus `api_key_index` / `used_failover` / `failover_count` / `failover_events` (reason class and `Retry-After` where supplied) in LLM trace metadata.
 - The KB agent is the stronger reasoning step and should be allowed to use the stronger model tier than the final answering step.
 - If the planner or final answer step fails after KB retrieval succeeded, the runtime should prefer a grounded degradation path over a template refusal whenever the KB agent's extracted `grounded_facts` or `answer_basis` support a safe short answer. It must not select sentences from arbitrary loaded KB pages.
 - Deterministic degradations must be based on retrieved facts generically, not on one-off question-specific hardcodes.

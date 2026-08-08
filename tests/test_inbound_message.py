@@ -65,6 +65,22 @@ class RetryPendingKBAgentService:
         }
 
 
+class ExhaustedRecoveryKBAgentService:
+    def read(self, text: str, kb_hits: list[dict], *, conversation_context: dict | None = None) -> dict:
+        _ = (text, kb_hits, conversation_context)
+        return {
+            "kb_status": "found",
+            "kb_mode": "test_stub",
+            "grounding_status": "llm_unavailable",
+            "answer_context": [],
+            "grounded_facts": [],
+            "answer_basis": "",
+            "source_refs": [],
+            "reason": "llm_recovery_exhausted:rate_limited",
+            "trace": {"extraction": {"reason": "llm_recovery_exhausted:rate_limited"}},
+        }
+
+
 class NotGroundedKBAgentService:
     def read(self, text: str, kb_hits: list[dict], *, conversation_context: dict | None = None) -> dict:
         _ = (text, conversation_context)
@@ -755,6 +771,40 @@ def test_terminal_first_reply_is_greeted_and_never_leaks_internal_profile_name()
     assert result["route"]["route"] == "cannot_answer"
     assert response_text.startswith("Здравствуйте!")
     assert "профил" not in response_text.lower()
+
+
+def test_llm_recovery_exhaustion_returns_one_safe_customer_answer_without_retry_pending() -> None:
+    class ReadKBPlanner:
+        def assess_request(self, *args, **kwargs):
+            return {"action": "read_kb", "confidence": 1.0, "reason": "test", "llm_trace": []}
+
+    class FoundRetrieval:
+        def retrieve(self, *args, **kwargs):
+            return {"kb_status": "found", "kb_snippets": [{"text": "raw KB text must not leak"}]}
+
+        def expand_for_grounding(self, retrieval, **kwargs):
+            return retrieval
+
+    result = OrchestratorService(
+        retrieval=FoundRetrieval(),
+        kb_agent=ExhaustedRecoveryKBAgentService(),
+        direct_llm=ReadKBPlanner(),
+        policy=PolicyService(),
+        tool_runtime=ToolRuntimeService(),
+    ).run(
+        text="Когда можно записаться?",
+        context={"recent_messages": [{"role": "user", "content": "Когда можно записаться?"}]},
+        knowledge_backend="filesystem",
+        knowledge_root="/unused",
+        knowledge_query="Когда можно записаться?",
+    )
+
+    response_text = result["route"]["reply"]["response_text"]
+    assert result["route"]["route"] == "answer"
+    assert "повторите попытку" in response_text.lower()
+    assert "raw KB text" not in response_text
+    assert result["route"]["route_reason"] == "llm_recovery_exhausted:rate_limited"
+    assert result["response_strategy"]["steps"].count("answer") == 1
 
 
 def test_followup_after_in_domain_terminal_answer_cannot_be_short_circuited_as_out_of_scope() -> None:

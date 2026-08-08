@@ -60,6 +60,7 @@ class Settings(BaseSettings):
     summary_llm_timeout_seconds: int = 45
     summary_llm_max_retries: int = 2
     summary_llm_retry_backoff_seconds: float = 1.0
+    summary_llm_retry_deadline_seconds: float = 45.0
 
     hermes_backend_enabled: bool = False
     hermes_backend_mode: str = "stub"

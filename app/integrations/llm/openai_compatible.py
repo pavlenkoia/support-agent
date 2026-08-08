@@ -4,11 +4,10 @@ import hashlib
 import json
 import logging
 import random
-import socket
 import threading
 import time
 from http.client import IncompleteRead
-from typing import Any
+from typing import Any, ClassVar
 from urllib import error, request
 
 from app.integrations.llm.base import BaseLLMClient
@@ -16,11 +15,15 @@ from app.integrations.llm.base import BaseLLMClient
 logger = logging.getLogger(__name__)
 
 
+class LLMRecoveryExhausted(RuntimeError):
+    """All bounded recovery attempts and eligible key slots were exhausted."""
+
+
 class OpenAICompatibleClient(BaseLLMClient):
-    _pool_active_key_indexes: dict[tuple[str, str, tuple[str, ...]], int] = {}
-    _pool_disabled_key_indexes: dict[tuple[str, str, tuple[str, ...]], set[int]] = {}
-    _pool_cooldown_until: dict[tuple[str, str, tuple[str, ...]], dict[int, float]] = {}
-    _pool_lock = threading.Lock()
+    _pool_active_key_indexes: ClassVar[dict[tuple[str, str, tuple[str, ...]], int]] = {}
+    _pool_disabled_key_indexes: ClassVar[dict[tuple[str, str, tuple[str, ...]], set[int]]] = {}
+    _pool_cooldown_until: ClassVar[dict[tuple[str, str, tuple[str, ...]], dict[int, float]]] = {}
+    _pool_lock: ClassVar[threading.Lock] = threading.Lock()
 
     def __init__(
         self,
@@ -83,23 +86,29 @@ class OpenAICompatibleClient(BaseLLMClient):
         with self._pool_lock:
             self._pool_disabled_key_indexes.setdefault(self._pool_key, set()).add(index)
 
-    def _cool_down_key_index(self, index: int) -> None:
-        if self.rate_limit_cooldown_seconds <= 0:
+    def _cool_down_key_index(self, index: int, *, minimum_seconds: float = 0.0) -> None:
+        cooldown_seconds = max(self.rate_limit_cooldown_seconds, minimum_seconds)
+        if cooldown_seconds <= 0:
             return
         with self._pool_lock:
-            self._pool_cooldown_until.setdefault(self._pool_key, {})[index] = time.monotonic() + self.rate_limit_cooldown_seconds
+            self._pool_cooldown_until.setdefault(self._pool_key, {})[index] = time.monotonic() + cooldown_seconds
 
-    def _retry_delay_seconds(self, retry_attempt: int) -> float:
+    def _retry_delay_seconds(self, retry_attempt: int, *, retry_after_seconds: float | None = None) -> float:
+        if retry_after_seconds is not None:
+            return retry_after_seconds
         base_delay = self.retry_backoff_seconds * (2 ** retry_attempt)
         return random.uniform(base_delay * 0.5, base_delay * 1.5) if base_delay else 0.0
 
-    def _retry_allowed(self, *, deadline: float | None, retry_attempt: int) -> bool:
+    def _retry_allowed(self, *, deadline: float | None, retry_attempt: int, retry_after_seconds: float | None = None) -> bool:
+        delay = self._retry_delay_seconds(retry_attempt, retry_after_seconds=retry_after_seconds)
         if deadline is None:
+            if delay > 0:
+                time.sleep(delay)
             return True
         remaining = deadline - time.perf_counter()
         if remaining <= 0:
             return False
-        delay = min(self._retry_delay_seconds(retry_attempt), remaining)
+        delay = min(delay, remaining)
         if delay > 0:
             time.sleep(delay)
         return time.perf_counter() < deadline
@@ -160,6 +169,24 @@ class OpenAICompatibleClient(BaseLLMClient):
         compact = " ".join(str(detail or "").split())
         return compact[:200]
 
+    @staticmethod
+    def _retry_after_seconds(exc: error.HTTPError) -> float | None:
+        value = exc.headers.get("Retry-After") if exc.headers else None
+        try:
+            return max(0.0, float(value)) if value is not None else None
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _http_reason_class(exc: error.HTTPError, *, failover: bool) -> str:
+        if exc.code in {401, 403}:
+            return "authentication_failed"
+        if exc.code == 429:
+            return "quota_exhausted" if failover else "rate_limited"
+        if exc.code >= 500:
+            return "upstream_unavailable"
+        return "transient_http"
+
     def generate(
         self,
         *,
@@ -185,7 +212,8 @@ class OpenAICompatibleClient(BaseLLMClient):
         total_attempts = 0
         key_indexes = self._available_key_indexes()
         if not key_indexes:
-            raise RuntimeError("All LLM API key slots are temporarily unavailable")
+            self._set_last_call_info({"provider": self.provider, "model": self.model, "endpoint": endpoint, "attempts": 0, "error": "recovery_exhausted:no_available_slots"})
+            raise LLMRecoveryExhausted("All LLM API key slots are temporarily unavailable")
         active_key_position = 0
         active_key_index = key_indexes[active_key_position]
         data: dict[str, Any] | None = None
@@ -239,6 +267,7 @@ class OpenAICompatibleClient(BaseLLMClient):
                 except error.HTTPError as exc:  # pragma: no cover - network error path
                     detail = exc.read().decode("utf-8", errors="ignore")
                     should_fail_over = self._should_fail_over_on_http_error(exc, detail)
+                    retry_after_seconds = self._retry_after_seconds(exc)
                     if exc.code in {401, 403}:
                         if self._is_temporary_key_unavailable(detail):
                             self._cool_down_key_index(active_key_index)
@@ -249,7 +278,7 @@ class OpenAICompatibleClient(BaseLLMClient):
                     should_retry = (exc.code in {408, 409, 425, 429} or exc.code >= 500) and not should_fail_over
                     if should_retry and retry_attempt < self.max_retries:
                         last_error = RuntimeError(f"LLM HTTP {exc.code}: {detail}")
-                        if self._retry_allowed(deadline=deadline, retry_attempt=retry_attempt):
+                        if self._retry_allowed(deadline=deadline, retry_attempt=retry_attempt, retry_after_seconds=retry_after_seconds):
                             continue
                         self._set_retry_deadline_error(
                             endpoint=endpoint,
@@ -258,14 +287,19 @@ class OpenAICompatibleClient(BaseLLMClient):
                             active_key_index=active_key_index,
                             failover_events=failover_events,
                         )
-                        raise RuntimeError("LLM retry deadline exceeded") from exc
-                    if should_fail_over and active_key_position + 1 < len(key_indexes):
+                        raise LLMRecoveryExhausted("LLM retry deadline exceeded") from exc
+                    should_fail_over_after_retries = should_fail_over or should_retry
+                    if should_retry:
+                        self._cool_down_key_index(active_key_index, minimum_seconds=retry_after_seconds or 0.0)
+                    if should_fail_over_after_retries and active_key_position + 1 < len(key_indexes):
                         next_key_index = key_indexes[active_key_position + 1]
                         failover_event = {
                             "from_api_key_index": active_key_index,
                             "to_api_key_index": next_key_index,
                             "http_status": exc.code,
                             "reason": self._summarize_http_detail(detail),
+                            "reason_class": self._http_reason_class(exc, failover=should_fail_over),
+                            "retry_after_seconds": retry_after_seconds,
                         }
                         failover_events.append(failover_event)
                         self._set_active_key_index(next_key_index)
@@ -295,8 +329,8 @@ class OpenAICompatibleClient(BaseLLMClient):
                             "error": f"HTTP {exc.code}",
                         }
                     )
-                    raise RuntimeError(f"LLM HTTP {exc.code}: {detail}") from exc
-                except (error.URLError, TimeoutError, socket.timeout, IncompleteRead) as exc:  # pragma: no cover - network error path
+                    raise LLMRecoveryExhausted(f"LLM HTTP {exc.code}: {detail}") from exc
+                except (error.URLError, TimeoutError, IncompleteRead) as exc:  # pragma: no cover - network error path
                     if retry_attempt < self.max_retries:
                         last_error = RuntimeError(f"LLM connection error: {exc}")
                         if self._retry_allowed(deadline=deadline, retry_attempt=retry_attempt):
@@ -308,7 +342,7 @@ class OpenAICompatibleClient(BaseLLMClient):
                             active_key_index=active_key_index,
                             failover_events=failover_events,
                         )
-                        raise RuntimeError("LLM retry deadline exceeded") from exc
+                        raise LLMRecoveryExhausted("LLM retry deadline exceeded") from exc
                     self._set_last_call_info(
                         {
                             "provider": self.provider,
@@ -323,7 +357,7 @@ class OpenAICompatibleClient(BaseLLMClient):
                             "error": type(exc).__name__,
                         }
                     )
-                    raise RuntimeError(f"LLM connection error: {exc}") from exc
+                    raise LLMRecoveryExhausted(f"LLM connection error: {exc}") from exc
             else:  # pragma: no cover - defensive
                 raise last_error or RuntimeError("LLM request failed")
 

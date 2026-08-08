@@ -334,6 +334,14 @@ class OrchestratorService:
         planner_action: str,
         planner_reason: str,
     ) -> dict[str, Any]:
+        if kb_result.get("grounding_status") == "llm_unavailable":
+            return {
+                "route": "answer",
+                "response_text": self.policy.render_llm_unavailable(),
+                "confidence": 0.0,
+                "reason": str(kb_result.get("reason") or "llm_recovery_exhausted"),
+                "llm_trace": [],
+            }
         if kb_result.get("grounding_status") == "retry_pending":
             return {
                 "route": "retry_pending",
