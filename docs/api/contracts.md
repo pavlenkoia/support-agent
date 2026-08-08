@@ -123,7 +123,7 @@ Expected `route.route` values:
 - `clarification_requested`
 
 Notes:
-- `route_reason` may carry either a normal planner/policy reason, a grounded-degradation marker such as `llm_fallback:RuntimeError`, or `llm_recovery_exhausted` when every bounded provider retry/key slot was exhausted. The last case still emits one neutral customer `answer`; it never becomes a blank/deferred transport reply or a provider-caused `cannot_answer`.
+- `route_reason` may carry either a normal planner/policy reason, a grounded-degradation marker such as `llm_fallback:RuntimeError`, or `llm_recovery_exhausted` when every bounded provider retry/key slot was exhausted. The last case is `retry_pending` with an empty payload and no outbound delivery; it never becomes a provider-caused `cannot_answer`.
 - `route_confidence` reflects the final emitted answer path, including grounded fallback paths.
 - date/tool-assisted answers may still surface `answer` as the final route even when the step trace includes both tool usage and KB-agent reading.
 

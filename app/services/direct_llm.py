@@ -194,11 +194,8 @@ class DirectLLMService:
                 }
             if isinstance(exc, LLMRecoveryExhausted):
                 return {
-                    "route": "answer",
-                    "response_text": self._prepend_standard_greeting_if_missing(
-                        "Сейчас не удаётся подготовить ответ. Пожалуйста, повторите попытку немного позже.",
-                        first_reply_in_dialogue=first_reply_in_dialogue,
-                    ),
+                    "route": "retry_pending",
+                    "response_text": "",
                     "confidence": 0.0,
                     "reason": "llm_recovery_exhausted",
                     "llm_trace": list(self._active_llm_trace),

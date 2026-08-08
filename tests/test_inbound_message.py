@@ -773,7 +773,7 @@ def test_terminal_first_reply_is_greeted_and_never_leaks_internal_profile_name()
     assert "профил" not in response_text.lower()
 
 
-def test_llm_recovery_exhaustion_returns_one_safe_customer_answer_without_retry_pending() -> None:
+def test_llm_recovery_exhaustion_defers_without_customer_reply() -> None:
     class ReadKBPlanner:
         def assess_request(self, *args, **kwargs):
             return {"action": "read_kb", "confidence": 1.0, "reason": "test", "llm_trace": []}
@@ -800,11 +800,11 @@ def test_llm_recovery_exhaustion_returns_one_safe_customer_answer_without_retry_
     )
 
     response_text = result["route"]["reply"]["response_text"]
-    assert result["route"]["route"] == "answer"
-    assert "повторите попытку" in response_text.lower()
+    assert result["route"]["route"] == "retry_pending"
+    assert response_text == ""
     assert "raw KB text" not in response_text
     assert result["route"]["route_reason"] == "llm_recovery_exhausted:rate_limited"
-    assert result["response_strategy"]["steps"].count("answer") == 1
+    assert result["response_strategy"]["steps"].count("retry_pending") == 1
 
 
 def test_followup_after_in_domain_terminal_answer_cannot_be_short_circuited_as_out_of_scope() -> None:

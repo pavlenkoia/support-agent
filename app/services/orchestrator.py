@@ -336,8 +336,8 @@ class OrchestratorService:
     ) -> dict[str, Any]:
         if kb_result.get("grounding_status") == "llm_unavailable":
             return {
-                "route": "answer",
-                "response_text": self.policy.render_llm_unavailable(),
+                "route": "retry_pending",
+                "response_text": "",
                 "confidence": 0.0,
                 "reason": str(kb_result.get("reason") or "llm_recovery_exhausted"),
                 "llm_trace": [],
