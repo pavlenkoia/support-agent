@@ -92,6 +92,27 @@ class DirectLLMService:
             calendar_period_guard["llm_trace"] = []
             return calendar_period_guard
 
+        # A KB-ready result is already the bounded factual answer plan. Sending it
+        # through a second generative decision step lets that step invent a new
+        # requirement or prohibition that was not grounded in the selected pages.
+        # Render the curated facts directly; wording must not re-decide the result.
+        if (
+            kb_packet.get("kb_status") == "found"
+            and kb_packet.get("grounding_status") == "ready"
+        ):
+            rendered = self._render_ready_grounding(kb_packet)
+            if rendered:
+                return {
+                    "route": "answer",
+                    "response_text": self._prepend_standard_greeting_if_missing(
+                        rendered,
+                        first_reply_in_dialogue=first_reply_in_dialogue,
+                    ),
+                    "confidence": 0.76,
+                    "reason": "ready_grounding_rendered",
+                    "llm_trace": [],
+                }
+
         if settings.direct_llm_provider == "stub" and not self._client_injected:
             return self._respond_stub(
                 text,

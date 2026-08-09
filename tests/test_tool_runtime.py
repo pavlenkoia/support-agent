@@ -139,7 +139,7 @@ def test_ready_grounding_cannot_finish_as_clarification(monkeypatch) -> None:
     assert "Какой именно вариант" not in result["response_text"]
 
 
-def test_ready_grounding_preserves_contextual_final_model_answer(monkeypatch) -> None:
+def test_ready_grounding_does_not_delegate_factual_result_to_final_model(monkeypatch) -> None:
     class ContextAwareClient:
         def generate(self, **kwargs):
             return '{"route":"answer","response_text":"Сегодня офис уже не работает. Если не дозваниваетесь, попробуйте позвонить в понедельник утром.","confidence":0.9,"reason":"contextual_answer"}'
@@ -161,11 +161,11 @@ def test_ready_grounding_preserves_contextual_final_model_answer(monkeypatch) ->
     )
 
     assert result["route"] == "answer"
-    assert result["response_text"].startswith("Сегодня офис уже не работает")
-    assert result["reason"] == "contextual_answer"
+    assert result["response_text"] == "Офис работает по будням с 09:00 до 17:00."
+    assert result["reason"] == "ready_grounding_rendered"
 
 
-def test_final_response_receives_customer_facing_kb_packet_without_internal_trace(monkeypatch) -> None:
+def test_ready_grounding_does_not_send_internal_trace_or_facts_to_final_model(monkeypatch) -> None:
     class CapturingClient(BaseLLMClient):
         def __init__(self) -> None:
             self.payload: dict | None = None
@@ -209,22 +209,10 @@ def test_final_response_receives_customer_facing_kb_packet_without_internal_trac
     )
 
     assert result["route"] == "answer"
-    assert client.payload is not None
-    evidence = client.payload["grounding_evidence"]
-    assert evidence == {
-        "facts": [
-            "Прыжки обычно проходят по выходным.",
-            "Дата 2026-08-04 — вторник, будний день.",
-        ],
-    }
-    serialized = json.dumps(client.payload, ensure_ascii=False)
-    assert client.payload["conversation_context"]["recent_messages"][-1]["content"] == "А завтра?"
-    assert client.system_prompt == service.prompt_service.load_system_prompt()
-    assert "Прыжки обычно проходят по выходным и зависят от погоды и анонса." not in serialized
-    assert "Внутреннее обоснование" not in serialized
-    assert "Внутренняя проверка" not in serialized
-    assert "tool_results" not in serialized
-    assert len(serialized) < 2500
+    assert client.payload is None
+    assert client.system_prompt is None
+    assert result["response_text"] == "Прыжки обычно проходят по выходным. Дата 2026-08-04 — вторник, будний день."
+    assert result["reason"] == "ready_grounding_rendered"
 
 
 def test_direct_llm_runtime_error_returns_grounded_kb_answer(monkeypatch) -> None:
@@ -279,8 +267,8 @@ def test_direct_llm_ready_grounding_never_degrades_to_cannot_answer_when_seconda
 
     assert result["route"] == "answer"
     assert "до 85 кг" in result["response_text"]
-    assert result["reason"] == "prompt_runtime_grounded_fallback:RuntimeError"
-    assert any(item.get("step") == "grounded_fallback" for item in result["llm_trace"])
+    assert result["reason"] == "ready_grounding_rendered"
+    assert result["llm_trace"] == []
 
 
 def test_direct_llm_runtime_error_uses_only_kb_grounded_facts(monkeypatch) -> None:
