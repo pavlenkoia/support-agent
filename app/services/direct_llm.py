@@ -269,13 +269,20 @@ class DirectLLMService:
         facts = kb_packet.get("grounded_facts")
         if isinstance(facts, list):
             rendered = " ".join(
-                fact.strip()
+                self._as_customer_sentence(fact)
                 for fact in facts[:3]
                 if isinstance(fact, str) and fact.strip()
             )
             if rendered:
                 return self._sanitize_customer_text(rendered)
-        return self._sanitize_customer_text(str(kb_packet.get("answer_basis") or ""))
+        return self._sanitize_customer_text(self._as_customer_sentence(str(kb_packet.get("answer_basis") or "")))
+
+    @staticmethod
+    def _as_customer_sentence(text: str) -> str:
+        cleaned = text.strip()
+        if cleaned and cleaned[-1] not in ".!?…":
+            return f"{cleaned}."
+        return cleaned
 
     def respond_social(self, text: str, *, conversation_context: dict | None = None) -> dict:
         """Finish a planner-approved social turn without KB retrieval or cannot_answer UX."""

@@ -46,3 +46,20 @@ def test_ready_grounding_is_sent_without_a_second_model_reinterpreting_it(monkey
         "Их отсутствие само по себе не мешает прыжку."
     )
     assert result["reason"] == "ready_grounding_rendered"
+
+
+def test_ready_grounding_renderer_separates_unpunctuated_facts() -> None:
+    result = DirectLLMService(client=None)._render_ready_grounding(
+        {
+            "grounded_facts": [
+                "Очки, шлем, комбинезон и перчатки не выдаются",
+                "Их отсутствие само по себе не мешает прыжку",
+                "Берцы можно взять в прокате на месте",
+            ]
+        }
+    )
+
+    assert result == (
+        "Очки, шлем, комбинезон и перчатки не выдаются. "
+        "Их отсутствие само по себе не мешает прыжку. Берцы можно взять в прокате на месте."
+    )
