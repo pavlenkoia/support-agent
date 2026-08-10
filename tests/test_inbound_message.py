@@ -1,5 +1,7 @@
 import json
+from datetime import datetime, timedelta
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from fastapi.testclient import TestClient
 from sqlalchemy import text
@@ -367,6 +369,86 @@ def test_routing_service_persists_outbound_message_for_followup_context(tmp_path
     ]
     respond_calls = [call for call in routing.direct_llm.calls if call["method"] == "respond"]
     assert respond_calls[-1]["first_reply_in_dialogue"] is False
+
+
+def test_routing_starts_new_case_when_local_calendar_day_changes(tmp_path: Path) -> None:
+    routing = make_test_routing_service(tmp_path)
+    yekaterinburg = ZoneInfo("Asia/Yekaterinburg")
+    first = routing.handle_inbound(
+        InboundMessage(
+            channel="telegram",
+            external_user_id="boundary-day",
+            external_chat_id="boundary-day",
+            text="Сколько стоят прыжки?",
+            received_at=datetime(2026, 8, 10, 23, 30, tzinfo=yekaterinburg),
+        )
+    )
+    second = routing.handle_inbound(
+        InboundMessage(
+            channel="telegram",
+            external_user_id="boundary-day",
+            external_chat_id="boundary-day",
+            text="А сертификат действует?",
+            received_at=datetime(2026, 8, 11, 0, 15, tzinfo=yekaterinburg),
+        )
+    )
+
+    assert second["case"]["case_id"] != first["case"]["case_id"]
+    assert second["context"]["recent_messages"] == [{"role": "user", "content": "А сертификат действует?"}]
+
+
+def test_routing_starts_new_case_after_two_hours_of_inactivity(tmp_path: Path) -> None:
+    routing = make_test_routing_service(tmp_path)
+    yekaterinburg = ZoneInfo("Asia/Yekaterinburg")
+    first_at = datetime(2026, 8, 10, 10, 0, tzinfo=yekaterinburg)
+    first = routing.handle_inbound(
+        InboundMessage(
+            channel="telegram",
+            external_user_id="boundary-gap",
+            external_chat_id="boundary-gap",
+            text="Сколько стоят прыжки?",
+            received_at=first_at,
+        )
+    )
+    second = routing.handle_inbound(
+        InboundMessage(
+            channel="telegram",
+            external_user_id="boundary-gap",
+            external_chat_id="boundary-gap",
+            text="А сертификат действует?",
+            received_at=first_at + timedelta(hours=2, minutes=1),
+        )
+    )
+
+    assert second["case"]["case_id"] != first["case"]["case_id"]
+    assert second["context"]["recent_messages"] == [{"role": "user", "content": "А сертификат действует?"}]
+
+
+def test_routing_keeps_same_case_within_two_hours_on_same_local_day(tmp_path: Path) -> None:
+    routing = make_test_routing_service(tmp_path)
+    yekaterinburg = ZoneInfo("Asia/Yekaterinburg")
+    first_at = datetime(2026, 8, 10, 10, 0, tzinfo=yekaterinburg)
+    first = routing.handle_inbound(
+        InboundMessage(
+            channel="telegram",
+            external_user_id="boundary-continue",
+            external_chat_id="boundary-continue",
+            text="Сколько стоят прыжки?",
+            received_at=first_at,
+        )
+    )
+    second = routing.handle_inbound(
+        InboundMessage(
+            channel="telegram",
+            external_user_id="boundary-continue",
+            external_chat_id="boundary-continue",
+            text="А сертификат действует?",
+            received_at=first_at + timedelta(hours=1, minutes=59),
+        )
+    )
+
+    assert second["case"]["case_id"] == first["case"]["case_id"]
+    assert second["context"]["recent_messages"][-1] == {"role": "user", "content": "А сертификат действует?"}
 
 
 def test_routing_service_persists_entities_and_workflow_events(tmp_path: Path) -> None:

@@ -1,15 +1,22 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
+from zoneinfo import ZoneInfo
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models.case import SupportCase
 from app.models.channel import ChannelAccount
 from app.models.conversation import Conversation
+from app.models.message import Message
 from app.models.user import User
 from app.schemas.message import InboundMessage
 
+
 PROBE_MARKER_KEYS = ("is_test", "source", "session_type", "scenario_name", "requested_by")
+SESSION_TIMEZONE = ZoneInfo("Asia/Yekaterinburg")
+SESSION_INACTIVITY_LIMIT = timedelta(hours=2)
 
 
 def _extract_session_markers(payload: InboundMessage) -> dict:
@@ -37,6 +44,34 @@ def _apply_case_markers(support_case: SupportCase, markers: dict) -> None:
     support_case.session_type = markers.get("session_type")
     support_case.scenario_name = markers.get("scenario_name")
     support_case.requested_by = markers.get("requested_by")
+
+
+def _normalized_timestamp(value: datetime | None) -> datetime:
+    if value is None:
+        return datetime.now(UTC)
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
+
+
+def _starts_new_session(latest_message: Message | None, payload: InboundMessage) -> bool:
+    if latest_message is None:
+        return False
+
+    previous_at = _normalized_timestamp(latest_message.created_at)
+    incoming_at = _normalized_timestamp(payload.received_at)
+    if previous_at.astimezone(SESSION_TIMEZONE).date() != incoming_at.astimezone(SESSION_TIMEZONE).date():
+        return True
+    return incoming_at - previous_at > SESSION_INACTIVITY_LIMIT
+
+
+def _create_case(session: Session, conversation: Conversation, markers: dict) -> SupportCase:
+    support_case = SupportCase(conversation_id=conversation.id)
+    if markers and any(markers.get(key) is not None for key in PROBE_MARKER_KEYS):
+        _apply_case_markers(support_case, markers)
+    session.add(support_case)
+    session.flush()
+    return support_case
 
 
 def ensure_conversation(session: Session, *, channel: str, external_chat_id: str, markers: dict | None = None) -> Conversation:
@@ -138,14 +173,20 @@ def resolve_case(session: Session, payload: InboundMessage) -> dict:
         .order_by(SupportCase.id.desc())
     )
     if support_case is None:
-        support_case = SupportCase(conversation_id=conversation.id)
-        if markers and any(markers.get(key) is not None for key in PROBE_MARKER_KEYS):
+        support_case = _create_case(session, conversation, markers)
+    else:
+        latest_message = session.scalar(
+            select(Message)
+            .where(Message.case_id == support_case.id)
+            .order_by(Message.created_at.desc(), Message.id.desc())
+        )
+        if _starts_new_session(latest_message, payload):
+            support_case.status = "resolved"
+            support_case.route_mode = "session_boundary"
+            support_case = _create_case(session, conversation, markers)
+        elif markers and any(markers.get(key) is not None for key in PROBE_MARKER_KEYS):
             _apply_case_markers(support_case, markers)
-        session.add(support_case)
-        session.flush()
-    elif markers and any(markers.get(key) is not None for key in PROBE_MARKER_KEYS):
-        _apply_case_markers(support_case, markers)
-        session.flush()
+            session.flush()
 
     return {
         "user_id": user.id,

@@ -35,7 +35,12 @@ def hash_text(text: str) -> str:
 
 
 def persist_inbound_message(session: Session, case_id: int, payload: InboundMessage) -> Message:
-    message = Message(case_id=case_id, role="user", content=payload.text)
+    message = Message(
+        case_id=case_id,
+        role="user",
+        content=payload.text,
+        created_at=normalize_timestamp(payload.received_at),
+    )
     session.add(message)
     session.flush()
     if settings.viewer_push_enabled and payload.channel == "vk":
