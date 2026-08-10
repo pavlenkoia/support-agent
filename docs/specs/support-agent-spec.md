@@ -9,7 +9,7 @@ It is not a ticket router and not an escalation-first bot.
 ## Main invariants
 
 1. The agent must stay within an explicit domain scope from the external profile.
-2. The agent must prefer grounded answers from KB and runtime tools for substantive requests.
+2. The agent must prefer authoritative answers from the active system prompt when it explicitly answers the request; otherwise it must use grounded KB and runtime-tool evidence for substantive requests.
 3. Substantive KB reasoning must pass through a dedicated KB agent that reads the compiled wiki selectively rather than treating lexical snippets as the final reasoning surface.
 4. The customer-facing support agent and the KB agent must use separate external prompt files.
 5. The agent must not fabricate facts when KB/tool evidence is missing.
@@ -22,7 +22,7 @@ It is not a ticket router and not an escalation-first bot.
 12. The main runtime flow must not silently switch into human or Hermes escalation.
 13. A transient LLM-provider failure must not discard already gathered KB facts when a short grounded fallback answer is still possible.
 14. Broad but clearly in-domain openers should prefer a safe overview answer over unnecessary clarification.
-15. When the KB agent returns `grounding_status=ready`, its curated `grounded_facts` (or `answer_basis`) are the factual customer-answer boundary: the runtime renders them directly and must not call a second generative finalizer that can invent requirements, prohibitions, or stronger conditions.
+15. When the KB agent returns `grounding_status=ready`, its compact `answer_basis` and grounded facts are evidence for the customer-facing final model. That model must answer the main customer question first, use only necessary confirmed facts, and must not invent requirements, prohibitions, or stronger conditions. Direct mechanical joining of all facts is not a normal answer path.
 16. Channel-specific transport workers must reuse the same application runtime rather than creating a second support agent.
 17. VK transport-level manual-admin intervention must silence auto-replies for 1 hour from the last unmatched `message_reply`.
 18. Transport-level override must be re-checked immediately before a VK reply is sent.
@@ -36,10 +36,10 @@ Per inbound turn:
 2. finalize a planner-approved `social_reply` without KB lookup or final answer-model generation; only a first-turn `out_of_scope` may finalize directly
 3. force a KB read before accepting `out_of_scope` on a contextual follow-up
 4. for substantive in-domain turns, assess the next action
-5. optionally gather runtime tool observations
-6. optionally gather KB facts
-7. run the dedicated KB agent over the compiled wiki material already gathered
-8. re-assess / finalize through the customer-output boundary
+5. if the active system prompt explicitly answers the request, choose `answer_from_prompt` and finalize without KB retrieval
+6. otherwise optionally gather runtime tool observations and KB facts
+7. run the dedicated KB agent over the compiled wiki material already gathered when KB is needed
+8. finalize through the customer-output boundary with only the relevant evidence
 9. emit one of the allowed outcomes
 
 ## Tool-aware reasoning

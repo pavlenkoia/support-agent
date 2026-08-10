@@ -31,6 +31,7 @@ States:
 6. `stop`
 
 Allowed actions inside the loop:
+- `answer_from_prompt`
 - `read_kb`
 - `use_tool`
 - `ask_clarification`
@@ -102,11 +103,12 @@ The application-level outcomes are now:
    - `last_call_info` / LLM trace preserve `api_key_index`, `used_failover`, `failover_count`, and failover events including non-secret reason class and `Retry-After`
    - warning logs and LLM-usage summaries show reserve-key use
 5. **Planner over-clarification is constrained**:
+   - if the active `SYSTEM_PROMPT.md` explicitly and completely answers a factual request, the planner chooses `answer_from_prompt`; no KB read is performed merely to reconfirm it
    - if KB has not been read yet and the opener is broad but clearly in-domain, prefer `read_kb`
    - if KB is already found and a short safe overview is possible, prefer `answer_from_kb`
 4. **The KB agent is the heavy reasoning step**. The stronger model is allocated to page selection / selective reading / coverage review / grounded extraction.
-5. **Ready grounding is the factual customer-answer boundary.** When the KB agent returns `grounding_status=ready`, the runtime renders its curated `grounded_facts` (or `answer_basis` when facts are unavailable) in order. It does not invoke a second generative finalizer that could reinterpret the result, invent a requirement, or strengthen a condition.
-6. **The customer renderer receives no KB-agent audit.** It excludes full selected pages, planner/navigation/review traces, route reasons, raw tool output, and unbounded dialogue reasoning. The renderer only formats curated grounded output and adds the standard first-turn greeting when needed.
+5. **Ready grounding is final-answer evidence, not a phrase list.** When the KB agent returns `grounding_status=ready`, the customer-facing final model receives the active system prompt, current dialogue, compact `answer_basis`, grounded facts, and relevant tool observations. It must answer the main question first and omit evidence that is not needed for that answer.
+6. **The customer finalizer receives no KB-agent audit.** It excludes full selected pages, planner/navigation/review traces, route reasons, raw tool output, and unbounded dialogue reasoning. On final-model transport failure only, a generic grounded fallback may use `answer_basis` first, then curated facts; it must not invent information.
 7. **Deterministic fallbacks must stay generic**. The core must not hardcode one business question as the only fallback path; the degradation path must work across in-domain topics such as certificates, schedules, and rules.
 8. **Date/tool paths must advance after the tool result is gathered**. A live runtime must not repeat `use_tool` for the same turn once the relevant tool result is already present.
 9. **Relative-date resolution is runtime-anchored**. Words such as `сегодня`, `завтра`, and `послезавтра` must resolve from the active request's runtime date, and clock-time phrases like `к 15:00` must not be misread as a calendar day.
