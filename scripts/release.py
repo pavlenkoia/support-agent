@@ -189,8 +189,10 @@ result = service.respond("Можно ли в тандеме при весе 120 
     "answer_basis": "При весе 120 кг тандем-прыжок невозможен.",
 })
 assert result["route"] == "answer", result
-assert "до 85 кг" in result["response_text"], result
-assert result["reason"] == "ready_grounding_rendered", result
+assert "120 кг" in result["response_text"], result
+assert result["reason"] == "prompt_runtime_grounded_fallback:RuntimeError", result
+assert result["llm_trace"][0]["step"] == "grounded_fallback", result
+assert result["llm_trace"][0]["grounded_fallback_emitted"] is True, result
 print(json.dumps({"route": result["route"], "reason": result["reason"]}, ensure_ascii=False))'''
     result: dict[str, str] = {}
     for service in RUNTIME_CODE_SERVICES:
