@@ -4,18 +4,17 @@
 The customer-facing answer must be written from the active `SYSTEM_PROMPT.md`, the current conversation, and only the relevant knowledge/tool evidence needed for the question.
 
 ## Runtime contract
+
+The canonical packet and evidence contract is defined in `docs/specs/final-answer-contract.md`.
+
 1. The bounded-loop planner may choose `answer_from_prompt` when the active system prompt already contains sufficient authoritative information.
 2. `answer_from_prompt` must not trigger KB retrieval.
 3. When KB is required, KB-agent output is evidence for the final customer-facing model, not customer-ready prose.
-4. The final customer-facing model receives:
-   - active system prompt;
-   - current user message;
-   - current-session history;
-   - relevant KB answer basis and grounded facts, if gathered;
-   - relevant tool observations, if gathered.
-5. The final response must answer the main customer question first and include only facts needed for that answer.
-6. A ready KB packet must not be converted to customer text by mechanically joining `grounded_facts`.
-7. On final-model transport failure, the runtime may use a grounded fallback, preferring `answer_basis` over a list of unrelated facts. It must not invent information.
+4. The final customer-facing model receives only an allowlisted packet: active system prompt, explicit `knowledge_mode`, current user message, role-labelled current-case dialogue, compact grounded evidence, and normalized customer-relevant tool facts.
+5. Planner actions/reasons, routing metadata, traces, raw KB pages, raw tool payloads, case state, and duplicated context representations must never enter the final-model request.
+6. The final response must answer the main customer question first and include only facts needed for that answer.
+7. A ready KB packet must not be converted to customer text by mechanically joining `grounded_facts`.
+8. On final-model transport failure, the runtime may use a grounded fallback, preferring compact ready grounding over unrelated raw context. It must not invent information.
 
 ## Session and safety boundaries
 - The existing new-day / more-than-two-hour case boundary remains unchanged.

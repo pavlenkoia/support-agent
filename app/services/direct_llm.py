@@ -71,16 +71,24 @@ class DirectLLMService:
         text: str,
         kb_result: dict[str, Any] | list[dict],
         *,
+        knowledge_mode: str = "kb_grounded",
         conversation_context: dict | None = None,
         tool_observations: list[dict] | None = None,
         first_reply_in_dialogue: bool = False,
     ) -> dict:
         self._reset_llm_trace()
+        if knowledge_mode not in {"prompt_only", "kb_grounded"}:
+            raise ValueError(f"unsupported finalization knowledge_mode: {knowledge_mode}")
         tool_observations = tool_observations or []
         fallback_text = self.prompt_service.render_cannot_answer()
-        system_prompt = self.prompt_service.load_system_prompt()
+        system_prompt = self._build_finalization_system_prompt(
+            self.prompt_service.load_system_prompt(),
+            knowledge_mode=knowledge_mode,
+        )
         kb_packet = self._coerce_kb_result(kb_result)
         grounding_evidence = self._build_finalization_evidence(kb_packet)
+        finalization_conversation = self._build_finalization_conversation(conversation_context)
+        tool_facts = self._build_finalization_tool_facts(tool_observations)
         calendar_period_guard = self._fallback_answer_from_grounding(
             text,
             kb_packet.get("answer_context", []),
@@ -105,11 +113,7 @@ class DirectLLMService:
         user_prompt = json.dumps(
             {
                 "task": "Прими клиентское решение по вопросу и сформулируй итоговый ответ только из подтверждённых доказательств.",
-                "knowledge_mode": (
-                    "prompt_only"
-                    if str((conversation_context or {}).get("planner_action") or "") == "answer_from_prompt"
-                    else "kb_grounded"
-                ),
+                "knowledge_mode": knowledge_mode,
                 "required_json_schema": {
                     "route": "answer|cannot_answer|out_of_scope|clarification_requested",
                     "response_text": "string",
@@ -118,12 +122,16 @@ class DirectLLMService:
                 },
                 "user_message": text,
                 "first_reply_in_dialogue": first_reply_in_dialogue,
-                "conversation_context": conversation_context or {},
+                "conversation": finalization_conversation,
                 "grounding_evidence": grounding_evidence,
+                "tool_facts": tool_facts,
                 "output_rules": [
                     "Верни только JSON-объект по указанной схеме.",
-                    "Сначала сам прими клиентское решение по точным фактам из системного промпта и, когда knowledge_mode=kb_grounded, из grounding_evidence.",
+                    "Ответь на текущий вопрос клиента, используя точные факты системного промпта и, когда knowledge_mode=kb_grounded, подтверждённые grounding_evidence и tool_facts.",
                     "При knowledge_mode=prompt_only пустой grounding_evidence ожидаем: отвечай по явно заданным фактам и правилам системного промпта, не требуя KB.",
+                    "При knowledge_mode=kb_grounded считай переданные grounding_evidence уже подтверждёнными на предыдущем этапе: не переоценивай, существуют ли эти сведения, и не отбрасывай факт, необходимый для прямого ответа на текущий вопрос.",
+                    "Условные правила системного промпта вида «если точная информация не подтверждена» применяй только когда соответствующего факта нет в grounding_evidence и tool_facts; они не должны заменять явно подтверждённый факт общей резервной формулировкой.",
+                    "answer_basis задаёт компактный смысл требуемого ответа, а facts ограничивают его подтверждённую фактическую область; если между ними есть противоречие, не выходи за точные facts.",
                     "Факты в grounding_evidence — это доказательства, а не порядок построения фразы; не пересказывай цепочку вывода вместо результата.",
                     "Сохраняй точную модальность подтверждённых фактов: «обычно», «может», «зависит», «рекомендуется» нельзя усиливать до «только», «всегда», «точно», «обязательно» или другого более сильного утверждения.",
                     "Общее вероятностное правило не доказывает исход конкретного случая: если evidence говорит «обычно» или оставляет условия/исключения, не отвечай категорическим «да» или «нет» о конкретной дате; сообщи об общем правиле и безопасном способе уточнить конкретный случай.",
@@ -395,6 +403,56 @@ class DirectLLMService:
                 if isinstance(fact, str) and fact.strip()
             ],
         }
+
+    @staticmethod
+    def _build_finalization_conversation(conversation_context: dict | None) -> list[dict[str, str]]:
+        """Project runtime context to role-labelled customer dialogue only."""
+        if not isinstance(conversation_context, dict):
+            return []
+        recent_messages = conversation_context.get("recent_messages", [])
+        if not isinstance(recent_messages, list):
+            return []
+        projected: list[dict[str, str]] = []
+        for item in recent_messages:
+            if not isinstance(item, dict):
+                continue
+            role = str(item.get("role") or "").strip()
+            content = str(item.get("content") or "").strip()
+            if role in {"user", "assistant"} and content:
+                projected.append({"role": role, "content": content})
+        return projected
+
+    @staticmethod
+    def _build_finalization_tool_facts(tool_observations: list[dict]) -> list[dict[str, str]]:
+        """Project tool output to normalized customer-relevant facts only."""
+        projected: list[dict[str, str]] = []
+        for item in tool_observations:
+            if not isinstance(item, dict):
+                continue
+            kind = str(item.get("kind") or "").strip()
+            summary = str(item.get("summary") or "").strip()
+            if kind and summary:
+                projected.append({"kind": kind, "summary": summary})
+        return projected
+
+    @staticmethod
+    def _build_finalization_system_prompt(active_system_prompt: str, *, knowledge_mode: str) -> str:
+        """Add the application-owned evidence boundary at system-message priority."""
+        contract = f"""
+
+## Runtime finalization contract
+
+The application has selected knowledge_mode={knowledge_mode}.
+This section governs only how the final customer answer is composed; it does not replace the approved business policy above.
+
+- In prompt_only mode, answer from the approved profile policy and customer dialogue. Empty grounding evidence is expected.
+- In kb_grounded mode, grounding_evidence has already passed the knowledge boundary and is confirmed for this turn. Do not re-decide whether those facts exist.
+- When answer_basis directly answers the current customer question, preserve that answer as the factual core. Rephrase it naturally and keep it within the exact scope and modality of facts.
+- A conditional fallback from the profile such as “if exact information is not confirmed” applies only when the corresponding fact is absent from grounding_evidence and tool_facts. It must not replace a directly confirmed answer with a generic missing-information response.
+- Do not invent a new distinction, missing prerequisite, prohibition, or uncertainty that is not present in the supplied policy and evidence.
+- Select only evidence relevant to the current question; never mechanically concatenate every fact and never expose internal mechanics.
+""".strip()
+        return f"{active_system_prompt.rstrip()}\n\n{contract}"
 
     def _respond_stub(
         self,

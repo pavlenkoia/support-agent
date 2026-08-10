@@ -160,12 +160,15 @@ def test_prompt_only_finalizer_uses_system_prompt_without_grounding_evidence(mon
             "answer_basis": "",
             "grounded_facts": [],
         },
-        conversation_context={"planner_action": "answer_from_prompt", "recent_messages": []},
+        knowledge_mode="prompt_only",
+        conversation_context={"recent_messages": []},
     )
 
     assert client.payload is not None
     assert client.payload["knowledge_mode"] == "prompt_only"
     assert client.payload["grounding_evidence"] == {"answer_basis": "", "facts": []}
+    assert "planner_action" not in json.dumps(client.payload, ensure_ascii=False)
+    assert "planner_reason" not in json.dumps(client.payload, ensure_ascii=False)
     assert result["response_text"] == "Сертификат можно использовать только в Челябинске."
 
 

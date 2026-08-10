@@ -94,12 +94,8 @@ class OrchestratorService:
                         "grounded_facts": [],
                         "answer_context": [],
                     },
-                    conversation_context={
-                        **context,
-                        "tool_observations": tool_observations,
-                        "planner_action": planner_action,
-                        "planner_reason": str(planner.get("reason") or ""),
-                    },
+                    knowledge_mode="prompt_only",
+                    conversation_context=context,
                     tool_observations=tool_observations,
                     first_reply_in_dialogue=self._is_first_reply(context),
                 )
@@ -234,8 +230,6 @@ class OrchestratorService:
                 retrieval=retrieval,
                 kb_result=kb_result,
                 tool_observations=tool_observations,
-                planner_action=planner_action,
-                planner_reason=str(planner.get("reason") or ""),
             )
             loop_trace.append(
                 {
@@ -266,8 +260,6 @@ class OrchestratorService:
                 retrieval=retrieval,
                 kb_result=kb_result,
                 tool_observations=tool_observations,
-                planner_action="max_iterations_fallback",
-                planner_reason="max_iterations_fallback",
             )
             loop_trace.append(
                 {
@@ -360,8 +352,6 @@ class OrchestratorService:
         retrieval: dict[str, Any],
         kb_result: dict[str, Any],
         tool_observations: list[dict[str, Any]],
-        planner_action: str,
-        planner_reason: str,
     ) -> dict[str, Any]:
         if kb_result.get("grounding_status") == "llm_unavailable":
             return {
@@ -391,12 +381,8 @@ class OrchestratorService:
             return self.direct_llm.respond(
                 text,
                 kb_result,
-                conversation_context={
-                    **context,
-                    "tool_observations": tool_observations,
-                    "planner_action": planner_action,
-                    "planner_reason": planner_reason,
-                },
+                knowledge_mode="kb_grounded",
+                conversation_context=context,
                 tool_observations=tool_observations,
                 first_reply_in_dialogue=self._is_first_reply(context),
             )
@@ -407,8 +393,6 @@ class OrchestratorService:
             conversation_context={
                 **context,
                 "tool_observations": tool_observations,
-                "planner_action": planner_action,
-                "planner_reason": planner_reason,
             },
         )
         return {

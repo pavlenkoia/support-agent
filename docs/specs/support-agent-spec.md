@@ -23,11 +23,13 @@ It is not a ticket router and not an escalation-first bot.
 13. A transient LLM-provider failure must not discard already gathered KB facts when a short grounded fallback answer is still possible.
 14. Broad but clearly in-domain openers should prefer a safe overview answer over unnecessary clarification.
 15. When the KB agent returns `grounding_status=ready`, its compact `answer_basis` and grounded facts are evidence for the customer-facing final model. That model must answer the main customer question first, use only necessary confirmed facts, and must not invent requirements, prohibitions, or stronger conditions. Direct mechanical joining of all facts is not a normal answer path.
-16. Channel-specific transport workers must reuse the same application runtime rather than creating a second support agent.
-17. VK transport-level manual-admin intervention must silence auto-replies for 1 hour from the last unmatched `message_reply`.
-18. Transport-level override must be re-checked immediately before a VK reply is sent.
-19. Planner actions are capability-bound: `use_tool` is valid only for an explicitly advertised runtime capability. A request outside that set is rejected before tool execution as internal `planner_action_rejected`, never customer-facing `cannot_answer` by itself.
-20. A defensive runtime capability mismatch (`tool_unavailable`) must immediately advance to KB/finalization; neither it nor a rejected planner action may repeat `use_tool` or consume another bounded-loop iteration.
+16. The customer-facing final model receives a newly constructed allowlisted packet, never the broad runtime context: no planner action/reason, route/loop/audit metadata, KB navigation/review reasons, raw KB pages, raw tool payloads, case identifiers, or duplicate dialogue forms may enter its request. `knowledge_mode` is an explicit application control, not a value inferred from planner reasoning exposed to the model.
+17. In `kb_grounded` mode, ready evidence has already passed the KB boundary. A conditional system-prompt fallback for missing/unconfirmed information must not override a corresponding fact present in ready grounding. The final model still selects relevance and writes natural customer prose; it does not mechanically concatenate facts.
+18. Channel-specific transport workers must reuse the same application runtime rather than creating a second support agent.
+19. VK transport-level manual-admin intervention must silence auto-replies for 1 hour from the last unmatched `message_reply`.
+20. Transport-level override must be re-checked immediately before a VK reply is sent.
+21. Planner actions are capability-bound: `use_tool` is valid only for an explicitly advertised runtime capability. A request outside that set is rejected before tool execution as internal `planner_action_rejected`, never customer-facing `cannot_answer` by itself.
+22. A defensive runtime capability mismatch (`tool_unavailable`) must immediately advance to KB/finalization; neither it nor a rejected planner action may repeat `use_tool` or consume another bounded-loop iteration.
 
 ## Decision loop
 
