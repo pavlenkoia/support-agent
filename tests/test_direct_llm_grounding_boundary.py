@@ -203,3 +203,21 @@ def test_case_594_finalization_contract_treats_ready_payment_evidence_as_confirm
     assert "preserve that answer as the factual core" in client.system_prompt
     assert "Оплатить можно" in result["response_text"]
     assert "уточнят при записи" not in result["response_text"]
+
+
+def test_finalization_conversation_enforces_role_and_window_allowlist() -> None:
+    messages = [
+        {"role": "user", "content": f"message-{index}"}
+        for index in range(12)
+    ]
+    messages.insert(6, {"role": "system", "content": "INTERNAL_SYSTEM_MESSAGE"})
+    messages.append({"role": "tool", "content": "INTERNAL_TOOL_MESSAGE"})
+
+    projected = DirectLLMService._build_finalization_conversation(
+        {"recent_messages": messages}
+    )
+
+    assert len(projected) == 10
+    assert projected[0] == {"role": "user", "content": "message-2"}
+    assert projected[-1] == {"role": "user", "content": "message-11"}
+    assert all(item["role"] in {"user", "assistant"} for item in projected)

@@ -1,7 +1,11 @@
 from pathlib import Path
+from typing import Any
+
+import pytest
 
 from app.core.db import Base, make_session_factory
 from app.schemas.message import InboundMessage
+from app.services.orchestrator import OrchestratorService
 from app.services.outcome import OutcomeService
 from app.services.routing import RoutingService
 
@@ -78,6 +82,30 @@ class FakeDirectLLMService:
             "reason": "test_stub",
         }
 
+    def respond(
+        self,
+        text: str,
+        kb_result: dict,
+        *,
+        knowledge_mode: str,
+        conversation_context: dict | None = None,
+        tool_observations: list[dict] | None = None,
+        first_reply_in_dialogue: bool = False,
+    ) -> dict:
+        _ = (knowledge_mode, tool_observations, first_reply_in_dialogue)
+        legacy = self.answer(
+            text,
+            kb_result.get("answer_context", []),
+            allow_general_without_kb=False,
+            conversation_context=conversation_context,
+        )
+        return {
+            "route": "answer" if legacy.get("decision") == "answer" else "cannot_answer",
+            "response_text": legacy.get("response_text", ""),
+            "confidence": legacy.get("confidence", 0.0),
+            "reason": legacy.get("reason", "test_stub"),
+        }
+
 
 class FakeSummaryService:
     def summarize_case(self, messages: list[str]) -> str | None:
@@ -140,6 +168,43 @@ def test_routing_service_delegates_outcome_execution_for_answer_route(tmp_path: 
     assert retrieval["kb_status"] == "found"
     assert user_message == "What are your business hours?"
     assert result["outcome"]["outcome_payload"]["response_text"] == "delegated"
+
+
+def test_orchestrator_rejects_legacy_finalizer_without_respond() -> None:
+    class LegacyOnlyDirect:
+        def answer(self, *args, **kwargs):
+            return {
+                "decision": "answer",
+                "response_text": "unsafe legacy answer",
+                "confidence": 1.0,
+                "reason": "legacy",
+            }
+
+    dummy: Any = object()
+    legacy_direct: Any = LegacyOnlyDirect()
+    orchestrator = OrchestratorService(
+        retrieval=dummy,
+        kb_agent=dummy,
+        direct_llm=legacy_direct,
+        policy=dummy,
+        tool_runtime=dummy,
+    )
+
+    with pytest.raises(RuntimeError, match="direct_llm.respond is required"):
+        orchestrator._finalize_reply(
+            text="question",
+            context={
+                "recent_messages": [{"role": "user", "content": "question"}],
+                "planner_reason": "MUST_NOT_REACH_A_LEGACY_FINALIZER",
+            },
+            retrieval={"kb_snippets": []},
+            kb_result={
+                "grounding_status": "ready",
+                "answer_basis": "grounded answer",
+                "grounded_facts": ["grounded fact"],
+            },
+            tool_observations=[],
+        )
 
 
 def test_outcome_service_builds_cannot_answer_outcome() -> None:

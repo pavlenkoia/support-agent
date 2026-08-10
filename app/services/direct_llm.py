@@ -420,7 +420,7 @@ class DirectLLMService:
             content = str(item.get("content") or "").strip()
             if role in {"user", "assistant"} and content:
                 projected.append({"role": role, "content": content})
-        return projected
+        return projected[-10:]
 
     @staticmethod
     def _build_finalization_tool_facts(tool_observations: list[dict]) -> list[dict[str, str]]:

@@ -32,7 +32,7 @@ The final model may receive only:
 - the full active `SYSTEM_PROMPT.md` as approved profile policy, followed in the same system message by the application-owned generic finalization contract;
 - `knowledge_mode` (`prompt_only` or `kb_grounded`);
 - the current customer question;
-- bounded current-case dialogue as `{role, content}` items, with roles restricted to `user|assistant`;
+- at most the last 10 valid current-case dialogue items as `{role, content}`, with roles restricted to `user|assistant`;
 - KB `answer_basis` and ordered `grounded_facts` when `knowledge_mode=kb_grounded`;
 - normalized customer-relevant tool observations containing only their public kind and summary.
 
@@ -46,6 +46,8 @@ The final model must not receive:
 - internal summaries whose provenance or relevance is not guaranteed.
 
 The application constructs a new allowlisted finalization packet. It must never serialize a broad runtime `context` dictionary into the final-model request.
+
+There is no legacy `answer(...)` bypass for KB-ready customer finalization. A configured finalizer must implement the common `respond(...)` contract; otherwise the runtime fails closed instead of sending broad context through an older path.
 
 ## Evidence semantics
 

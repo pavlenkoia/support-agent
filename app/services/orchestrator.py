@@ -377,30 +377,16 @@ class OrchestratorService:
                 "reason": str(kb_result.get("reason") or "kb_agent_no_ready_grounding"),
                 "llm_trace": [],
             }
-        if hasattr(self.direct_llm, "respond"):
-            return self.direct_llm.respond(
-                text,
-                kb_result,
-                knowledge_mode="kb_grounded",
-                conversation_context=context,
-                tool_observations=tool_observations,
-                first_reply_in_dialogue=self._is_first_reply(context),
-            )
-        legacy = self.direct_llm.answer(
+        if not hasattr(self.direct_llm, "respond"):
+            raise RuntimeError("direct_llm.respond is required for customer finalization")
+        return self.direct_llm.respond(
             text,
-            kb_result.get("answer_context", retrieval.get("kb_snippets", [])),
-            allow_general_without_kb=False,
-            conversation_context={
-                **context,
-                "tool_observations": tool_observations,
-            },
+            kb_result,
+            knowledge_mode="kb_grounded",
+            conversation_context=context,
+            tool_observations=tool_observations,
+            first_reply_in_dialogue=self._is_first_reply(context),
         )
-        return {
-            "route": "answer" if legacy.get("decision") == "answer" else "cannot_answer",
-            "response_text": str(legacy.get("response_text") or ""),
-            "confidence": float(legacy.get("confidence", 0.0)),
-            "reason": str(legacy.get("reason") or "legacy_answer"),
-        }
 
     def _finalize_social_reply(self, text: str, context: dict) -> dict[str, Any]:
         if hasattr(self.direct_llm, "respond_social"):
