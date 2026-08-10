@@ -27,9 +27,9 @@
 - Modify: `/home/tian/support-agent-profiles/parachute/SYSTEM_PROMPT.md`
 - Test: `tests/test_inbound_message.py`
 
-1. Add a prompt-content regression assertion for the approved rule.
+1. Add a prompt-content regression assertion for the approved generic rule.
 2. Run it and confirm it fails before the prompt change.
-3. Amend the existing geography section: service/certificate use is at Kalachevo in Chelyabinsk; customer residence/travel origin must not be interpreted as an additional service city; another city requires explicit KB confirmation.
+3. Amend the existing geography section: a city may be stated as a service location only with explicit KnowledgeBase confirmation; customer residence/travel origin must not be interpreted as an additional service city. Do not put city facts into the system prompt.
 4. Re-run the assertion.
 
 ### Task 3: Verify target runtime

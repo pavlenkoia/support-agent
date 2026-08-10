@@ -16,9 +16,9 @@ The prior case remains stored for history. It is not deleted or passed to the mo
 A new case is a first reply, so the customer-facing greeting contract applies.
 
 ## Geography rule
-The customer-facing system prompt must state that services and certificate use are limited to Kalachevo airfield in Chelyabinsk. When a customer asks about another city, the answer must address the place of service, not infer availability from where customers may live or travel from.
+The customer-facing system prompt must require direct KnowledgeBase confirmation for every claimed service location. When a customer asks about a city, the answer must address the confirmed place of service, not infer availability from where customers may live or travel from.
 
-The prompt must prohibit claims that services are available in another city unless that city is explicitly confirmed by the knowledge base.
+The prompt must prohibit claims that services are available in a city unless that city is explicitly confirmed by the knowledge base. City facts belong in the knowledge base, not in the system prompt.
 
 ## Acceptance criteria
 - A same-chat message on the next local day receives a new `case_id` and has no prior-case messages in its context.
