@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime
+from typing import Any, cast
 
 from app.integrations.llm.base import BaseLLMClient
 from app.services import direct_llm as direct_llm_module
 from app.services import tool_runtime as tool_runtime_module
 from app.services.direct_llm import DirectLLMService
+from app.services.orchestrator import OrchestratorService
+from app.services.policy import PolicyService
 from app.services.tool_runtime import ToolRuntimeService
 
 
@@ -49,6 +52,121 @@ def test_planner_receives_closed_runtime_capability_set() -> None:
         }
     ]
     assert any("no other tool" in rule for rule in client.payload["rules"])
+
+
+def test_planner_accepts_answer_from_prompt_when_system_prompt_is_sufficient() -> None:
+    class PromptSufficientClient(BaseLLMClient):
+        def generate(self, **kwargs):
+            payload = json.loads(kwargs["user_prompt"])
+            assert "answer_from_prompt" in payload["required_json_schema"]["action"]
+            assert any("system prompt" in rule.lower() for rule in payload["rules"])
+            return json.dumps(
+                {
+                    "action": "answer_from_prompt",
+                    "scope_status": "in_scope",
+                    "confidence": 1.0,
+                    "reason": "system_prompt_is_sufficient",
+                    "clarification_question": "",
+                }
+            )
+
+    result = DirectLLMService(client=PromptSufficientClient()).assess_request(
+        "Можно использовать сертификат в другом городе?",
+        retrieval={"kb_status": "not_started", "kb_snippets": []},
+        runtime_capabilities=[],
+    )
+
+    assert result["action"] == "answer_from_prompt"
+
+
+def test_orchestrator_answer_from_prompt_skips_retrieval_and_kb_agent() -> None:
+    class NoRetrieval:
+        def retrieve(self, *args, **kwargs):
+            raise AssertionError("KB retrieval must not run for answer_from_prompt")
+
+    class NoKBAgent:
+        def read(self, *args, **kwargs):
+            raise AssertionError("KB agent must not run for answer_from_prompt")
+
+    class PromptDirect:
+        def assess_request(self, *args, **kwargs):
+            return {
+                "action": "answer_from_prompt",
+                "scope_status": "in_scope",
+                "confidence": 1.0,
+                "reason": "prompt_sufficient",
+            }
+
+        def respond(self, text, kb_result, **kwargs):
+            assert text == "Можно использовать сертификат в другом городе?"
+            assert kb_result["kb_status"] == "not_started"
+            assert kb_result["grounding_status"] == "not_required"
+            return {
+                "route": "answer",
+                "response_text": "Сертификат можно использовать только в Челябинске.",
+                "confidence": 1.0,
+                "reason": "prompt_finalized",
+                "llm_trace": [],
+            }
+
+    class NoTools:
+        def matches_calendar_query(self, text):
+            return False
+
+        def planner_capabilities(self):
+            return []
+
+    result = OrchestratorService(
+        retrieval=cast(Any, NoRetrieval()),
+        kb_agent=cast(Any, NoKBAgent()),
+        direct_llm=cast(Any, PromptDirect()),
+        policy=PolicyService(),
+        tool_runtime=cast(Any, NoTools()),
+    ).run(
+        text="Можно использовать сертификат в другом городе?",
+        context={"recent_messages": []},
+        knowledge_backend="filesystem",
+        knowledge_root="/tmp/unused",
+        knowledge_query="Можно использовать сертификат в другом городе?",
+    )
+
+    assert result["route"]["route"] == "answer"
+    assert result["response_strategy"]["steps"] == ["answer"]
+
+
+def test_prompt_only_finalizer_uses_system_prompt_without_grounding_evidence(monkeypatch) -> None:
+    class PromptOnlyClient(BaseLLMClient):
+        def __init__(self) -> None:
+            self.payload: dict | None = None
+
+        def generate(self, **kwargs):
+            self.payload = json.loads(kwargs["user_prompt"])
+            return json.dumps(
+                {
+                    "route": "answer",
+                    "response_text": "Сертификат можно использовать только в Челябинске.",
+                    "confidence": 1.0,
+                    "reason": "prompt_only_finalized",
+                }
+            )
+
+    client = PromptOnlyClient()
+    monkeypatch.setattr(direct_llm_module.settings, "direct_llm_provider", "mistral")
+    result = DirectLLMService(client=client).respond(
+        "Можно использовать сертификат в другом городе?",
+        {
+            "kb_status": "not_started",
+            "grounding_status": "not_required",
+            "answer_basis": "",
+            "grounded_facts": [],
+        },
+        conversation_context={"planner_action": "answer_from_prompt", "recent_messages": []},
+    )
+
+    assert client.payload is not None
+    assert client.payload["knowledge_mode"] == "prompt_only"
+    assert client.payload["grounding_evidence"] == {"answer_basis": "", "facts": []}
+    assert result["response_text"] == "Сертификат можно использовать только в Челябинске."
 
 
 def test_tool_runtime_resolves_relative_dates_from_runtime_context(monkeypatch) -> None:
@@ -139,10 +257,10 @@ def test_ready_grounding_cannot_finish_as_clarification(monkeypatch) -> None:
     assert "Какой именно вариант" not in result["response_text"]
 
 
-def test_ready_grounding_does_not_delegate_factual_result_to_final_model(monkeypatch) -> None:
+def test_ready_grounding_is_finalized_by_customer_facing_model(monkeypatch) -> None:
     class ContextAwareClient:
         def generate(self, **kwargs):
-            return '{"route":"answer","response_text":"Сегодня офис уже не работает. Если не дозваниваетесь, попробуйте позвонить в понедельник утром.","confidence":0.9,"reason":"contextual_answer"}'
+            return '{"route":"answer","response_text":"Офис работает по будням с 09:00 до 17:00.","confidence":0.9,"reason":"contextual_answer"}'
 
     monkeypatch.setattr(direct_llm_module.settings, "direct_llm_provider", "mistral")
     result = DirectLLMService(client=ContextAwareClient()).respond(
@@ -162,10 +280,10 @@ def test_ready_grounding_does_not_delegate_factual_result_to_final_model(monkeyp
 
     assert result["route"] == "answer"
     assert result["response_text"] == "Офис работает по будням с 09:00 до 17:00."
-    assert result["reason"] == "ready_grounding_rendered"
+    assert result["reason"] == "contextual_answer"
 
 
-def test_ready_grounding_does_not_send_internal_trace_or_facts_to_final_model(monkeypatch) -> None:
+def test_ready_grounding_sends_answer_basis_and_facts_without_internal_trace_to_final_model(monkeypatch) -> None:
     class CapturingClient(BaseLLMClient):
         def __init__(self) -> None:
             self.payload: dict | None = None
@@ -209,10 +327,17 @@ def test_ready_grounding_does_not_send_internal_trace_or_facts_to_final_model(mo
     )
 
     assert result["route"] == "answer"
-    assert client.payload is None
-    assert client.system_prompt is None
-    assert result["response_text"] == "Прыжки обычно проходят по выходным. Дата 2026-08-04 — вторник, будний день."
-    assert result["reason"] == "ready_grounding_rendered"
+    assert client.payload is not None
+    assert client.system_prompt is not None
+    evidence = client.payload["grounding_evidence"]
+    assert evidence["answer_basis"] == "В этот день прыжки не проводятся."
+    assert evidence["facts"] == [
+        "Прыжки обычно проходят по выходным.",
+        "Дата 2026-08-04 — вторник, будний день.",
+    ]
+    assert "trace" not in json.dumps(client.payload, ensure_ascii=False)
+    assert result["response_text"] == "Завтра прыжки не проводятся. Ближайшие прыжки обычно проходят в выходные."
+    assert result["reason"] == "finalized"
 
 
 def test_direct_llm_runtime_error_returns_grounded_kb_answer(monkeypatch) -> None:
@@ -266,12 +391,12 @@ def test_direct_llm_ready_grounding_never_degrades_to_cannot_answer_when_seconda
     )
 
     assert result["route"] == "answer"
-    assert "до 85 кг" in result["response_text"]
-    assert result["reason"] == "ready_grounding_rendered"
-    assert result["llm_trace"] == []
+    assert result["response_text"] == "При весе 120 кг тандем-прыжок невозможен."
+    assert result["reason"] == "prompt_runtime_grounded_fallback:RuntimeError"
+    assert result["llm_trace"][0]["step"] == "grounded_fallback"
 
 
-def test_direct_llm_runtime_error_uses_only_kb_grounded_facts(monkeypatch) -> None:
+def test_direct_llm_runtime_error_prefers_kb_answer_basis(monkeypatch) -> None:
     class BrokenClient:
         def generate(self, **kwargs):
             raise RuntimeError("IncompleteRead")
@@ -296,13 +421,13 @@ def test_direct_llm_runtime_error_uses_only_kb_grounded_facts(monkeypatch) -> No
                 "На самостоятельный прыжок можно записаться по телефону +7 (351) 214-30-30, добавочный 1.",
                 "Обычно запись проходит в пятницу после 12:00 на субботу и в субботу после 12:00 на воскресенье.",
             ],
-            "answer_basis": "Запись на самостоятельный прыжок: телефон и время записи.",
+            "answer_basis": "На самостоятельный прыжок можно записаться по телефону +7 (351) 214-30-30, добавочный 1.",
         },
     )
 
     assert result["route"] == "answer"
     assert "+7 (351) 214-30-30" in result["response_text"]
-    assert "пятницу после 12:00" in result["response_text"]
+    assert "пятницу после 12:00" not in result["response_text"]
     assert "3–4 часа" not in result["response_text"]
     assert "прыгнуть завтра" not in result["response_text"]
 

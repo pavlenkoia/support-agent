@@ -92,27 +92,6 @@ class DirectLLMService:
             calendar_period_guard["llm_trace"] = []
             return calendar_period_guard
 
-        # A KB-ready result is already the bounded factual answer plan. Sending it
-        # through a second generative decision step lets that step invent a new
-        # requirement or prohibition that was not grounded in the selected pages.
-        # Render the curated facts directly; wording must not re-decide the result.
-        if (
-            kb_packet.get("kb_status") == "found"
-            and kb_packet.get("grounding_status") == "ready"
-        ):
-            rendered = self._render_ready_grounding(kb_packet)
-            if rendered:
-                return {
-                    "route": "answer",
-                    "response_text": self._prepend_standard_greeting_if_missing(
-                        rendered,
-                        first_reply_in_dialogue=first_reply_in_dialogue,
-                    ),
-                    "confidence": 0.76,
-                    "reason": "ready_grounding_rendered",
-                    "llm_trace": [],
-                }
-
         if settings.direct_llm_provider == "stub" and not self._client_injected:
             return self._respond_stub(
                 text,
@@ -126,6 +105,11 @@ class DirectLLMService:
         user_prompt = json.dumps(
             {
                 "task": "Прими клиентское решение по вопросу и сформулируй итоговый ответ только из подтверждённых доказательств.",
+                "knowledge_mode": (
+                    "prompt_only"
+                    if str((conversation_context or {}).get("planner_action") or "") == "answer_from_prompt"
+                    else "kb_grounded"
+                ),
                 "required_json_schema": {
                     "route": "answer|cannot_answer|out_of_scope|clarification_requested",
                     "response_text": "string",
@@ -138,11 +122,13 @@ class DirectLLMService:
                 "grounding_evidence": grounding_evidence,
                 "output_rules": [
                     "Верни только JSON-объект по указанной схеме.",
-                    "Сначала сам прими клиентское решение по точным фактам из grounding_evidence и правилам системного промпта.",
+                    "Сначала сам прими клиентское решение по точным фактам из системного промпта и, когда knowledge_mode=kb_grounded, из grounding_evidence.",
+                    "При knowledge_mode=prompt_only пустой grounding_evidence ожидаем: отвечай по явно заданным фактам и правилам системного промпта, не требуя KB.",
                     "Факты в grounding_evidence — это доказательства, а не порядок построения фразы; не пересказывай цепочку вывода вместо результата.",
                     "Сохраняй точную модальность подтверждённых фактов: «обычно», «может», «зависит», «рекомендуется» нельзя усиливать до «только», «всегда», «точно», «обязательно» или другого более сильного утверждения.",
                     "Общее вероятностное правило не доказывает исход конкретного случая: если evidence говорит «обычно» или оставляет условия/исключения, не отвечай категорическим «да» или «нет» о конкретной дате; сообщи об общем правиле и безопасном способе уточнить конкретный случай.",
                     "После прямого ответа добавь только нужные клиенту подтверждённые условия, ограничения или следующий шаг.",
+                    "Не добавляй подтверждённый факт только потому, что он присутствует в grounding_evidence; исключай всё, что не нужно для ответа на текущий вопрос.",
                     "Не добавляй новые факты и не показывай внутренний процесс, инструменты, источники или причины выбора ответа.",
                     "Если клиент прямо спрашивает «почему», объясни результат только подтверждёнными фактами.",
                     "Если доказательств недостаточно для уверенного решения, используй обязательный ответ при отсутствии информации.",
@@ -252,20 +238,23 @@ class DirectLLMService:
 
     @staticmethod
     def _grounded_fallback_context(kb_packet: dict[str, Any]) -> list[dict[str, str]]:
+        answer_basis = str(kb_packet.get("answer_basis") or "").strip()
+        if answer_basis:
+            return [{"text": answer_basis}]
         facts = kb_packet.get("grounded_facts")
         if isinstance(facts, list):
-            context = [
+            return [
                 {"text": fact.strip()}
                 for fact in facts
                 if isinstance(fact, str) and fact.strip()
             ]
-            if context:
-                return context
-        answer_basis = str(kb_packet.get("answer_basis") or "").strip()
-        return [{"text": answer_basis}] if answer_basis else []
+        return []
 
     def _render_ready_grounding(self, kb_packet: dict[str, Any]) -> str:
-        """Last-resort customer answer from KB-agent curated facts only."""
+        """Last-resort customer answer from the KB-agent answer basis, then facts."""
+        answer_basis = str(kb_packet.get("answer_basis") or "").strip()
+        if answer_basis:
+            return self._sanitize_customer_text(self._as_customer_sentence(answer_basis))
         facts = kb_packet.get("grounded_facts")
         if isinstance(facts, list):
             rendered = " ".join(
@@ -399,6 +388,7 @@ class DirectLLMService:
     def _build_finalization_evidence(kb_packet: dict[str, Any]) -> dict[str, Any]:
         """Pass only the compact, client-relevant grounded evidence to the final LLM."""
         return {
+            "answer_basis": str(kb_packet.get("answer_basis") or "").strip(),
             "facts": [
                 fact.strip()
                 for fact in kb_packet.get("grounded_facts", [])
@@ -498,6 +488,7 @@ class DirectLLMService:
     ) -> dict:
         self._reset_llm_trace()
         profile = self._load_profile_context()
+        active_system_prompt = self.prompt_service.load_system_prompt()
         retrieval = retrieval or {"kb_status": "not_started", "kb_snippets": []}
         tool_observations = tool_observations or []
         runtime_capabilities = runtime_capabilities or []
@@ -522,13 +513,14 @@ class DirectLLMService:
             {
                 "task": "Select the next bounded-loop action for this support turn.",
                 "required_json_schema": {
-                    "action": "read_kb|use_tool|ask_clarification|answer_from_kb|cannot_answer|out_of_scope|social_reply",
+                    "action": "read_kb|use_tool|ask_clarification|answer_from_prompt|answer_from_kb|cannot_answer|out_of_scope|social_reply",
                     "scope_status": "in_scope|out_of_scope|uncertain",
                     "confidence": "number 0..1",
                     "reason": "short string",
                     "clarification_question": "optional string",
                 },
                 "agent_profile": profile,
+                "active_system_prompt": active_system_prompt,
                 "user_message": text,
                 "conversation_context": conversation_context or {},
                 "retrieval": retrieval,
@@ -536,7 +528,8 @@ class DirectLLMService:
                 "runtime_capabilities": runtime_capabilities,
                 "rules": [
                     "`use_tool` is permitted only when one of runtime_capabilities explicitly supports the requested fact; no other tool, external lookup, contact check, web search, or live-data source exists.",
-                    "Use read_kb only when support-domain information may exist in the KB and it has not been gathered yet.",
+                    "Before choosing read_kb, compare the customer's question with the active system prompt (`active_system_prompt`). If that prompt explicitly and completely answers the factual question, you MUST choose answer_from_prompt and MUST NOT read KB merely to reconfirm it.",
+                    "Use read_kb only when support-domain information may exist in the KB and the active system prompt does not completely answer the question.",
                     "If retrieval.kb_status is found, do not choose read_kb again because the KB has already been gathered for this loop; choose answer_from_kb, use_tool, ask_clarification, or cannot_answer.",
                     "Use use_tool only for an explicitly supported calendar calculation: date, weekday, calendar month/season period, or current year.",
                     "For a calendar month, month range, or season request, preserve the user's stated period in any fallback; never rewrite it as a relative period such as 'after these months'.",
@@ -579,6 +572,7 @@ class DirectLLMService:
             "read_kb",
             "use_tool",
             "ask_clarification",
+            "answer_from_prompt",
             "answer_from_kb",
             "cannot_answer",
             "out_of_scope",

@@ -84,6 +84,35 @@ class OrchestratorService:
                 )
                 break
 
+            if planner_action == "answer_from_prompt":
+                final_reply = self.direct_llm.respond(
+                    text,
+                    {
+                        "kb_status": "not_started",
+                        "grounding_status": "not_required",
+                        "answer_basis": "",
+                        "grounded_facts": [],
+                        "answer_context": [],
+                    },
+                    conversation_context={
+                        **context,
+                        "tool_observations": tool_observations,
+                        "planner_action": planner_action,
+                        "planner_reason": str(planner.get("reason") or ""),
+                    },
+                    tool_observations=tool_observations,
+                    first_reply_in_dialogue=self._is_first_reply(context),
+                )
+                loop_trace.append(
+                    {
+                        "iteration": iteration,
+                        "action": final_reply.get("route", "cannot_answer"),
+                        "reason": final_reply.get("reason", "prompt_runtime"),
+                        "planner_action": planner_action,
+                    }
+                )
+                break
+
             if planner_action == "use_tool" and not self.tool_runtime.matches_calendar_query(text):
                 planner_action = "read_kb"
                 force_finalize_after_kb = True

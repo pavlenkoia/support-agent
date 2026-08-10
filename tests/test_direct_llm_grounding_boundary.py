@@ -5,24 +5,26 @@ from app.services import direct_llm as direct_llm_module
 from app.services.direct_llm import DirectLLMService
 
 
-def test_ready_grounding_is_sent_without_a_second_model_reinterpreting_it(monkeypatch) -> None:
-    class InventingFinalizer(BaseLLMClient):
+def test_ready_grounding_is_finalized_with_system_prompt_and_compact_evidence(monkeypatch) -> None:
+    class RelevantFinalizer(BaseLLMClient):
         def __init__(self) -> None:
             self.calls = 0
+            self.payload: dict | None = None
 
         def generate(self, **kwargs):
             self.calls += 1
+            self.payload = json.loads(kwargs["user_prompt"])
             return json.dumps(
                 {
                     "route": "answer",
-                    "response_text": "Вам нужно привезти экипировку с собой.",
+                    "response_text": "Да, прыгнуть можно. Отсутствие этой экипировки само по себе не мешает прыжку.",
                     "confidence": 0.9,
-                    "reason": "invented_requirement",
+                    "reason": "finalized_from_grounding",
                 },
                 ensure_ascii=False,
             )
 
-    client = InventingFinalizer()
+    client = RelevantFinalizer()
     monkeypatch.setattr(direct_llm_module.settings, "direct_llm_provider", "mistral")
 
     result = DirectLLMService(client=client).respond(
@@ -39,13 +41,12 @@ def test_ready_grounding_is_sent_without_a_second_model_reinterpreting_it(monkey
         },
     )
 
-    assert client.calls == 0
+    assert client.calls == 1
+    assert client.payload is not None
+    assert client.payload["grounding_evidence"]["answer_basis"] == "Да, прыгнуть можно."
     assert result["route"] == "answer"
-    assert result["response_text"] == (
-        "Да, прыгнуть можно. Очки, шлем, комбинезон и перчатки не выдаются. "
-        "Их отсутствие само по себе не мешает прыжку."
-    )
-    assert result["reason"] == "ready_grounding_rendered"
+    assert result["response_text"] == "Да, прыгнуть можно. Отсутствие этой экипировки само по себе не мешает прыжку."
+    assert result["reason"] == "finalized_from_grounding"
 
 
 def test_ready_grounding_renderer_separates_unpunctuated_facts() -> None:
