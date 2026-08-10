@@ -58,7 +58,7 @@ def persist_inbound_message(session: Session, case_id: int, payload: InboundMess
 
 
 def persist_outbound_message(session: Session, case_id: int, text: str, *, role: str = "assistant") -> Message:
-    message = Message(case_id=case_id, role=role, content=text)
+    message = Message(case_id=case_id, role=role, content=text, created_at=utc_now())
     session.add(message)
     session.flush()
     return message
