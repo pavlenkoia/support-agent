@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import threading
+from collections.abc import Callable
+
 from app.core.config import parse_csv_set, settings
 from app.core.db import SessionLocal
 from app.integrations.telegram.client import TelegramBotClient
@@ -72,6 +75,9 @@ class TelegramGatewayService:
         return self.queue.flush_due()
 
     def _process_generation(self, inbound: InboundMessage, generation: Generation) -> str | None:
+        return self._run_with_typing(inbound.external_chat_id, lambda: self._generate_and_deliver(inbound, generation))
+
+    def _generate_and_deliver(self, inbound: InboundMessage, generation: Generation) -> str | None:
         result = self.routing.handle_inbound(inbound, persist_inbound=False)
         reply_text = self._build_reply_text(result)
         if not reply_text:
@@ -90,6 +96,22 @@ class TelegramGatewayService:
             return "delivered"
 
         return generation.run_if_current(persist_and_deliver)
+
+    def _run_with_typing(self, chat_id: str, callback: Callable[[], str | None]) -> str | None:
+        self.sender.send_chat_action(chat_id, "typing")
+        stop_event = threading.Event()
+
+        def keepalive() -> None:
+            while not stop_event.wait(self.typing_interval_seconds):
+                self.sender.send_chat_action(chat_id, "typing")
+
+        worker = threading.Thread(target=keepalive, name=f"telegram-typing-{chat_id}", daemon=True)
+        worker.start()
+        try:
+            return callback()
+        finally:
+            stop_event.set()
+            worker.join(timeout=self.typing_interval_seconds + 0.5)
 
     def _persist_raw_event(self, inbound: InboundMessage) -> bool:
         if not hasattr(self.routing, "session_factory"):

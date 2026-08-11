@@ -34,7 +34,7 @@ class RecordingSender:
 
 
 class StubRouting:
-    def handle_inbound(self, payload) -> dict:
+    def handle_inbound(self, payload, *, persist_inbound=True) -> dict:
         return {
             "case": {"case_status": "resolved", "case_id": 1},
             "route": {"route": "cannot_answer"},
@@ -44,6 +44,9 @@ class StubRouting:
                 "outcome_payload": {"response_text": "Сейчас не могу дать точный ответ на этот вопрос."},
             },
         }
+
+    def persist_inbound_message(self, case_id: int, payload) -> None:
+        self.persisted_inbound = (case_id, payload.text)
 
     def record_outbound_message(self, case_id: int, text: str) -> None:
         self.recorded = (case_id, text)
