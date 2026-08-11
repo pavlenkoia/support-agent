@@ -190,6 +190,32 @@ def test_openai_compatible_client_fails_over_to_next_api_key_on_auth_error(monke
     assert "llm api key failover triggered" in caplog.text
 
 
+
+
+def test_openai_compatible_client_fails_over_and_disables_slot_on_payment_required(monkeypatch) -> None:
+    seen_auth_headers: list[str] = []
+
+    def fake_urlopen(req, timeout):
+        _ = timeout
+        seen_auth_headers.append(req.headers["Authorization"])
+        if req.headers["Authorization"] == "Bearer payment-required-token":
+            raise error.HTTPError(req.full_url, 402, "payment required", hdrs=None, fp=io.BytesIO(b'{"error":"payment_required"}'))
+        return FakeResponse({"choices": [{"message": {"content": "ok-secondary"}}]})
+
+    monkeypatch.setattr("app.integrations.llm.openai_compatible.request.urlopen", fake_urlopen)
+    client = OpenAICompatibleClient(
+        provider="mistral", base_url="https://example.test/v1", api_key="payment-required-token",
+        api_keys=["payment-required-token", "working-token"], model="test-model", max_retries=0,
+    )
+
+    assert client.generate(system_prompt="sys", user_prompt="first") == "ok-secondary"
+    first_info = client.get_last_call_info()
+    assert client.generate(system_prompt="sys", user_prompt="second") == "ok-secondary"
+    assert seen_auth_headers == ["Bearer payment-required-token", "Bearer working-token", "Bearer working-token"]
+    assert first_info["failover_events"][0]["reason_class"] == "payment_required"
+
+
+
 def test_openai_compatible_client_skips_invalid_and_quota_exhausted_slots_on_next_request(monkeypatch) -> None:
     seen_auth_headers: list[str] = []
 

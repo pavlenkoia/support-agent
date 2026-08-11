@@ -143,7 +143,7 @@ class OpenAICompatibleClient(BaseLLMClient):
     @staticmethod
     def _should_fail_over_on_http_error(exc: error.HTTPError, detail: str) -> bool:
         normalized_detail = detail.lower()
-        if exc.code in {401, 403}:
+        if exc.code in {401, 402, 403}:
             return True
         if exc.code == 429 and any(
             marker in normalized_detail
@@ -181,6 +181,8 @@ class OpenAICompatibleClient(BaseLLMClient):
     def _http_reason_class(exc: error.HTTPError, *, failover: bool) -> str:
         if exc.code in {401, 403}:
             return "authentication_failed"
+        if exc.code == 402:
+            return "payment_required"
         if exc.code == 429:
             return "quota_exhausted" if failover else "rate_limited"
         if exc.code >= 500:
@@ -268,7 +270,7 @@ class OpenAICompatibleClient(BaseLLMClient):
                     detail = exc.read().decode("utf-8", errors="ignore")
                     should_fail_over = self._should_fail_over_on_http_error(exc, detail)
                     retry_after_seconds = self._retry_after_seconds(exc)
-                    if exc.code in {401, 403}:
+                    if exc.code in {401, 402, 403}:
                         if self._is_temporary_key_unavailable(detail):
                             self._cool_down_key_index(active_key_index)
                         else:
