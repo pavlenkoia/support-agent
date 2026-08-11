@@ -49,6 +49,14 @@ class PolicyService:
             return message.strip()
         return "Сейчас не могу дать точный ответ на этот вопрос."
 
+    def render_simple_cannot_answer(self) -> str:
+        profile = self.load_profile()
+        templates = profile.get("response_templates", {}) if isinstance(profile, dict) else {}
+        message = templates.get("simple_cannot_answer") if isinstance(templates, dict) else None
+        if isinstance(message, str) and message.strip():
+            return message.strip()
+        return "Сейчас не могу дать точный ответ на этот вопрос."
+
     def render_out_of_scope(self) -> str:
         profile = self.load_profile()
         templates = profile.get("response_templates", {}) if isinstance(profile, dict) else {}

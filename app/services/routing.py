@@ -213,9 +213,14 @@ class RoutingService:
         route_name = "answer" if kind in {"grounded_answer", "social_reply"} else kind
         raw_text = str(engine_result["response_text"] or "")
         first_reply = not any(item["role"] == "assistant" for item in context["recent_messages"])
-        response_text = "" if route_name == "retry_pending" else self.policy.finalize_customer_text(
-            raw_text, first_reply_in_dialogue=first_reply
-        )
+        if route_name == "retry_pending":
+            response_text = ""
+        elif kind == "out_of_scope":
+            response_text = self.policy.render_out_of_scope()
+        elif kind == "cannot_answer":
+            response_text = self.policy.render_simple_cannot_answer()
+        else:
+            response_text = self.policy.finalize_customer_text(raw_text, first_reply_in_dialogue=first_reply)
         route = {
             "route": route_name,
             "reply": {"response_text": response_text},

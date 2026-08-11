@@ -35,6 +35,12 @@ class TextOnlyPolicy:
     def finalize_customer_text(self, text: str, *, first_reply_in_dialogue: bool) -> str:
         return f"sanitized:{text}"
 
+    def render_out_of_scope(self) -> str:
+        return "safe-out-of-scope"
+
+    def render_simple_cannot_answer(self) -> str:
+        return "safe-cannot-answer"
+
 
 def test_simple_mode_routes_once_without_legacy_orchestrator(tmp_path: Path) -> None:
     session_factory = make_session_factory(f"sqlite+pysqlite:///{tmp_path / 'routing.db'}")
@@ -76,4 +82,22 @@ def test_simple_policy_can_sanitize_text_but_cannot_change_engine_kind(tmp_path:
 
     assert result["route"]["outcome_kind"] == "out_of_scope"
     assert result["outcome"]["outcome_type"] == "out_of_scope"
-    assert result["outcome"]["outcome_payload"]["response_text"] == "sanitized:Не мой вопрос."
+    assert result["outcome"]["outcome_payload"]["response_text"] == "safe-out-of-scope"
+
+
+def test_simple_cannot_answer_never_uses_legacy_contact_fallback(tmp_path: Path) -> None:
+    session_factory = make_session_factory(f"sqlite+pysqlite:///{tmp_path / 'routing-cannot-answer.db'}")
+    Base.metadata.create_all(bind=session_factory.kw["bind"])
+    routing = RoutingService(
+        session_factory=session_factory,
+        answer_engine_mode="simple_full_corpus",
+        simple_answer_engine=RecordingSimpleEngine(kind="cannot_answer", response_text=""),
+        policy=TextOnlyPolicy(),
+    )
+
+    result = routing.handle_inbound(
+        InboundMessage(channel="test", external_user_id="user", external_chat_id="chat", text="Нет данных")
+    )
+
+    assert result["route"]["outcome_kind"] == "cannot_answer"
+    assert result["outcome"]["outcome_payload"]["response_text"] == "safe-cannot-answer"
