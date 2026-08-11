@@ -57,6 +57,17 @@ def test_grounded_answer_uses_one_call_and_declared_source_ref() -> None:
     assert len(client.calls) == 1
 
 
+def test_out_of_scope_allows_empty_model_text_and_uses_no_source_refs() -> None:
+    engine, client = make_engine(envelope("out_of_scope", ""))
+
+    result = engine.answer(question="Как сварить борщ?", history=[])
+
+    assert result["kind"] == "out_of_scope"
+    assert result["response_text"] == ""
+    assert result["source_refs"] == []
+    assert len(client.calls) == 1
+
+
 @pytest.mark.parametrize("refs", [[], ["compiled/concepts/missing.md"]])
 def test_grounded_answer_without_known_source_ref_fails_closed(refs: list[str]) -> None:
     engine, client = make_engine(envelope("grounded_answer", "Цена есть.", refs))

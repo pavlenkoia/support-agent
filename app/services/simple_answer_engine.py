@@ -102,7 +102,9 @@ class SimpleAnswerEngine:
             source_refs = parsed["source_refs"]
             if kind not in {"grounded_answer", "social_reply", "clarification_requested", "cannot_answer", "out_of_scope"}:
                 raise ValueError("invalid_kind")
-            if not response_text or not isinstance(source_refs, list) or not all(isinstance(ref, str) for ref in source_refs):
+            if (kind != "out_of_scope" and not response_text) or not isinstance(source_refs, list) or not all(
+                isinstance(ref, str) for ref in source_refs
+            ):
                 raise ValueError("invalid_required_fields")
             known_refs = {page["source_ref"] for page in packet["corpus"]["pages"]}
             if kind == "grounded_answer" and (not source_refs or not set(source_refs).issubset(known_refs)):
