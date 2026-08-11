@@ -17,6 +17,7 @@ from app.services.persistence import (
     activate_human_override,
     get_or_create_conversation_transport_state,
 )
+from app.services.inbound_queue import InboundQueue
 from app.services.vk_gateway import VKGatewayService
 
 
@@ -94,10 +95,10 @@ class StubRouting:
         self.handled_payloads = []
         self.recorded_outbound = []
 
-    def handle_inbound(self, payload) -> dict:
+    def handle_inbound(self, payload, *, persist_inbound: bool = True) -> dict:
         self.handled_payloads.append(payload)
         return {
-            "case": {"conversation_id": 1, "case_id": None, "case_status": "open"},
+            "case": {"conversation_id": 1, "case_id": 1, "case_status": "open"},
             "outcome": {"outcome_payload": {"response_text": self.response_text}},
         }
 
@@ -139,14 +140,29 @@ class RaceRouting(StubRouting):
         super().__init__(response_text=response_text)
         self.session_factory = session_factory
 
-    def handle_inbound(self, payload) -> dict:
-        result = super().handle_inbound(payload)
+    def handle_inbound(self, payload, *, persist_inbound: bool = True) -> dict:
+        result = super().handle_inbound(payload, persist_inbound=persist_inbound)
         with self.session_factory() as session:
             conversation = session.scalar(select(Conversation).where(Conversation.external_id == f"vk:{payload.external_chat_id}"))
             state = get_or_create_conversation_transport_state(session, conversation_id=conversation.id, platform="vk")
             activate_human_override(session, state, admin_replied_at=datetime.now(UTC), silence_seconds=3600)
             session.commit()
         return result
+
+
+class ImmediateQueue:
+    """Legacy gateway tests exercise delivery after an explicitly due batch."""
+
+    def __init__(self, processor) -> None:
+        self.queue = InboundQueue(processor, quiet_seconds=0, max_wait_seconds=0)
+
+    def submit(self, inbound):
+        batch = self.queue.submit(inbound)
+        self.queue.flush_due(now=datetime.now(UTC), background=False)
+        return batch
+
+    def cancel(self, channel: str, external_chat_id: str) -> None:
+        self.queue.cancel(channel, external_chat_id)
 
 
 def make_service(tmp_path: Path, *, routing=None, sender=None, client=None) -> tuple[VKGatewayService, Any]:
@@ -160,7 +176,38 @@ def make_service(tmp_path: Path, *, routing=None, sender=None, client=None) -> t
         session_factory=session_factory,
         override_silence_seconds=3600,
     )
+    service.queue = ImmediateQueue(service._process_generation)
     return service, session_factory
+
+
+def test_vk_gateway_coalesces_two_messages_into_one_runtime_turn(tmp_path: Path) -> None:
+    sender = RecordingVKSender()
+    routing = StubRouting(response_text="Ответ на полный запрос")
+    service, session_factory = make_service(tmp_path, routing=routing, sender=sender)
+    service.queue = InboundQueue(service._process_generation, quiet_seconds=5, max_wait_seconds=15)
+    now = datetime.now(UTC)
+
+    for message_id, text_value in [(201, "Муж хочет прыгнуть с парашютом😁"), (202, "Хочу ему сделать подарок")]:
+        result = service.handle_event({
+            "type": "message_new",
+            "group_id": 55,
+            "object": {"message": {"id": message_id, "peer_id": 2201, "from_id": 3201, "text": text_value, "date": int(now.timestamp())}},
+        })
+        assert result["queued"] is True
+
+    assert service.queue.flush_due(now=now + timedelta(seconds=6), background=False) == 1
+    assert [payload.text for payload in routing.handled_payloads] == [
+        "Муж хочет прыгнуть с парашютом😁\nХочу ему сделать подарок"
+    ]
+    assert sender.calls == [("2201", "Ответ на полный запрос")]
+    with session_factory() as session:
+        messages = session.scalars(select(Message).order_by(Message.id)).all()
+        assert [(message.role, message.content) for message in messages] == [
+            ("user", "Муж хочет прыгнуть с парашютом😁\nХочу ему сделать подарок"),
+        ]
+        assert routing.recorded_outbound == [(1, "Ответ на полный запрос")]
+        events = session.scalars(select(TransportEvent).order_by(TransportEvent.id)).all()
+        assert [(event.external_message_id, event.status) for event in events] == [("201", "processed"), ("202", "processed")]
 
 
 def test_vk_gateway_retries_pending_kb_transport_failure_without_intermediate_customer_reply(tmp_path: Path) -> None:
@@ -175,7 +222,7 @@ def test_vk_gateway_retries_pending_kb_transport_failure_without_intermediate_cu
 
     first = service.handle_event(event)
 
-    assert first["retry_pending"] is True
+    assert first["queued"] is True
     assert sender.calls == []
     with session_factory() as session:
         stored = session.scalar(select(TransportEvent).where(TransportEvent.dedupe_key == "vk:message_new:2000:100"))
@@ -188,7 +235,7 @@ def test_vk_gateway_retries_pending_kb_transport_failure_without_intermediate_cu
 
     assert retried["processed"] == 1
     assert sender.calls == [("2000", "Ответ после повтора")]
-    assert routing.persist_flags == [True, False]
+    assert routing.persist_flags == [False, False]
     with session_factory() as session:
         stored = session.scalar(select(TransportEvent).where(TransportEvent.dedupe_key == "vk:message_new:2000:100"))
         assert stored is not None
@@ -233,7 +280,7 @@ def test_vk_gateway_populates_missing_user_display_name_from_vk_profile(tmp_path
         }
     )
 
-    assert result["suppressed"] is False
+    assert result["queued"] is True
     assert client.calls == [["3001"]]
     with session_factory() as session:
         user = session.scalar(select(User).where(User.external_id == "vk:3001"))
@@ -259,7 +306,7 @@ def test_vk_gateway_skips_profile_lookup_when_display_name_already_exists(tmp_pa
         }
     )
 
-    assert result["suppressed"] is False
+    assert result["queued"] is True
     assert client.calls == []
     with session_factory() as session:
         user = session.scalar(select(User).where(User.external_id == "vk:3006"))
@@ -283,7 +330,7 @@ def test_vk_gateway_ignores_profile_lookup_failures_and_keeps_processing(tmp_pat
         }
     )
 
-    assert result["suppressed"] is False
+    assert result["queued"] is True
     assert client.calls == [["3007"]]
     with session_factory() as session:
         user = session.scalar(select(User).where(User.external_id == "vk:3007"))
@@ -302,7 +349,7 @@ def test_vk_gateway_reconciles_bot_message_reply_without_override(tmp_path: Path
             "object": {"message": {"id": 101, "peer_id": 2001, "from_id": 3001, "text": "Здравствуйте", "date": 1780000000}},
         }
     )
-    assert inbound_result["suppressed"] is False
+    assert inbound_result["queued"] is True
     assert sender.calls == [("2001", "Готовый ответ")]
 
     reply_result = service.handle_event(
@@ -421,8 +468,7 @@ def test_vk_gateway_rechecks_override_before_send_and_drops_stale_reply(tmp_path
         }
     )
 
-    assert result["suppressed"] is True
-    assert result["reason"] == "human_override_activated_before_send"
+    assert result["queued"] is True
     assert sender.calls == []
 
 
@@ -438,8 +484,8 @@ def test_vk_gateway_persists_structured_vk_send_error_details(tmp_path: Path) ->
         }
     )
 
-    assert result["suppressed"] is False
-    assert result["delivery"]["sent"] is False
+    assert result["queued"] is True
+    assert sender.calls == [("2005", "Готовый ответ")]
 
     with session_factory() as session:
         row = session.execute(

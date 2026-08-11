@@ -15,6 +15,7 @@ from app.models.transport_event import TransportEvent
 from app.models.user import User
 from app.schemas.message import InboundMessage
 from app.services.case_resolution import ensure_conversation, resolve_case
+from app.services.inbound_queue import Generation, InboundQueue
 from app.services.persistence import (
     activate_human_override,
     find_recent_outbound_transport_match,
@@ -45,12 +46,19 @@ class VKGatewayService:
         client: VKAPIClient | None = None,
         session_factory=SessionLocal,
         override_silence_seconds: int | None = None,
+        queue: InboundQueue | None = None,
     ) -> None:
         self.routing = routing or RoutingService()
         self.sender = sender or VKSender()
         self.client = client or getattr(self.sender, "client", None) or VKAPIClient()
         self.session_factory = session_factory
         self.override_silence_seconds = override_silence_seconds or settings.vk_override_silence_seconds
+        self.queue = queue or InboundQueue(
+            self._process_generation,
+            quiet_seconds=settings.inbound_coalesce_quiet_seconds,
+            max_wait_seconds=settings.inbound_coalesce_max_wait_seconds,
+            autostart=True,
+        )
 
     def handle_event(self, event: dict[str, Any]) -> dict[str, Any]:
         event_type = str(event.get("type") or "")
@@ -61,6 +69,142 @@ class VKGatewayService:
         return {"ok": True, "ignored": True, "reason": "unsupported_event_type", "event_type": event_type}
 
     def _handle_message_new(self, event: dict[str, Any]) -> dict[str, Any]:
+        message = self._extract_message(event)
+        text = str(message.get("text") or "").strip()
+        peer_id = self._string_id(message.get("peer_id"))
+        from_id = self._string_id(message.get("from_id"))
+        message_id = self._string_id(message.get("id"))
+        if not text or not peer_id or not from_id or not message_id:
+            return {"ok": True, "ignored": True, "reason": "unsupported_message_new"}
+        event_time = self._event_time(message)
+        dedupe_key = f"vk:message_new:{peer_id}:{message_id}"
+        inbound = InboundMessage(
+            channel="vk", external_user_id=from_id, external_chat_id=peer_id, text=text,
+            external_message_id=message_id, external_event_type="message_new", external_event_id=dedupe_key,
+            received_at=event_time, raw_event=event,
+            metadata={"group_id": event.get("group_id"), "peer_id": peer_id, "from_id": from_id},
+        )
+        with self.session_factory() as session:
+            transport_event, created = persist_transport_event(
+                session, platform="vk", event_type="message_new", dedupe_key=dedupe_key, payload_json=event,
+                external_event_id=dedupe_key, external_message_id=message_id,
+                conversation_external_id=self._conversation_external_id(peer_id), received_at=event_time,
+            )
+            if not created:
+                session.commit()
+                return {"ok": True, "ignored": True, "reason": "duplicate_event", "event_type": "message_new"}
+            self._sync_user_display_name(session, external_user_id=from_id)
+            conversation = ensure_conversation(session, channel="vk", external_chat_id=peer_id)
+            state = get_or_create_conversation_transport_state(session, conversation_id=conversation.id, platform="vk")
+            set_last_inbound_message(session, state, external_message_id=message_id)
+            if is_override_active(state, now=event_time):
+                case = resolve_case(session, inbound)
+                persist_inbound_message(session, case["case_id"], inbound)
+                mark_transport_event_processed(session, transport_event, status="suppressed")
+                session.commit()
+                return {"ok": True, "ignored": False, "suppressed": True, "reason": "human_override_active", "case": case, "event_type": "message_new"}
+            session.commit()
+        batch = self.queue.submit(inbound)
+        return {"ok": True, "ignored": False, "queued": True, "event_type": "message_new", "batch_id": batch.batch_id, "revision": batch.revision}
+
+    def _process_generation(self, inbound: InboundMessage, generation: Generation) -> str | None:
+        """Run one combined turn; raw events were persisted at ingress already."""
+        try:
+            result = self.routing.handle_inbound(inbound, persist_inbound=False)
+        except Exception as exc:
+            self._mark_generation_failed(generation, str(exc))
+            raise
+        if self._is_retry_pending(result):
+            self._mark_generation_retry_pending(generation, result)
+            return "retry_pending"
+
+        reply_text = self._build_reply_text(result)
+        if not reply_text:
+            return "retry_pending"
+        case = result.get("case") or {}
+        case_id = case.get("case_id")
+        conversation_id = case.get("conversation_id")
+        if case_id is None:
+            return "retry_pending"
+
+        def persist_and_deliver() -> str:
+            with self.session_factory() as session:
+                current_conversation_id = conversation_id
+                if current_conversation_id is None:
+                    conversation = session.scalar(
+                        select(Conversation).where(Conversation.external_id == self._conversation_external_id(inbound.external_chat_id))
+                    )
+                    current_conversation_id = conversation.id if conversation is not None else None
+                if current_conversation_id is None:
+                    conversation = ensure_conversation(session, channel="vk", external_chat_id=inbound.external_chat_id)
+                    current_conversation_id = conversation.id
+                state = get_or_create_conversation_transport_state(
+                    session, conversation_id=current_conversation_id, platform="vk"
+                )
+                if is_override_active(state, now=datetime.now(UTC)):
+                    self._mark_generation_sources(session, generation, status="suppressed")
+                    session.commit()
+                    return "superseded"
+                persist_inbound_message(session, case_id, inbound)
+                delivery = self.sender.send_message(peer_id=inbound.external_chat_id, text=reply_text)
+                sent = delivery.get("sent", delivery.get("ok"))
+                self._mark_generation_sources(session, generation, status="processed" if sent else "failed")
+                if not sent:
+                    for source in generation.source_messages:
+                        if source.external_event_id and (event := find_transport_event(session, source.external_event_id)) is not None:
+                            event.error_text = self._format_delivery_error(delivery)
+                    session.commit()
+                    return "retry_pending"
+                persist_outbound_transport_send(
+                    session,
+                    platform="vk",
+                    conversation_id=current_conversation_id,
+                    case_id=case_id,
+                    peer_external_id=inbound.external_chat_id,
+                    random_id=str(delivery["random_id"]),
+                    content_text=reply_text,
+                    external_message_id=delivery.get("external_message_id"),
+                    sent_at=delivery.get("sent_at"),
+                )
+                set_last_bot_reply(session, state, replied_at=delivery.get("sent_at"))
+                session.commit()
+            self.routing.record_outbound_message(case_id, reply_text)
+            return "delivered"
+
+        return generation.run_if_current(persist_and_deliver)
+
+    def _mark_generation_sources(self, session, generation: Generation, *, status: str) -> None:
+        for source in generation.source_messages:
+            if source.external_event_id and (event := find_transport_event(session, source.external_event_id)) is not None:
+                mark_transport_event_processed(session, event, status=status)
+
+    def _mark_generation_failed(self, generation: Generation, error: str) -> None:
+        with self.session_factory() as session:
+            for source in generation.source_messages:
+                if source.external_event_id and (event := find_transport_event(session, source.external_event_id)) is not None:
+                    mark_transport_event_failed(session, event, error)
+            session.commit()
+
+    def _mark_generation_retry_pending(self, generation: Generation, result: dict[str, Any]) -> None:
+        with self.session_factory() as session:
+            for source in generation.source_messages:
+                if source.external_event_id and (event := find_transport_event(session, source.external_event_id)) is not None:
+                    self._schedule_retry_pending(session, event, result)
+            session.commit()
+
+    def _mark_generation_sources_processed(self, generation: Generation) -> None:
+        with self.session_factory() as session:
+            self._mark_generation_sources(session, generation, status="processed")
+            session.commit()
+
+    def _process_message_new(
+        self,
+        event: dict[str, Any],
+        *,
+        inbound_override: InboundMessage | None = None,
+        already_persisted: bool = False,
+        generation: Generation | None = None,
+    ) -> dict[str, Any]:
         message = self._extract_message(event)
         text = str(message.get("text") or "").strip()
         peer_id = self._string_id(message.get("peer_id"))
@@ -87,6 +231,8 @@ class VKGatewayService:
                 "from_id": from_id,
             },
         )
+        if inbound_override is not None:
+            inbound = inbound_override
 
         with self.session_factory() as session:
             transport_event, created = persist_transport_event(
@@ -100,7 +246,7 @@ class VKGatewayService:
                 conversation_external_id=self._conversation_external_id(peer_id),
                 received_at=event_time,
             )
-            if not created:
+            if not created and not already_persisted:
                 session.commit()
                 return {"ok": True, "ignored": True, "reason": "duplicate_event", "event_type": "message_new"}
 
@@ -126,7 +272,7 @@ class VKGatewayService:
             session.commit()
 
         try:
-            result = self.routing.handle_inbound(inbound)
+            result = self.routing.handle_inbound(inbound, persist_inbound=False)
         except Exception as exc:
             with self.session_factory() as session:
                 stored_event = find_transport_event(session, dedupe_key)
@@ -134,6 +280,9 @@ class VKGatewayService:
                     mark_transport_event_failed(session, stored_event, str(exc))
                 session.commit()
             raise
+
+        if generation is not None and not generation.is_current():
+            return {"ok": True, "ignored": False, "suppressed": True, "reason": "generation_superseded", "app_result": result}
 
         if self._is_retry_pending(result):
             with self.session_factory() as session:
@@ -183,8 +332,12 @@ class VKGatewayService:
                     "reason": "human_override_activated_before_send",
                     "app_result": result,
                 }
+            if generation is not None and case_id is not None:
+                persist_inbound_message(session, case_id, inbound)
             session.commit()
 
+        if generation is not None and not generation.is_current():
+            return {"ok": True, "ignored": False, "suppressed": True, "reason": "generation_superseded", "app_result": result}
         delivery = self.sender.send_message(peer_id=peer_id, text=reply_text)
         sent = delivery.get("sent")
         if sent is None:
@@ -443,6 +596,7 @@ class VKGatewayService:
                 admin_replied_at=event_time,
                 silence_seconds=self.override_silence_seconds,
             )
+            self.queue.cancel("vk", peer_id)
             mark_transport_event_processed(session, transport_event)
             session.commit()
             return {

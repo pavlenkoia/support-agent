@@ -146,6 +146,11 @@ For degraded-but-grounded answers, `outcome.outcome_payload.reason` should prese
 ## Transport persistence side-contracts
 
 These are internal persistence contracts rather than public HTTP endpoints, but they are part of the shipped repository behavior:
+- Telegram and VK accepted text events are deduplicated, journaled as individual raw `transport_events`, and enqueued before `RoutingService.handle_inbound()`; transport polling/webhook handlers return without waiting for routing or an external send
+- the shared in-memory queue is keyed by `(channel, external_chat_id)`, combines a package after 5 seconds of quiet or 15 seconds from its first source event, and joins source texts with one newline in receive order
+- a package revision is superseded by a new source event or human override; only the current revision can persist its combined `user` message or send/store its `assistant` reply
+- human override cancels the pending package and is rechecked immediately in the final delivery boundary
+- package state is process-local; pending packages are not restored/replayed after a worker restart
 - raw transport events are journaled with a dedupe key and processing status
 - outbound transport sends are stored for later reconciliation against transport-side activity events
 - VK conversation transport state stores `last_bot_reply_at`, `last_admin_reply_at`, and `human_override_until`

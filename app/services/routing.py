@@ -166,6 +166,11 @@ class RoutingService:
                 "audit": audit,
             }
 
+    def persist_inbound_message(self, case_id: int, payload: InboundMessage) -> None:
+        with self.session_factory() as session:
+            persist_inbound_message(session, case_id, payload)
+            session.commit()
+
     def record_outbound_message(self, case_id: int, text: str) -> None:
         cleaned = str(text or "").strip()
         if not cleaned:

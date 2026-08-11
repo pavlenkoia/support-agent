@@ -76,10 +76,7 @@ def test_process_once_polls_update_routes_and_acks_offset() -> None:
     result = process_once(gateway=gateway, poller=poller, acker=acker, offset=100)
 
     assert result["next_offset"] == 102
-    assert sender.calls == [
-        ("action", "12345", "typing"),
-        ("message", "12345", "Сейчас не могу дать точный ответ на этот вопрос."),
-    ]
+    assert sender.calls == []
     assert acker.offsets == [102]
     assert poller.offsets == [100]
 

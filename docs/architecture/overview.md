@@ -126,14 +126,18 @@ The application-level outcomes are now:
 
 See also: `docs/architecture/kb-agent-hardening.md`.
 
-## Transport-state persistence
+## Inbound coalescing and transport-state persistence
 
-The repository now includes transport-level persistence separate from business dialogue content:
+Telegram and VK place accepted text events into one channel-independent, in-memory `InboundQueue` before `RoutingService.handle_inbound()`. The queue is keyed by `(channel, external_chat_id)`: it combines texts received within a 5-second quiet window (with a 15-second maximum wait) into one newline-delimited customer turn, while different dialogs continue independently. Polling acknowledges the transport event after validation, dedupe, raw journaling, and enqueueing; it never waits for LLM work or delivery.
+
+Each package has a monotonically increasing revision. A new source event or human override supersedes the active revision. Routing happens outside the polling flow; the final message persistence and transport send are serialized with enqueue/cancellation, so an obsolete revision cannot persist or deliver a customer reply. A provider `retry_pending` package does not spin in memory and is re-opened only by a newer inbound revision. Batch state is deliberately process-local and is not replayed after a worker restart.
+
+The repository keeps transport-level persistence separate from business dialogue content:
 - `transport_events` — raw inbound/outbound transport-event journal with dedupe key and processing status
 - `outbound_transport_sends` — bot-send reconciliation records used to match later transport-side echo/activity events
 - `conversation_transport_states` — per-conversation transport state such as last bot reply, last admin reply, and active human-override window
 
-This transport layer exists around the current `RoutingService`; it does not replace the existing case/message runtime.
+Raw source events remain individually auditable; after an actual delivery, `messages` contains exactly one combined `user` turn and one `assistant` turn for the package. This transport layer exists around the current `RoutingService`; it does not replace the existing case/message runtime.
 
 ## VK channel behavior
 

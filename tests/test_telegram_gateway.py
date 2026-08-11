@@ -1,4 +1,5 @@
 import time
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from sqlalchemy import text
@@ -44,6 +45,52 @@ class StubRouting:
         }
 
 
+def test_telegram_gateway_queues_inbound_without_blocking_or_sending() -> None:
+    sender = RecordingSender()
+    routing = StubRouting()
+    service = TelegramGatewayService(routing=routing, sender=sender)
+
+    result = service.handle_update({
+        "update_id": 12,
+        "message": {
+            "message_id": 8,
+            "text": "Короткая реплика",
+            "chat": {"id": 12345},
+            "from": {"id": 777},
+        },
+    })
+
+    assert result["queued"] is True
+    assert sender.calls == []
+
+
+def test_telegram_gateway_coalesces_two_messages_into_one_runtime_turn() -> None:
+    class CoalescingRouting(StubRouting):
+        def __init__(self) -> None:
+            self.payloads = []
+            self.persisted = []
+
+        def handle_inbound(self, payload, *, persist_inbound=True) -> dict:
+            assert persist_inbound is False
+            self.payloads.append(payload)
+            return super().handle_inbound(payload)
+
+        def persist_inbound_message(self, case_id: int, payload) -> None:
+            self.persisted.append((case_id, payload.text))
+
+    sender = RecordingSender()
+    routing = CoalescingRouting()
+    service = TelegramGatewayService(routing=routing, sender=sender)
+    for message_id, text in [(1, "Здравствуйте"), (2, "Сколько стоит прыжок с самолёта?")]:
+        service.handle_update({"update_id": message_id, "message": {"message_id": message_id, "text": text, "chat": {"id": 12345}, "from": {"id": 777}}})
+
+    service.queue.flush_due(now=datetime.now(UTC) + timedelta(seconds=6), background=False)
+
+    assert [payload.text for payload in routing.payloads] == ["Здравствуйте\nСколько стоит прыжок с самолёта?"]
+    assert routing.persisted == [(1, "Здравствуйте\nСколько стоит прыжок с самолёта?")]
+    assert [call for call in sender.calls if call[0] == "message"] == [("message", "12345", "Сейчас не могу дать точный ответ на этот вопрос.")]
+
+
 def test_telegram_gateway_handles_new_command() -> None:
     sender = RecordingSender()
     service = TelegramGatewayService(routing=StubRouting(), sender=sender)
@@ -66,7 +113,7 @@ def test_telegram_gateway_handles_new_command() -> None:
     ]
 
 
-def test_telegram_gateway_sends_runtime_reply_and_persists_outbound_message(tmp_path: Path) -> None:
+def test_telegram_gateway_persists_one_combined_user_and_assistant_message(tmp_path: Path) -> None:
     sender = RecordingSender()
     routing = make_test_routing_service(tmp_path)
     routing.direct_llm.answer = lambda text, kb_hits, *, allow_general_without_kb=False, conversation_context=None: {
@@ -79,38 +126,30 @@ def test_telegram_gateway_sends_runtime_reply_and_persists_outbound_message(tmp_
     }
     service = TelegramGatewayService(routing=routing, sender=sender)
 
-    first = service.handle_update({
-        "update_id": 21,
-        "message": {
-            "message_id": 5,
-            "text": "А без подготовки можно?",
-            "chat": {"id": 12345},
-            "from": {"id": 777},
-        },
-    })
-    second = service.handle_update({
-        "update_id": 22,
-        "message": {
-            "message_id": 6,
-            "text": "Я офицер вдв",
-            "chat": {"id": 12345},
-            "from": {"id": 777},
-        },
-    })
+    for update_id, message_id, text_value in [
+        (21, 5, "А без подготовки можно?"),
+        (22, 6, "Я офицер вдв"),
+    ]:
+        result = service.handle_update({
+            "update_id": update_id,
+            "message": {"message_id": message_id, "text": text_value, "chat": {"id": 12345}, "from": {"id": 777}},
+        })
+        assert result["queued"] is True
 
-    assert first["reply_text"] == "Здравствуйте! Подготовка обязательна даже для первого прыжка."
-    assert second["reply_text"] == "Подготовка обязательна даже для первого прыжка."
-    assert sender.calls[1] == ("message", "12345", "Здравствуйте! Подготовка обязательна даже для первого прыжка.")
+    service.queue.flush_due(now=datetime.now(UTC) + timedelta(seconds=6), background=False)
 
+    assert sender.calls == [("message", "12345", "Здравствуйте! Подготовка обязательна даже для первого прыжка.")]
     with routing.session_factory() as session:
         roles = session.execute(text("select role from messages order by id")).scalars().all()
-        assert roles == ["user", "assistant", "user", "assistant"]
+        assert roles == ["user", "assistant"]
         contents = session.execute(text("select content from messages order by id")).scalars().all()
-        assert contents[1] == "Здравствуйте! Подготовка обязательна даже для первого прыжка."
-        assert contents[2] == "Я офицер вдв"
+        assert contents == [
+            "А без подготовки можно?\nЯ офицер вдв",
+            "Здравствуйте! Подготовка обязательна даже для первого прыжка.",
+        ]
 
 
-def test_telegram_gateway_typing_loop_keeps_single_action_for_fast_callback(tmp_path: Path) -> None:
+def test_telegram_gateway_polling_handler_returns_without_typing_or_delivery(tmp_path: Path) -> None:
     sender = RecordingSender()
     routing = make_test_routing_service(tmp_path)
     service = TelegramGatewayService(routing=routing, sender=sender, typing_interval_seconds=0.05)
@@ -118,14 +157,9 @@ def test_telegram_gateway_typing_loop_keeps_single_action_for_fast_callback(tmp_
     started = time.time()
     result = service.handle_update({
         "update_id": 31,
-        "message": {
-            "message_id": 7,
-            "text": "привет",
-            "chat": {"id": 12345},
-            "from": {"id": 777},
-        },
+        "message": {"message_id": 7, "text": "привет", "chat": {"id": 12345}, "from": {"id": 777}},
     })
-    elapsed = time.time() - started
 
-    assert result["typing"]["sent_actions"] >= 1
-    assert elapsed < 2.5
+    assert result["queued"] is True
+    assert time.time() - started < 0.2
+    assert sender.calls == []

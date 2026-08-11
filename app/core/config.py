@@ -74,6 +74,8 @@ class Settings(BaseSettings):
     telegram_poll_timeout_seconds: int = 30
     telegram_poll_interval_seconds: int = 3
     telegram_poll_offset_file: str = "/app/logs/telegram-update-offset.txt"
+    inbound_coalesce_quiet_seconds: int = 5
+    inbound_coalesce_max_wait_seconds: int = 15
 
     vk_enabled: bool = False
     vk_group_id: str | None = None
