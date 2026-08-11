@@ -2,18 +2,31 @@ from __future__ import annotations
 
 import threading
 from collections.abc import Callable
+from datetime import UTC, datetime, timedelta
+
+from sqlalchemy import select
 
 from app.core.config import parse_csv_set, settings
 from app.core.db import SessionLocal
 from app.integrations.telegram.client import TelegramBotClient
+from app.models.message import Message
+from app.models.transport_event import TransportEvent
 from app.schemas.message import InboundMessage
+from app.services.case_resolution import ensure_conversation
 from app.services.inbound_queue import Generation, InboundQueue
 from app.services.persistence import (
     find_transport_event,
+    get_or_create_conversation_transport_state,
+    is_override_active,
     mark_transport_event_processed,
+    mark_transport_event_retry_pending,
     persist_transport_event,
+    set_last_inbound_message,
 )
 from app.services.routing import RoutingService
+
+TELEGRAM_RETRY_MAX_ATTEMPTS = 3
+TELEGRAM_RETRY_BASE_DELAY_SECONDS = 30
 
 
 class TelegramGatewayService:
@@ -68,33 +81,97 @@ class TelegramGatewayService:
 
         if not self._persist_raw_event(inbound):
             return {"ok": True, "ignored": True, "reason": "duplicate_event"}
+        self._update_transport_state_on_inbound(inbound)
         batch = self.queue.submit(inbound)
         return {"ok": True, "ignored": False, "queued": True, "update_id": update.get("update_id"), "batch_id": batch.batch_id, "revision": batch.revision}
 
     def flush_due(self) -> int:
         return self.queue.flush_due()
 
+    def process_due_retries(self, *, now=None) -> int:
+        if not hasattr(self.routing, "session_factory"):
+            return 0
+        due_at = now or datetime.now(UTC)
+        with self.session_factory() as session:
+            events = list(
+                session.scalars(
+                    select(TransportEvent).where(
+                        TransportEvent.platform == "telegram",
+                        TransportEvent.event_type == "message",
+                        TransportEvent.status == "retry_pending",
+                        TransportEvent.available_at <= due_at,
+                    )
+                    .order_by(TransportEvent.available_at, TransportEvent.id)
+                )
+            )
+        processed = 0
+        for event in events:
+            result = self._retry_transport_event(event.id, due_at=due_at)
+            if result != "noop":
+                processed += 1
+        return processed
+
     def _process_generation(self, inbound: InboundMessage, generation: Generation) -> str | None:
         return self._run_with_typing(inbound.external_chat_id, lambda: self._generate_and_deliver(inbound, generation))
 
-    def _generate_and_deliver(self, inbound: InboundMessage, generation: Generation) -> str | None:
-        result = self.routing.handle_inbound(inbound, persist_inbound=False)
+    def _generate_and_deliver(
+        self,
+        inbound: InboundMessage,
+        generation: Generation,
+        *,
+        retry_event_id: int | None = None,
+        due_at: datetime | None = None,
+    ) -> str | None:
+        if hasattr(self.routing, "session_factory") and inbound.external_event_id is not None:
+            with self.session_factory() as session:
+                state = self._conversation_state(session, inbound.external_chat_id)
+                if self._is_stale_or_overridden(session, state, inbound, due_at=due_at):
+                    if retry_event_id is not None and (event := session.get(TransportEvent, retry_event_id)) is not None:
+                        event.status = "suppressed"
+                        event.error_text = event.error_text or "telegram_retry_suppressed"
+                        session.commit()
+                    return "suppressed"
+        try:
+            result = self.routing.handle_inbound(inbound, persist_inbound=False)
+        except Exception as exc:
+            self._mark_retry_pending(inbound, f"routing_error:{type(exc).__name__}", generation=generation, now=due_at)
+            return "retry_pending"
         reply_text = self._build_reply_text(result)
         if not reply_text:
+            self._mark_retry_pending(inbound, "empty_reply", generation=generation, now=due_at)
             return "retry_pending"
         case_id = (result.get("case") or {}).get("case_id")
         if case_id is None:
+            self._mark_retry_pending(inbound, "missing_case", generation=generation, now=due_at)
             return "retry_pending"
 
         def persist_and_deliver() -> str:
-            self.routing.persist_inbound_message(case_id, inbound)
+            if hasattr(self.routing, "session_factory"):
+                with self.session_factory() as check_session:
+                    state = self._conversation_state(check_session, inbound.external_chat_id)
+                    if self._is_stale_or_overridden(check_session, state, inbound, due_at=due_at):
+                        if retry_event_id is not None and (event := check_session.get(TransportEvent, retry_event_id)) is not None:
+                            event.status = "suppressed"
+                            event.error_text = event.error_text or "telegram_retry_suppressed"
+                            check_session.commit()
+                        return "suppressed"
+            if not self._has_persisted_user_message(case_id, inbound.text):
+                self.routing.persist_inbound_message(case_id, inbound)
             delivery = self.sender.send_message(inbound.external_chat_id, reply_text)
             if not delivery.get("sent", delivery.get("ok")):
+                self._mark_retry_pending(
+                    inbound,
+                    str(delivery.get("error") or "delivery_failed"),
+                    generation=generation,
+                    now=due_at,
+                )
                 return "retry_pending"
             self.routing.record_outbound_message(case_id, reply_text)
             self._mark_sources_processed(generation)
             return "delivered"
 
+        if retry_event_id is not None:
+            return persist_and_deliver()
         return generation.run_if_current(persist_and_deliver)
 
     def _run_with_typing(self, chat_id: str, callback: Callable[[], str | None]) -> str | None:
@@ -117,7 +194,7 @@ class TelegramGatewayService:
         if not hasattr(self.routing, "session_factory"):
             return True
         with self.session_factory() as session:
-            _, created = persist_transport_event(
+            event, created = persist_transport_event(
                 session,
                 platform="telegram",
                 event_type="message",
@@ -128,6 +205,8 @@ class TelegramGatewayService:
                 conversation_external_id=f"telegram:{inbound.external_chat_id}",
                 received_at=inbound.received_at,
             )
+            if created:
+                event.available_at = self._retry_available_at(inbound.received_at, 0)
             session.commit()
             return created
 
@@ -140,9 +219,119 @@ class TelegramGatewayService:
                     mark_transport_event_processed(session, event)
             session.commit()
 
+    def _mark_retry_pending(
+        self,
+        inbound: InboundMessage,
+        error_text: str,
+        *,
+        generation: Generation | None = None,
+        now: datetime | None = None,
+    ) -> None:
+        if not hasattr(self.routing, "session_factory"):
+            return
+        with self.session_factory() as session:
+            sources = generation.source_messages if generation is not None else (inbound,)
+            for source in sources:
+                if source.external_event_id is None:
+                    continue
+                event = find_transport_event(session, str(source.external_event_id))
+                if event is None:
+                    event, _ = persist_transport_event(
+                        session,
+                        platform="telegram",
+                        event_type="message",
+                        dedupe_key=str(source.external_event_id),
+                        payload_json=source.raw_event or {},
+                        external_event_id=source.external_event_id,
+                        external_message_id=source.external_message_id,
+                        conversation_external_id=f"telegram:{source.external_chat_id}",
+                        received_at=source.received_at,
+                    )
+                mark_transport_event_retry_pending(
+                    session,
+                    event,
+                    error_text=error_text,
+                    available_at=self._retry_available_at(now or datetime.now(UTC), event.retry_attempts + 1),
+                )
+            session.commit()
+
+    def _retry_transport_event(self, event_id: int, *, due_at: datetime) -> str:
+        with self.session_factory() as session:
+            event = session.get(TransportEvent, event_id)
+            if event is None or event.status != "retry_pending":
+                return "noop"
+            if self._normalized_dt(event.available_at) > self._normalized_dt(due_at):
+                return "noop"
+            if event.retry_attempts >= TELEGRAM_RETRY_MAX_ATTEMPTS:
+                event.status = "retry_exhausted"
+                event.error_text = event.error_text or "telegram_retry_exhausted"
+                session.commit()
+                return "exhausted"
+            payload = event.payload_json or {}
+            message = payload.get("message") or payload.get("edited_message") or {}
+            inbound = InboundMessage(
+                channel="telegram",
+                external_user_id=str((message.get("from") or {}).get("id", "")),
+                external_chat_id=str((message.get("chat") or {}).get("id", "")),
+                text=str(message.get("text") or "").strip(),
+                external_message_id=str(message.get("message_id") or ""),
+                external_event_type="message",
+                external_event_id=str(event.external_event_id or event.dedupe_key),
+                raw_event=payload,
+            )
+            generation = Generation(self.queue, (inbound.channel, inbound.external_chat_id), event.retry_attempts or 1, (inbound,))
+            state = self._conversation_state(session, inbound.external_chat_id)
+            if self._is_stale_or_overridden(session, state, inbound, due_at=due_at):
+                event.status = "suppressed"
+                event.error_text = event.error_text or "telegram_retry_suppressed"
+                session.commit()
+                return "suppressed"
+        return self._generate_and_deliver(inbound, generation, retry_event_id=event.id, due_at=due_at)
+
     @staticmethod
     def _build_reply_text(result: dict) -> str:
         outcome = result.get("outcome", {})
         payload = outcome.get("outcome_payload", {})
         response_text = payload.get("response_text") if isinstance(payload, dict) else None
         return str(response_text or "").strip()
+
+    @staticmethod
+    def _normalized_dt(value: datetime | None) -> datetime:
+        current = value or datetime.now(UTC)
+        return current.replace(tzinfo=UTC) if current.tzinfo is None else current.astimezone(UTC)
+
+    def _retry_available_at(self, received_at: datetime | None, retry_attempts: int) -> datetime:
+        base = self._normalized_dt(received_at)
+        delay_seconds = TELEGRAM_RETRY_BASE_DELAY_SECONDS * (2 ** max(0, retry_attempts - 1))
+        return base + timedelta(seconds=delay_seconds)
+
+    def _conversation_state(self, session, external_chat_id: str):
+        conversation = ensure_conversation(session, channel="telegram", external_chat_id=external_chat_id)
+        return get_or_create_conversation_transport_state(session, conversation_id=conversation.id, platform="telegram")
+
+    def _update_transport_state_on_inbound(self, inbound: InboundMessage) -> None:
+        if not hasattr(self.routing, "session_factory"):
+            return
+        with self.session_factory() as session:
+            state = self._conversation_state(session, inbound.external_chat_id)
+            set_last_inbound_message(session, state, external_message_id=inbound.external_message_id)
+            session.commit()
+
+    def _is_stale_or_overridden(self, session, state, inbound: InboundMessage, *, due_at: datetime | None = None) -> bool:
+        if is_override_active(state, now=due_at):
+            return True
+        if inbound.external_message_id is None:
+            return False
+        if state is None or state.last_inbound_external_message_id is None:
+            return False
+        return str(state.last_inbound_external_message_id) != str(inbound.external_message_id)
+
+    def _has_persisted_user_message(self, case_id: int, text: str) -> bool:
+        if not hasattr(self.routing, "session_factory"):
+            return False
+        with self.session_factory() as session:
+            return bool(
+                session.scalar(
+                    select(Message.id).where(Message.case_id == case_id, Message.role == "user", Message.content == text).limit(1)
+                )
+            )

@@ -239,8 +239,20 @@ class RoutingService:
             support_case.status = case["case_status"]
             support_case.route_mode = route_name
         audit = build_audit_event(case, route, retrieval, outcome, {"turn_type": "simple"}, response_strategy)
-        persist_workflow_event(session, case["case_id"], {"answer_engine": "simple_full_corpus"}, event_type="turn_classified", actor="system:routing")
-        persist_workflow_event(session, case["case_id"], {"response_strategy": response_strategy}, event_type="response_strategy_selected", actor="system:routing")
+        persist_workflow_event(session, case["case_id"], {"answer_engine": "simple_full_corpus", "outcome_kind": kind, "source_refs": engine_result["source_refs"]}, event_type="turn_classified", actor="system:routing")
+        persist_workflow_event(
+            session,
+            case["case_id"],
+            {
+                "response_strategy": response_strategy,
+                "outcome_kind": kind,
+                "source_refs": engine_result["source_refs"],
+                "logical_llm_call_count": response_strategy.get("logical_llm_call_count"),
+                "provider_attempt_count": response_strategy.get("provider_attempt_count"),
+            },
+            event_type="response_strategy_selected",
+            actor="system:routing",
+        )
         persist_workflow_event(session, case["case_id"], audit, event_type="inbound_processed", actor="system:routing")
         session.commit()
         return {"case": case, "context": context, "retrieval": retrieval, "kb_result": {}, "route": {key: value for key, value in route.items() if key != "reply"}, "outcome": outcome, "audit": audit}

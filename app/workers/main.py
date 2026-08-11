@@ -34,6 +34,7 @@ class OffsetAcker:
 
 
 def process_once(gateway, poller, acker, offset: int | None) -> dict:
+    retry_processed = gateway.process_due_retries()
     updates = poller.get_updates(offset=offset, timeout=settings.telegram_poll_timeout_seconds)
     results = updates.get("result") or []
     next_offset = offset
@@ -49,6 +50,7 @@ def process_once(gateway, poller, acker, offset: int | None) -> dict:
 
     return {
         "processed": len(results),
+        "retry_processed": retry_processed,
         "next_offset": next_offset,
     }
 

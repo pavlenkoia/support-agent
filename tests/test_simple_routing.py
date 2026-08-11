@@ -5,6 +5,7 @@ import pytest
 from app.core.db import Base, make_session_factory
 from app.schemas.message import InboundMessage
 from app.services.routing import RoutingService
+from app.workers.main import process_once
 
 
 class RecordingSimpleEngine:
@@ -172,3 +173,68 @@ def test_simple_policy_sanitizer_does_not_change_kind_or_outcome(tmp_path: Path)
     assert result["route"]["outcome_kind"] == "social_reply"
     assert result["outcome"]["outcome_type"] == "answer"
     assert result["outcome"]["outcome_payload"]["response_text"] == "Здравствуйте! hello"
+
+
+class TraceRecordingEngine(RecordingSimpleEngine):
+    def __init__(self, *, kind: str = "grounded_answer", response_text: str = "Подтверждённый ответ.") -> None:
+        super().__init__(kind=kind, response_text=response_text)
+
+    def answer(self, **kwargs: object) -> dict:
+        result = super().answer(**kwargs)
+        result["telemetry"] = {
+            "answer_engine": "simple_full_corpus",
+            "logical_llm_call_count": 2,
+            "provider_attempt_count": 3,
+        }
+        return result
+
+
+def test_simple_trace_persists_route_observability_fields(tmp_path: Path) -> None:
+    session_factory = make_session_factory(f"sqlite+pysqlite:///{tmp_path / 'routing-trace.db'}")
+    Base.metadata.create_all(bind=session_factory.kw["bind"])
+    routing = RoutingService(
+        session_factory=session_factory,
+        answer_engine_mode="simple_full_corpus",
+        simple_answer_engine=TraceRecordingEngine(),
+    )
+
+    result = routing.handle_inbound(
+        InboundMessage(channel="test", external_user_id="user", external_chat_id="chat", text="Сколько стоит?")
+    )
+
+    assert result["route"]["outcome_kind"] == "grounded_answer"
+    assert result["route"]["source_refs"] == ["compiled/concepts/pricing.md"]
+    assert result["audit"]["outcome_kind"] == "grounded_answer"
+    assert result["audit"]["source_refs"] == ["compiled/concepts/pricing.md"]
+    assert result["audit"]["logical_llm_call_count"] == 2
+    assert result["audit"]["provider_attempt_count"] == 3
+
+
+def test_worker_process_once_invokes_due_retry_without_consuming_fake_gateway_state() -> None:
+    class FakeGateway:
+        def __init__(self) -> None:
+            self.processed = 0
+            self.handled: list[dict] = []
+
+        def process_due_retries(self) -> int:
+            self.processed += 1
+            return 1
+
+        def handle_update(self, update: dict) -> None:
+            self.handled.append(update)
+
+    class FakePoller:
+        def get_updates(self, offset=None, timeout=None):
+            return {"result": []}
+
+    class FakeAcker:
+        def __init__(self) -> None:
+            self.offsets: list[int] = []
+
+        def ack(self, offset: int) -> None:
+            self.offsets.append(offset)
+
+    result = process_once(FakeGateway(), FakePoller(), FakeAcker(), offset=10)
+
+    assert result["retry_processed"] == 1
+    assert result["processed"] == 0
