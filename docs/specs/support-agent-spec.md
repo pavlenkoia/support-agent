@@ -2,6 +2,8 @@
 
 ## Current target behavior
 
+> Candidate mode: `ANSWER_ENGINE_MODE=simple_full_corpus` is implemented for isolated verification only; the default remains the legacy bounded loop until Igor explicitly approves production cutover.
+
 The support agent is a **bounded, policy-driven conversational agent**.
 
 It is not a ticket router and not an escalation-first bot.

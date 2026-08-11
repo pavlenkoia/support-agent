@@ -13,7 +13,6 @@ from app.models.message import Message
 from app.models.user import User
 from app.schemas.message import InboundMessage
 
-
 PROBE_MARKER_KEYS = ("is_test", "source", "session_type", "scenario_name", "requested_by")
 SESSION_TIMEZONE = ZoneInfo("Asia/Yekaterinburg")
 SESSION_INACTIVITY_LIMIT = timedelta(hours=2)

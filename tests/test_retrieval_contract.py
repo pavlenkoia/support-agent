@@ -33,7 +33,7 @@ def _make_large_wiki(tmp_path: Path) -> tuple[Path, Path, Path]:
         "restrictions-and-safety",
         "# Restrictions and safety\nОграничения по весу: самостоятельный прыжок доступен при массе 45–90 кг. Тандем — до 85 кг.\n",
     )
-    equipment = _write_page(
+    _write_page(
         kb_root,
         "equipment-and-rental",
         "# Equipment and rental\nОграничения по выдаваемой экипировке уточняйте на аэродроме. См. [[restrictions-and-safety]].\n",
@@ -106,7 +106,7 @@ def test_grounding_expansion_loads_linked_page_without_mutating_iteration_set(tm
 
 def test_grounding_expansion_prefers_link_target_relevant_to_current_question(tmp_path: Path) -> None:
     kb_root, restrictions, pricing = _make_large_wiki(tmp_path)
-    office = _write_page(kb_root, "office", "# Office\nОфис работает по будням.\n")
+    _write_page(kb_root, "office", "# Office\nОфис работает по будням.\n")
     pricing.write_text(pricing.read_text(encoding="utf-8") + "См. [[office]].\n", encoding="utf-8")
     equipment = kb_root / "concepts" / "equipment-and-rental.md"
 

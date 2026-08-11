@@ -11,7 +11,8 @@ Application-first skeleton for the **Агент поддержки** project.
 - read-only VK dialog viewer web UI on port `3002`, including installable online-first PWA shell
 - internal probe session API for governor-driven live runtime checks without customer-channel traffic
 - external knowledge-layer contract
-- bounded support-agent loop with planner -> tool/KB gathering -> finalize
+- bounded support-agent loop with planner -> tool/KB gathering -> finalize (legacy default)
+- candidate `ANSWER_ENGINE_MODE=simple_full_corpus` path: one full-corpus call with validated source refs; it remains disabled by default pending isolated parity approval
 - separate KB agent for Karpathy-style wiki navigation and selective page reading
 - external hot-editable prompt files for the customer-facing agent and the KB agent
 - provider-aware LLM client with bounded retries/backoff for transient failures

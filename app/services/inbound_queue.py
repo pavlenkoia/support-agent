@@ -31,7 +31,7 @@ class Batch:
 class Generation:
     def __init__(
         self,
-        queue: "InboundQueue",
+        queue: InboundQueue,
         key: ConversationKey,
         revision: int,
         source_messages: tuple[InboundMessage, ...],

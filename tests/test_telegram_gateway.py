@@ -84,8 +84,8 @@ def test_telegram_gateway_coalesces_two_messages_into_one_runtime_turn() -> None
     sender = RecordingSender()
     routing = CoalescingRouting()
     service = TelegramGatewayService(routing=routing, sender=sender)
-    for message_id, text in [(1, "Здравствуйте"), (2, "Сколько стоит прыжок с самолёта?")]:
-        service.handle_update({"update_id": message_id, "message": {"message_id": message_id, "text": text, "chat": {"id": 12345}, "from": {"id": 777}}})
+    for message_id, text_value in [(1, "Здравствуйте"), (2, "Сколько стоит прыжок с самолёта?")]:
+        service.handle_update({"update_id": message_id, "message": {"message_id": message_id, "text": text_value, "chat": {"id": 12345}, "from": {"id": 777}}})
 
     service.queue.flush_due(now=datetime.now(UTC) + timedelta(seconds=6), background=False)
 

@@ -69,6 +69,8 @@ class Settings(BaseSettings):
     kb_agent_system_prompt_path: str | None = None
     knowledge_backend: str = "filesystem"
     knowledge_root: str | None = None
+    answer_engine_mode: str = "legacy"
+    simple_answer_max_corpus_chars: int = 50_000
     telegram_bot_token: str | None = None
     telegram_allowed_chats: str = ""
     telegram_poll_timeout_seconds: int = 30

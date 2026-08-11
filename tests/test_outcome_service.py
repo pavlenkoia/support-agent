@@ -190,7 +190,7 @@ def test_orchestrator_rejects_legacy_finalizer_without_respond() -> None:
         tool_runtime=dummy,
     )
 
-    with pytest.raises(RuntimeError, match="direct_llm.respond is required"):
+    with pytest.raises(RuntimeError, match=r"direct_llm\.respond is required"):
         orchestrator._finalize_reply(
             text="question",
             context={

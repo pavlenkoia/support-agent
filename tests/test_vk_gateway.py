@@ -13,11 +13,11 @@ from app.models.message import Message
 from app.models.outbound_transport_send import OutboundTransportSend
 from app.models.transport_event import TransportEvent
 from app.models.user import User
+from app.services.inbound_queue import InboundQueue
 from app.services.persistence import (
     activate_human_override,
     get_or_create_conversation_transport_state,
 )
-from app.services.inbound_queue import InboundQueue
 from app.services.vk_gateway import VKGatewayService
 
 

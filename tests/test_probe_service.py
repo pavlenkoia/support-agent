@@ -4,7 +4,6 @@ from fastapi.testclient import TestClient
 from sqlalchemy import text
 
 from app.api.deps import get_probe_service
-from app.core.db import Base, make_session_factory
 from app.main import app
 from app.services.probe_service import ProbeService
 from tests.test_inbound_message import make_test_routing_service

@@ -2,6 +2,8 @@
 
 ## Core runtime
 
+> The default runtime remains the legacy bounded loop. A temporary `simple_full_corpus` candidate mode routes through `SimpleAnswerEngine` for isolated parity checks only; it must not be deployed without explicit approval.
+
 This repository now targets a **bounded support-agent loop** rather than a linear `classify -> KB -> escalation` pipeline.
 
 Runtime layers:

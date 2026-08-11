@@ -199,9 +199,9 @@ def test_kb_agent_recovers_json_object_from_markdown_fence(tmp_path: Path) -> No
 
     client = RawSequentialClient(
         [
-            "```json\n{\"user_intent\":\"расписание\",\"information_needs\":[\"когда проходят прыжки\"],\"selected_source_refs\":[\"%s\"],\"reason\":\"fenced json\"}\n```" % booking,
+            f"```json\n{{\"user_intent\":\"расписание\",\"information_needs\":[\"когда проходят прыжки\"],\"selected_source_refs\":[\"{booking}\"],\"reason\":\"fenced json\"}}\n```",
             "```json\n{\"coverage_status\":\"enough\",\"missing_facts\":[],\"additional_source_refs\":[],\"reason\":\"fenced json\"}\n```",
-            "```json\n{\"grounding_status\":\"ready\",\"answer_basis\":\"Прыжки обычно по выходным.\",\"grounded_facts\":[\"Прыжки обычно по выходным.\"],\"missing_information\":[],\"cited_source_refs\":[\"%s\"],\"reason\":\"fenced json\"}\n```" % booking,
+            f"```json\n{{\"grounding_status\":\"ready\",\"answer_basis\":\"Прыжки обычно по выходным.\",\"grounded_facts\":[\"Прыжки обычно по выходным.\"],\"missing_information\":[],\"cited_source_refs\":[\"{booking}\"],\"reason\":\"fenced json\"}}\n```",
         ]
     )
     service = KBAgentService(client=client)
