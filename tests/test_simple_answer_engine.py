@@ -390,9 +390,146 @@ def test_date_observations_are_projected_before_the_one_model_call(tmp_path: Pat
     assert ToolRuntimeService().collect(text="Какие есть сертификаты?", kb_hits=[])["tool_results"] == []
 
 
+def test_month_range_period_observations_use_public_projection_without_exact_dates_or_weekend_dates(tmp_path: Path) -> None:
+    from app.services.tool_runtime import ToolRuntimeService
+
+    runtime = ToolRuntimeService()
+    collected = runtime.collect(text="Можно прыгнуть в августе?", kb_hits=[])
+    engine, client = make_engine(envelope("grounded_answer", "Можно ориентироваться на сезонный график.", [PRICE_REF]), profile_root=make_profile_root(tmp_path))
+
+    assert collected["tool_results"][0]["kind"] == "calendar_period_weekends"
+    assert collected["tool_results"][0]["summary"] == "В период в августе календарные выходные: 01.08.2026, 02.08.2026, 08.08.2026, 09.08.2026, 15.08.2026, 16.08.2026, 22.08.2026, 23.08.2026, 29.08.2026, 30.08.2026. Эти даты являются только календарными ориентирами."
+    assert collected["tool_trace"][0]["result"]["weekend_dates"] == [
+        "2026-08-01",
+        "2026-08-02",
+        "2026-08-08",
+        "2026-08-09",
+        "2026-08-15",
+        "2026-08-16",
+        "2026-08-22",
+        "2026-08-23",
+        "2026-08-29",
+        "2026-08-30",
+    ]
+
+    public = runtime.project_public_period_observation(collected["tool_results"][0])
+    assert public["kind"] == "calendar_period_public"
+    assert public["summary"] == "В период в августе"
+    assert "weekend_dates" not in public["structured"]
+
+    engine.answer(question="Можно прыгнуть в августе?", history=[], tool_observations=collected["tool_results"])
+
+    payload = json.loads(str(client.calls[0]["user_prompt"]))
+    obs = payload["tool_observations"][0]
+    assert obs["kind"] == "calendar_period_public"
+    assert obs["summary"] == "В период в августе"
+    assert obs["structured"]["original_period"] == "в августе"
+    assert obs["structured"]["start_month"] == 8
+    assert obs["structured"]["end_month"] == 8
+    assert "weekend_dates" not in obs["structured"]
+    assert "13.08" not in json.dumps(payload, ensure_ascii=False)
+    assert "2026-08" not in json.dumps(payload, ensure_ascii=False)
+
+
+def test_august_grounded_general_answer_succeeds_without_forbidden_exact_dates_for_period(tmp_path: Path) -> None:
+    from app.services.tool_runtime import ToolRuntimeService
+
+    observations = ToolRuntimeService().collect(text="Можно прыгнуть в августе?", kb_hits=[])["tool_results"]
+    engine, client = make_engine(
+        envelope("grounded_answer", "В августе обычно ориентируются на сезонный график.", [PRICE_REF], [{"source_ref": PRICE_REF, "quote": PRICE_PAGE}]),
+        profile_root=make_profile_root(tmp_path),
+    )
+
+    result = engine.answer(question="Можно прыгнуть в августе?", history=[], tool_observations=observations)
+
+    assert result["kind"] == "grounded_answer"
+    assert result["telemetry"]["contract_error"] is None
+    assert len(client.calls) == 1
+
+
+def test_public_period_observation_still_blocks_exact_dates_in_validated_customer_text(tmp_path: Path) -> None:
+    from app.services.tool_runtime import ToolRuntimeService
+
+    exact_date_quote = "Дата календарного ориентира — 01.08.2026."
+    profile_root = make_profile_root(tmp_path)
+    (profile_root / "kb" / PRICE_REF).write_text(
+        f"{PRICE_PAGE}\n{exact_date_quote}",
+        encoding="utf-8",
+    )
+    observations = ToolRuntimeService().collect(text="Можно прыгнуть в августе?", kb_hits=[])["tool_results"]
+    engine, client = make_engine(
+        envelope(
+            "grounded_answer",
+            exact_date_quote,
+            [PRICE_REF],
+            [{"source_ref": PRICE_REF, "quote": exact_date_quote}],
+        ),
+        profile_root=profile_root,
+    )
+
+    result = engine.answer(
+        question="Можно прыгнуть в августе?",
+        history=[],
+        tool_observations=observations,
+    )
+
+    assert result["kind"] == "cannot_answer"
+    assert result["response_text"] == ""
+    assert result["telemetry"]["contract_error"] == "forbidden_exact_dates_for_period"
+    assert len(client.calls) == 1
+
+
+@pytest.mark.parametrize("structured", [None, "broken", ["2026-08-01"]])
+def test_malformed_period_observation_is_still_projected_without_exact_date_leak(
+    tmp_path: Path,
+    structured: object,
+) -> None:
+    engine, client = make_engine(
+        envelope("cannot_answer", "Нет подтверждённой информации."),
+        profile_root=make_profile_root(tmp_path),
+    )
+
+    engine.answer(
+        question="Можно прыгнуть в августе?",
+        history=[],
+        tool_observations=[
+            {
+                "kind": "calendar_period_weekends",
+                "summary": "Выходные даты: 01.08.2026, 02.08.2026.",
+                "structured": structured,
+            }
+        ],
+    )
+
+    payload = json.loads(str(client.calls[0]["user_prompt"]))
+    observation = payload["tool_observations"][0]
+    assert observation["kind"] == "calendar_period_public"
+    assert observation["structured"] == {
+        "original_period": None,
+        "start_month": None,
+        "end_month": None,
+        "year": None,
+    }
+    assert "01.08.2026" not in json.dumps(observation, ensure_ascii=False)
+    assert "02.08.2026" not in json.dumps(observation, ensure_ascii=False)
+    assert len(client.calls) == 1
+
+
+def test_concrete_single_date_weekday_observation_remains_unchanged_supported(tmp_path: Path) -> None:
+    from app.services.tool_runtime import ToolRuntimeService
+
+    observations = ToolRuntimeService().collect(text="Можно ли прыгнуть 25 июня?", kb_hits=[])["tool_results"]
+    engine, client = make_engine(envelope("grounded_answer", "Дата будний день.", [PRICE_REF], [{"source_ref": PRICE_REF, "quote": PRICE_PAGE}]), profile_root=make_profile_root(tmp_path))
+
+    engine.answer(question="Можно ли прыгнуть 25 июня?", history=[], tool_observations=observations)
+
+    payload = json.loads(str(client.calls[0]["user_prompt"]))
+    assert payload["tool_observations"][0]["kind"] == "calendar_weekday"
+
+
 @pytest.mark.parametrize(
     ("question", "expected_kind"),
-    [("Можно прыгнуть завтра?", "calendar_weekday"), ("Можно прыгнуть в августе?", "calendar_period_weekends")],
+    [("Можно прыгнуть завтра?", "calendar_weekday"), ("Можно прыгнуть в августе?", "calendar_period_public")],
 )
 def test_relative_date_and_period_observations_are_projected_before_one_call(tmp_path: Path, question: str, expected_kind: str) -> None:
     from app.services.tool_runtime import ToolRuntimeService
@@ -462,3 +599,22 @@ def test_period_answer_with_forbidden_exact_dates_fails_closed(tmp_path: Path) -
     assert result["response_text"] == "Цена прыжка на 10 прыжков — 12 000 ₽."
     assert result["telemetry"]["contract_error"] is None
     assert len(client.calls) == 1
+
+
+def test_simple_engine_projects_period_public_summary_without_leaking_raw_dates(tmp_path: Path) -> None:
+    from app.services.tool_runtime import ToolRuntimeService
+
+    runtime = ToolRuntimeService()
+    collected = runtime.collect(text="Можно прыгнуть в августе?", kb_hits=[])
+
+    assert collected["tool_results"][0]["summary"] == "В период в августе календарные выходные: 01.08.2026, 02.08.2026, 08.08.2026, 09.08.2026, 15.08.2026, 16.08.2026, 22.08.2026, 23.08.2026, 29.08.2026, 30.08.2026. Эти даты являются только календарными ориентирами."
+    projected = runtime.project_public_period_observation(collected["tool_results"][0])
+    assert projected["summary"] == "В период в августе"
+    assert "2026-08-01" not in json.dumps(projected, ensure_ascii=False)
+
+    engine, client = make_engine(envelope("grounded_answer", "Можно ориентироваться на сезонный график.", [PRICE_REF]), profile_root=make_profile_root(tmp_path))
+    engine.answer(question="Можно прыгнуть в августе?", history=[], tool_observations=collected["tool_results"])
+
+    payload = json.loads(str(client.calls[0]["user_prompt"]))
+    assert payload["tool_observations"][0]["summary"] == "В период в августе"
+    assert "2026-08-01" not in json.dumps(payload, ensure_ascii=False)

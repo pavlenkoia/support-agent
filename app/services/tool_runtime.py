@@ -143,6 +143,31 @@ class ToolRuntimeService:
             "tool_trace": trace,
         }
 
+    @staticmethod
+    def project_public_period_observation(observation: dict[str, Any]) -> dict[str, Any]:
+        if not isinstance(observation, dict):
+            return observation
+        if observation.get("kind") != "calendar_period_weekends":
+            return observation
+        structured_value = observation.get("structured")
+        structured = structured_value if isinstance(structured_value, dict) else {}
+        summary = ToolRuntimeService._public_period_summary(structured)
+        return {
+            "kind": "calendar_period_public",
+            "summary": summary,
+            "structured": {
+                "original_period": structured.get("original_period"),
+                "start_month": structured.get("start_month"),
+                "end_month": structured.get("end_month"),
+                "year": structured.get("year"),
+            },
+        }
+
+    @staticmethod
+    def _public_period_summary(structured: dict[str, Any]) -> str:
+        original_period = str(structured.get("original_period") or "").strip()
+        return f"В период {original_period}" if original_period else "В период"
+
     def _extract_calendar_period(self, text: str) -> dict[str, Any] | None:
         lowered = str(text or "").lower()
         now_year = datetime.now(UTC).year

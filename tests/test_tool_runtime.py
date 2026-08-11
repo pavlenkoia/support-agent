@@ -234,6 +234,38 @@ def test_direct_llm_grounded_fallback_ignores_weekend_kb_for_office_question() -
     assert "офисе по будням" in result["response_text"]
 
 
+def test_tool_runtime_projects_public_period_metadata_without_weekend_dates_or_exact_date_list(monkeypatch) -> None:
+    monkeypatch.setattr(tool_runtime_module, "datetime", FrozenDateTime)
+    service = ToolRuntimeService()
+
+    result = service.collect(text="Можно прыгнуть в августе?", kb_hits=[])
+
+    assert result["tool_status"] == "used"
+    assert result["tool_results"][0]["kind"] == "calendar_period_weekends"
+    assert "01.08.2026" in result["tool_results"][0]["summary"]
+    assert "Эти даты являются только календарными ориентирами." in result["tool_results"][0]["summary"]
+    public = service.project_public_period_observation(result["tool_results"][0])
+    assert public["kind"] == "calendar_period_public"
+    assert public["structured"]["original_period"] == "в августе"
+    assert public["structured"]["start_month"] == 8
+    assert public["structured"]["end_month"] == 8
+    assert "weekend_dates" not in public["structured"]
+    assert "exact_dates" not in public["structured"]
+    assert "01.08.2026" not in json.dumps(public, ensure_ascii=False)
+    assert "2026-08-01" not in json.dumps(public, ensure_ascii=False)
+
+
+def test_tool_runtime_public_period_projection_preserves_single_date_weekday_observation(monkeypatch) -> None:
+    monkeypatch.setattr(tool_runtime_module, "datetime", FrozenDateTime)
+    service = ToolRuntimeService()
+
+    result = service.collect(text="Можно ли прыгнуть 25 июня?", kb_hits=[])
+
+    assert result["tool_results"][0]["kind"] == "calendar_weekday"
+    projected = service.project_public_period_observation(result["tool_results"][0])
+    assert projected == result["tool_results"][0]
+
+
 def test_ready_grounding_cannot_finish_as_clarification(monkeypatch) -> None:
     class ClarifyingClient:
         def generate(self, **kwargs):

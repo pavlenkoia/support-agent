@@ -74,6 +74,14 @@ class PolicyService:
             cleaned = f"Здравствуйте! {cleaned}"
         return cleaned[:1000]
 
+    def finalize_simple_customer_text(self, text: str, *, first_reply_in_dialogue: bool) -> str:
+        cleaned = re.sub(r"\s+", " ", str(text or "")).strip().replace("**", "").replace("__", "")
+        if not cleaned or self._INTERNAL_OUTPUT_PATTERN.search(cleaned) or any(char in cleaned for char in "[]{}"):
+            return self.render_simple_cannot_answer()
+        if first_reply_in_dialogue and not self._GREETING_PATTERN.search(cleaned):
+            cleaned = f"Здравствуйте! {cleaned}"
+        return cleaned[:1000]
+
     def render_clarification(self, question: str | None = None) -> str:
         cleaned = str(question or "").strip()
         if cleaned:

@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from app.integrations.llm.openai_compatible import LLMRecoveryExhausted
+from app.services.tool_runtime import ToolRuntimeService
 
 
 class CorpusTooLargeError(ValueError):
@@ -184,7 +185,7 @@ class SimpleAnswerEngine:
 
     @staticmethod
     def _contains_forbidden_period_dates(response_text: str, observations: list[dict[str, Any]]) -> bool:
-        if not any(item.get("kind") == "calendar_period_weekends" for item in observations):
+        if not any(item.get("kind") in {"calendar_period_weekends", "calendar_period_public"} for item in observations):
             return False
         return bool(re.search(r"\b\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?\b", response_text))
 
@@ -268,6 +269,8 @@ class SimpleAnswerEngine:
             kind = str(observation.get("kind") or "").strip()
             summary = str(observation.get("summary") or "").strip()
             structured = observation.get("structured")
-            if kind and summary:
+            if kind == "calendar_period_weekends":
+                projected.append(ToolRuntimeService.project_public_period_observation(observation))
+            elif kind and summary:
                 projected.append({"kind": kind, "summary": summary, "structured": structured if isinstance(structured, dict) else {}})
         return projected

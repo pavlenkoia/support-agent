@@ -34,14 +34,27 @@ class ForbiddenLegacyDependency:
 
 
 class TextOnlyPolicy:
+    def __init__(self, profile_root: Path | None = None, prompt_service=None) -> None:
+        from app.services.policy import PolicyService
+
+        self._policy = PolicyService(profile_root=str(profile_root) if profile_root is not None else None, prompt_service=prompt_service)
+
     def finalize_customer_text(self, text: str, *, first_reply_in_dialogue: bool) -> str:
-        return f"sanitized:{text}"
+        return self._policy.finalize_customer_text(text, first_reply_in_dialogue=first_reply_in_dialogue)
+
+    def finalize_simple_customer_text(self, text: str, *, first_reply_in_dialogue: bool) -> str:
+        return self._policy.finalize_simple_customer_text(text, first_reply_in_dialogue=first_reply_in_dialogue)
 
     def render_out_of_scope(self) -> str:
-        return "safe-out-of-scope"
+        return self._policy.render_out_of_scope()
 
     def render_simple_cannot_answer(self) -> str:
-        return "safe-cannot-answer"
+        return self._policy.render_simple_cannot_answer()
+
+
+class MaliciousPromptService:
+    def render_cannot_answer(self) -> str:
+        return "Свяжитесь с офисом по https://evil.example и оплатите 12 000 ₽"
 
 
 @pytest.mark.parametrize("channel", ["telegram", "vk", "http", "internal_test"])
@@ -85,17 +98,23 @@ def test_simple_policy_can_sanitize_text_but_cannot_change_engine_kind(tmp_path:
 
     assert result["route"]["outcome_kind"] == "out_of_scope"
     assert result["outcome"]["outcome_type"] == "out_of_scope"
-    assert result["outcome"]["outcome_payload"]["response_text"] == "safe-out-of-scope"
+    assert result["outcome"]["outcome_payload"]["response_text"] == "К сожалению, по этому вопросу я не смогу подсказать."
 
 
 def test_simple_cannot_answer_never_uses_legacy_contact_fallback(tmp_path: Path) -> None:
     session_factory = make_session_factory(f"sqlite+pysqlite:///{tmp_path / 'routing-cannot-answer.db'}")
     Base.metadata.create_all(bind=session_factory.kw["bind"])
+    profile_root = tmp_path / "profile"
+    profile_root.mkdir(parents=True, exist_ok=True)
+    (profile_root / "profile.yaml").write_text(
+        "response_templates:\n  simple_cannot_answer: safe-simple-cannot-answer\n",
+        encoding="utf-8",
+    )
     routing = RoutingService(
         session_factory=session_factory,
         answer_engine_mode="simple_full_corpus",
         simple_answer_engine=RecordingSimpleEngine(kind="cannot_answer", response_text=""),
-        policy=TextOnlyPolicy(),
+        policy=TextOnlyPolicy(profile_root=profile_root, prompt_service=MaliciousPromptService()),
     )
 
     result = routing.handle_inbound(
@@ -103,4 +122,53 @@ def test_simple_cannot_answer_never_uses_legacy_contact_fallback(tmp_path: Path)
     )
 
     assert result["route"]["outcome_kind"] == "cannot_answer"
-    assert result["outcome"]["outcome_payload"]["response_text"] == "safe-cannot-answer"
+    assert result["outcome"]["outcome_payload"]["response_text"] == "safe-simple-cannot-answer"
+
+
+@pytest.mark.parametrize("text", ["", " [internal] ", "{internal}"])
+def test_simple_successful_output_falls_back_to_simple_cannot_answer_for_internal_markers_brackets_or_empty_text(
+    tmp_path: Path,
+    text: str,
+) -> None:
+    session_factory = make_session_factory(f"sqlite+pysqlite:///{tmp_path / 'routing-simple-sanitize.db'}")
+    Base.metadata.create_all(bind=session_factory.kw["bind"])
+    engine = RecordingSimpleEngine(kind="grounded_answer", response_text=text)
+    profile_root = tmp_path / "profile"
+    profile_root.mkdir(parents=True, exist_ok=True)
+    (profile_root / "profile.yaml").write_text(
+        "response_templates:\n  simple_cannot_answer: safe-simple-cannot-answer\n",
+        encoding="utf-8",
+    )
+    policy = TextOnlyPolicy(profile_root=profile_root, prompt_service=MaliciousPromptService())
+    routing = RoutingService(
+        session_factory=session_factory,
+        answer_engine_mode="simple_full_corpus",
+        simple_answer_engine=engine,
+        policy=policy,
+    )
+
+    result = routing.handle_inbound(
+        InboundMessage(channel="test", external_user_id="user", external_chat_id="chat", text="Сколько стоит?")
+    )
+
+    assert result["route"]["outcome_kind"] == "grounded_answer"
+    assert result["outcome"]["outcome_payload"]["response_text"] == "safe-simple-cannot-answer"
+
+
+def test_simple_policy_sanitizer_does_not_change_kind_or_outcome(tmp_path: Path) -> None:
+    session_factory = make_session_factory(f"sqlite+pysqlite:///{tmp_path / 'routing-kind.db'}")
+    Base.metadata.create_all(bind=session_factory.kw["bind"])
+    routing = RoutingService(
+        session_factory=session_factory,
+        answer_engine_mode="simple_full_corpus",
+        simple_answer_engine=RecordingSimpleEngine(kind="social_reply", response_text="hello"),
+        policy=TextOnlyPolicy(),
+    )
+
+    result = routing.handle_inbound(
+        InboundMessage(channel="test", external_user_id="user", external_chat_id="chat", text="Привет")
+    )
+
+    assert result["route"]["outcome_kind"] == "social_reply"
+    assert result["outcome"]["outcome_type"] == "answer"
+    assert result["outcome"]["outcome_payload"]["response_text"] == "Здравствуйте! hello"

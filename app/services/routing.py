@@ -220,7 +220,7 @@ class RoutingService:
         elif kind == "cannot_answer":
             response_text = self.policy.render_simple_cannot_answer()
         else:
-            response_text = self.policy.finalize_customer_text(raw_text, first_reply_in_dialogue=first_reply)
+            response_text = self.policy.finalize_simple_customer_text(raw_text, first_reply_in_dialogue=first_reply)
         route = {
             "route": route_name,
             "reply": {"response_text": response_text},
