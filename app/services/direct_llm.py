@@ -651,9 +651,6 @@ This section governs only how the final customer answer is composed; it does not
         if action == "ask_clarification" and kb_status == "not_started" and self._should_try_kb_before_clarifying(text, conversation_context, profile):
             action = "read_kb"
 
-        if action == "ask_clarification" and kb_status == "found" and self._can_answer_from_found_kb_without_clarification(text, kb_hits, conversation_context):
-            action = "answer_from_kb"
-
         return {
             "action": action,
             "scope_status": scope_status,

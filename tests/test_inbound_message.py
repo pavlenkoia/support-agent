@@ -709,7 +709,7 @@ def test_direct_llm_prefers_read_kb_over_clarification_for_broad_in_domain_opene
     assert result["reason"] == "too_broad"
 
 
-def test_direct_llm_prefers_answer_from_kb_over_clarification_when_kb_is_already_found() -> None:
+def test_direct_llm_keeps_planner_clarification_when_kb_is_already_found() -> None:
     class ClarifyClient:
         def generate(self, **kwargs):
             return json.dumps({
@@ -734,8 +734,56 @@ def test_direct_llm_prefers_answer_from_kb_over_clarification_when_kb_is_already
         tool_observations=[],
     )
 
-    assert result["action"] == "answer_from_kb"
+    assert result["action"] == "ask_clarification"
     assert result["reason"] == "too_broad_after_kb"
+    assert result["clarification_question"] == "Что именно вас интересует?"
+
+
+def test_ambiguous_service_interest_keeps_planner_clarification_after_kb_lookup() -> None:
+    class ClarifyClient:
+        def generate(self, **kwargs):
+            return json.dumps({
+                "action": "ask_clarification",
+                "scope_status": "in_scope",
+                "confidence": 0.95,
+                "reason": "service_is_ambiguous",
+                "clarification_question": (
+                    "Вас интересуют прыжки с парашютом, полёты на самолёте "
+                    "или подарочный сертификат?"
+                ),
+            }, ensure_ascii=False)
+
+    service = DirectLLMService(client=ClarifyClient())
+    result = service.assess_request(
+        "Здравствуйте! Меня заинтересовала эта услуга.",
+        conversation_context={
+            "user_message": "Здравствуйте! Меня заинтересовала эта услуга.",
+            "recent_messages": [],
+        },
+        retrieval={
+            "kb_status": "found",
+            "kb_snippets": [
+                {
+                    "source_ref": "compiled/concepts/skydiving-services.md",
+                    "text": "Доступны самостоятельные прыжки и тандем-прыжки.",
+                },
+                {
+                    "source_ref": "compiled/concepts/flight-services.md",
+                    "text": "Доступны прогулочные полёты на самолётах.",
+                },
+                {
+                    "source_ref": "compiled/concepts/certificates.md",
+                    "text": "Можно приобрести подарочный сертификат.",
+                },
+            ],
+        },
+        tool_observations=[],
+    )
+
+    assert result["action"] == "ask_clarification"
+    assert result["clarification_question"] == (
+        "Вас интересуют прыжки с парашютом, полёты на самолёте или подарочный сертификат?"
+    )
 
 
 def test_social_reply_bypasses_kb_and_finishes_as_customer_answer() -> None:
