@@ -247,7 +247,7 @@ ANSWER_ENGINE_MODE=legacy|simple_full_corpus
 
 ## 13. Не входит в изменение
 
-- переписывание Telegram/VK transport;
+- переписывание normal Telegram/VK transport flow; корректировка ограничена durable recovery уже сохранённого Telegram `retry_pending`;
 - новая transport queue;
 - изменение схемы БД без доказанной необходимости;
 - изменение human override;
