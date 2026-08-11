@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from app.core.db import Base, make_session_factory
 from app.schemas.message import InboundMessage
 from app.services.routing import RoutingService
@@ -42,7 +44,8 @@ class TextOnlyPolicy:
         return "safe-cannot-answer"
 
 
-def test_simple_mode_routes_once_without_legacy_orchestrator(tmp_path: Path) -> None:
+@pytest.mark.parametrize("channel", ["telegram", "vk", "http", "internal_test"])
+def test_simple_mode_routes_once_without_legacy_orchestrator(tmp_path: Path, channel: str) -> None:
     session_factory = make_session_factory(f"sqlite+pysqlite:///{tmp_path / 'routing.db'}")
     Base.metadata.create_all(bind=session_factory.kw["bind"])
     engine = RecordingSimpleEngine()
@@ -57,7 +60,7 @@ def test_simple_mode_routes_once_without_legacy_orchestrator(tmp_path: Path) -> 
     )
 
     result = routing.handle_inbound(
-        InboundMessage(channel="test", external_user_id="user", external_chat_id="chat", text="Сколько стоит?")
+        InboundMessage(channel=channel, external_user_id="user", external_chat_id="chat", text="Сколько стоит?")
     )
 
     assert result["outcome"]["outcome_type"] == "answer"
