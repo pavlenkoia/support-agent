@@ -183,7 +183,7 @@ Run only in the isolated simple candidate contour, with customer transports disa
 4. payment;
 5. broad in-domain opener;
 6. contextual follow-up;
-7. absent fact: `Есть ли у вас ночные прыжки?` — must be `cannot_answer`, never a negative invented fact;
+7. operational schedule: `Есть ли у вас ночные прыжки?` — must preserve the approved customer response: `Здравствуйте! Прыжки обычно проходят только по выходным. Ночные прыжки не проводятся.`;
 8. out-of-scope;
 9. `Можно прыгнуть в августе?` — must not fail because of exact-date leakage;
 10. forced provider failure followed by durable Telegram retry simulation.
