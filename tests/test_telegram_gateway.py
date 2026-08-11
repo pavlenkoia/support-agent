@@ -4,6 +4,8 @@ from pathlib import Path
 
 from sqlalchemy import text
 
+from app.models.transport_event import TransportEvent
+from app.schemas.message import InboundMessage
 from app.services.telegram_gateway import TelegramGatewayService
 from tests.test_inbound_message import make_test_routing_service
 
@@ -153,14 +155,12 @@ def test_telegram_gateway_handles_new_command() -> None:
 def test_telegram_gateway_persists_one_combined_user_and_assistant_message(tmp_path: Path) -> None:
     sender = RecordingSender()
     routing = make_test_routing_service(tmp_path)
-    routing.direct_llm.answer = lambda text, kb_hits, *, allow_general_without_kb=False, conversation_context=None: {
-        "direct_status": "ready",
-        "response_text": "Подготовка обязательна даже для первого прыжка.",
-        "used_kb_sources": [hit["source_ref"] for hit in kb_hits],
-        "confidence": 0.93,
-        "decision": "answer",
-        "reason": "grounded_answer",
-    }
+    routing.answer_engine_mode = "simple_full_corpus"
+    routing.simple_answer_engine = type(
+        "Engine",
+        (),
+        {"answer": lambda self, **kwargs: {"kind": "grounded_answer", "response_text": "Подготовка обязательна даже для первого прыжка.", "source_refs": ["compiled/concepts/pricing.md"], "telemetry": {"answer_engine": "simple_full_corpus", "logical_llm_call_count": 1, "provider_attempt_count": 1}}},
+    )()
     service = TelegramGatewayService(routing=routing, sender=sender)
 
     for update_id, message_id, text_value in [
@@ -202,4 +202,177 @@ def test_telegram_gateway_polling_handler_returns_without_typing_or_delivery(tmp
 
     assert result["queued"] is True
     assert time.time() - started < 0.2
+    assert sender.calls == []
+
+
+class RetryFailureSender(RecordingSender):
+    def send_message(self, chat_id: str, text: str) -> dict:
+        self.calls.append(("message", chat_id, text))
+        return {"ok": False, "sent": False, "error": "temporary_failure"}
+
+
+class RetryRouting:
+    def __init__(self, session_factory) -> None:
+        self.session_factory = session_factory
+        self.calls = 0
+
+    def handle_inbound(self, payload, *, persist_inbound=True) -> dict:
+        self.calls += 1
+        return {
+            "case": {"case_status": "open", "case_id": 1},
+            "route": {"route": "retry_pending"},
+            "outcome": {
+                "outcome_type": "retry_pending",
+                "outcome_status": "queued",
+                "outcome_payload": {"response_text": ""},
+            },
+        }
+
+    def persist_inbound_message(self, case_id: int, payload) -> None:
+        from app.services.persistence import persist_inbound_message
+
+        with self.session_factory() as session:
+            persist_inbound_message(session, case_id, payload)
+            session.commit()
+
+    def record_outbound_message(self, case_id: int, text: str) -> None:
+        from app.services.persistence import persist_outbound_message
+
+        with self.session_factory() as session:
+            persist_outbound_message(session, case_id, text)
+            session.commit()
+
+
+def test_telegram_gateway_provider_failure_persists_retry_pending_raw_event(tmp_path: Path) -> None:
+    sender = RetryFailureSender()
+    routing = make_test_routing_service(tmp_path)
+    service = TelegramGatewayService(routing=routing, sender=sender)
+    inbound = InboundMessage(
+        channel="telegram",
+        external_user_id="777",
+        external_chat_id="12345",
+        text="проверка",
+        external_message_id="11",
+        external_event_type="message",
+        external_event_id="telegram:message:12345:11",
+        raw_event={"message": {"message_id": 11, "text": "проверка", "chat": {"id": 12345}, "from": {"id": 777}}},
+    )
+    service._mark_retry_pending(inbound, "temporary_failure")
+    with routing.session_factory() as session:
+        event = session.query(TransportEvent).filter(TransportEvent.dedupe_key == "telegram:message:12345:11").one()
+        assert event.status == "retry_pending"
+        assert event.retry_attempts >= 1
+        assert event.available_at is not None
+        assert event.payload_json["message"]["text"] == "проверка"
+    assert sender.calls == []
+
+
+def test_telegram_gateway_retry_pending_uses_future_backoff_and_exhausts_to_terminal_status(tmp_path: Path) -> None:
+    sender = RetryFailureSender()
+    routing = make_test_routing_service(tmp_path)
+    service = TelegramGatewayService(routing=routing, sender=sender)
+    inbound = InboundMessage(
+        channel="telegram",
+        external_user_id="777",
+        external_chat_id="12345",
+        text="проверка",
+        external_message_id="12",
+        external_event_type="message",
+        external_event_id="telegram:message:12345:12",
+        received_at=datetime.now(UTC),
+        raw_event={"message": {"message_id": 12, "text": "проверка", "chat": {"id": 12345}, "from": {"id": 777}}},
+    )
+    service._mark_retry_pending(inbound, "temporary_failure")
+
+    with routing.session_factory() as session:
+        event = session.query(TransportEvent).filter(TransportEvent.dedupe_key == "telegram:message:12345:12").one()
+        first_available = event.available_at
+        first_attempts = event.retry_attempts
+
+    assert service._normalized_dt(first_available) > service._normalized_dt(inbound.received_at)
+    assert first_attempts == 1
+
+    service.process_due_retries(now=first_available - timedelta(milliseconds=1))
+    with routing.session_factory() as session:
+        event = session.query(TransportEvent).filter(TransportEvent.dedupe_key == "telegram:message:12345:12").one()
+        assert event.status == "retry_pending"
+        assert event.retry_attempts == 1
+
+
+def test_telegram_gateway_restart_retries_due_transport_event_without_queue_state(tmp_path: Path) -> None:
+    sender = RecordingSender()
+    routing = make_test_routing_service(tmp_path)
+    service = TelegramGatewayService(routing=routing, sender=sender)
+    inbound = InboundMessage(
+        channel="telegram",
+        external_user_id="777",
+        external_chat_id="12345",
+        text="проверка",
+        external_message_id="13",
+        external_event_type="message",
+        external_event_id="telegram:message:12345:13",
+        received_at=datetime.now(UTC),
+        raw_event={"message": {"message_id": 13, "text": "проверка", "chat": {"id": 12345}, "from": {"id": 777}}},
+    )
+    service._mark_retry_pending(inbound, "temporary_failure")
+
+    processed = service.process_due_retries(now=datetime.now(UTC) + timedelta(days=1))
+
+    assert processed == 1
+    assert [call for call in sender.calls if call[0] == "message"]
+
+
+def test_telegram_gateway_suppresses_stale_retry_when_newer_inbound_exists(tmp_path: Path) -> None:
+    sender = RetryFailureSender()
+    routing = make_test_routing_service(tmp_path)
+    service = TelegramGatewayService(routing=routing, sender=sender)
+    first = InboundMessage(
+        channel="telegram",
+        external_user_id="777",
+        external_chat_id="12345",
+        text="первый",
+        external_message_id="14",
+        external_event_type="message",
+        external_event_id="telegram:message:12345:14",
+        received_at=datetime.now(UTC),
+        raw_event={"message": {"message_id": 14, "text": "первый", "chat": {"id": 12345}, "from": {"id": 777}}},
+    )
+    service._mark_retry_pending(first, "temporary_failure")
+    service.handle_update({"update_id": 15, "message": {"message_id": 15, "text": "второй", "chat": {"id": 12345}, "from": {"id": 777}}})
+
+    processed = service.process_due_retries(now=datetime.now(UTC) + timedelta(days=1))
+
+    assert processed == 1
+    assert sender.calls == []
+
+
+def test_telegram_gateway_suppresses_stale_retry_when_human_override_active(tmp_path: Path) -> None:
+    sender = RetryFailureSender()
+    routing = make_test_routing_service(tmp_path)
+    service = TelegramGatewayService(routing=routing, sender=sender)
+    inbound = InboundMessage(
+        channel="telegram",
+        external_user_id="777",
+        external_chat_id="12345",
+        text="проверка",
+        external_message_id="16",
+        external_event_type="message",
+        external_event_id="telegram:message:12345:16",
+        received_at=datetime.now(UTC),
+        raw_event={"message": {"message_id": 16, "text": "проверка", "chat": {"id": 12345}, "from": {"id": 777}}},
+    )
+    service._mark_retry_pending(inbound, "temporary_failure")
+    with routing.session_factory() as session:
+        from app.services.case_resolution import ensure_conversation
+        from app.services.persistence import (
+            activate_human_override,
+            get_or_create_conversation_transport_state,
+        )
+
+        conversation = ensure_conversation(session, channel="telegram", external_chat_id="12345")
+        state = get_or_create_conversation_transport_state(session, conversation_id=conversation.id, platform="telegram")
+        activate_human_override(session, state, silence_seconds=3600)
+        session.commit()
+
+    assert service.process_due_retries(now=datetime.now(UTC) + timedelta(minutes=1)) == 1
     assert sender.calls == []

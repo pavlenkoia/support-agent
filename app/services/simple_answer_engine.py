@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from app.integrations.llm.openai_compatible import LLMRecoveryExhausted
+from app.services.tool_runtime import ToolRuntimeService
 
 
 class CorpusTooLargeError(ValueError):
@@ -71,6 +72,8 @@ class SimpleAnswerEngine:
                     "kind": "grounded_answer|social_reply|clarification_requested|cannot_answer|out_of_scope",
                     "response_text": "string",
                     "source_refs": ["compiled path"],
+                    "evidence": [{"source_ref": "compiled path", "quote": "exact source substring"}],
+                    "grounded_answer": "Use exact quotes only; response_text must be built exclusively from exact source substrings copied from evidence.",
                 },
                 "question": packet["question"],
                 "history": packet["history"],
@@ -98,32 +101,75 @@ class SimpleAnswerEngine:
         try:
             parsed = self._parse_json_object(raw)
             kind = str(parsed["kind"]).strip()
-            response_text = str(parsed["response_text"]).strip()
+            response_value = parsed["response_text"]
+            if not isinstance(response_value, str):
+                raise ValueError("invalid_required_fields")
+            response_text = response_value.strip()
             source_refs = parsed["source_refs"]
+            evidence = parsed.get("evidence")
             if kind not in {"grounded_answer", "social_reply", "clarification_requested", "cannot_answer", "out_of_scope"}:
                 raise ValueError("invalid_kind")
-            if (kind != "out_of_scope" and not response_text) or not isinstance(source_refs, list) or not all(
+            if (kind not in {"grounded_answer", "out_of_scope"} and not response_text) or not isinstance(source_refs, list) or not all(
                 isinstance(ref, str) for ref in source_refs
             ):
                 raise ValueError("invalid_required_fields")
-            known_refs = {page["source_ref"] for page in packet["corpus"]["pages"]}
-            if kind == "grounded_answer" and (not source_refs or not set(source_refs).issubset(known_refs)):
-                telemetry["contract_error"] = "invalid_grounded_source_refs"
-                return self._result("cannot_answer", "", [], telemetry)
-            if kind != "grounded_answer" and source_refs:
-                telemetry["contract_error"] = "unexpected_source_refs"
-                return self._result("cannot_answer", "", [], telemetry)
+            if kind == "grounded_answer":
+                source_refs, response_text = self._finalize_grounded_answer(parsed, packet)
+            else:
+                if evidence not in (None, []):
+                    telemetry["contract_error"] = "unexpected_evidence"
+                    return self._result("cannot_answer", "", [], telemetry)
+                if source_refs:
+                    telemetry["contract_error"] = "unexpected_source_refs"
+                    return self._result("cannot_answer", "", [], telemetry)
             if self._contains_forbidden_period_dates(response_text, packet["tool_observations"]):
                 telemetry["contract_error"] = "forbidden_exact_dates_for_period"
                 return self._result("cannot_answer", "", [], telemetry)
             return self._result(kind, response_text, source_refs, telemetry)
-        except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        except ValueError as exc:
+            telemetry["contract_error"] = str(exc)
+            return self._result("cannot_answer", "", [], telemetry)
+        except (KeyError, TypeError, json.JSONDecodeError) as exc:
             telemetry["contract_error"] = f"invalid_envelope:{type(exc).__name__}"
             return self._result("cannot_answer", "", [], telemetry)
 
     @staticmethod
     def _result(kind: str, response_text: str, source_refs: list[str], telemetry: dict[str, Any]) -> dict[str, Any]:
         return {"kind": kind, "response_text": response_text, "source_refs": source_refs, "telemetry": telemetry}
+
+    def _finalize_grounded_answer(self, parsed: dict[str, Any], packet: dict[str, Any]) -> tuple[list[str], str]:
+        evidence = parsed.get("evidence")
+        if not isinstance(evidence, list) or not evidence or len(evidence) > 3:
+            raise ValueError("invalid_evidence_count")
+        pages_by_ref = {page["source_ref"]: page for page in packet["corpus"]["pages"]}
+        validated_quotes: list[str] = []
+        normalized_refs: list[str] = []
+        seen_quotes: set[str] = set()
+        for item in evidence:
+            if not isinstance(item, dict):
+                raise ValueError("invalid_evidence_item")
+            source_ref_value = item.get("source_ref")
+            quote_value = item.get("quote")
+            if not isinstance(source_ref_value, str) or not isinstance(quote_value, str):
+                raise ValueError("invalid_evidence_types")
+            source_ref = source_ref_value.strip()
+            quote = quote_value.strip()
+            if not source_ref or source_ref not in pages_by_ref:
+                raise ValueError("invalid_evidence_source_ref")
+            if not quote or quote not in pages_by_ref[source_ref]["content"]:
+                raise ValueError("invalid_evidence_quote")
+            if quote not in seen_quotes:
+                seen_quotes.add(quote)
+                validated_quotes.append(quote)
+            if source_ref not in normalized_refs:
+                normalized_refs.append(source_ref)
+        model_refs = parsed.get("source_refs")
+        if not isinstance(model_refs, list) or any(not isinstance(ref, str) for ref in model_refs):
+            raise ValueError("inconsistent_source_refs")
+        model_refs = [ref.strip() for ref in model_refs]
+        if any(not ref for ref in model_refs) or set(model_refs) != set(normalized_refs):
+            raise ValueError("inconsistent_source_refs")
+        return normalized_refs, " ".join(validated_quotes)
 
     def _provider_telemetry(self) -> dict[str, Any]:
         info = self.client.get_last_call_info() if hasattr(self.client, "get_last_call_info") else {}
@@ -139,7 +185,7 @@ class SimpleAnswerEngine:
 
     @staticmethod
     def _contains_forbidden_period_dates(response_text: str, observations: list[dict[str, Any]]) -> bool:
-        if not any(item.get("kind") == "calendar_period_weekends" for item in observations):
+        if not any(item.get("kind") in {"calendar_period_weekends", "calendar_period_public"} for item in observations):
             return False
         return bool(re.search(r"\b\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?\b", response_text))
 
@@ -223,6 +269,8 @@ class SimpleAnswerEngine:
             kind = str(observation.get("kind") or "").strip()
             summary = str(observation.get("summary") or "").strip()
             structured = observation.get("structured")
-            if kind and summary:
+            if kind == "calendar_period_weekends":
+                projected.append(ToolRuntimeService.project_public_period_observation(observation))
+            elif kind and summary:
                 projected.append({"kind": kind, "summary": summary, "structured": structured if isinstance(structured, dict) else {}})
         return projected

@@ -204,3 +204,65 @@ def test_probe_api_lists_and_filters_sessions_by_db_markers(tmp_path: Path) -> N
         assert second_session in resolved_ids
     finally:
         app.dependency_overrides.clear()
+
+
+class TraceFieldRouting:
+    def __init__(self, routing) -> None:
+        self.routing = routing
+
+    def handle_inbound(self, payload):
+        result = self.routing.handle_inbound(payload)
+        result["route"]["outcome_kind"] = "grounded_answer"
+        return result
+
+    def record_outbound_message(self, case_id: int, text: str) -> None:
+        self.routing.record_outbound_message(case_id, text)
+
+    @property
+    def session_factory(self):
+        return self.routing.session_factory
+
+
+def test_probe_trace_returns_persisted_route_observability_fields(tmp_path: Path) -> None:
+    class TraceEngine:
+        def answer(self, **kwargs: object) -> dict:
+            return {
+                "kind": "grounded_answer",
+                "response_text": "Подтверждённый ответ.",
+                "source_refs": ["compiled/concepts/pricing.md"],
+                "telemetry": {
+                    "answer_engine": "simple_full_corpus",
+                    "logical_llm_call_count": 1,
+                    "provider_attempt_count": 1,
+                },
+            }
+
+    routing = make_test_routing_service(tmp_path)
+    routing.answer_engine_mode = "simple_full_corpus"
+    routing.simple_answer_engine = TraceEngine()  # type: ignore[assignment]
+    service = make_probe_service(tmp_path, routing=routing)
+    session_id = service.start_session(scenario_name="trace-fields", requested_by="igor")["session_id"]
+    service.send_message(session_id, "Сколько стоят прыжки?")
+
+    trace = service.get_trace(session_id)
+    app.dependency_overrides[get_probe_service] = lambda: service
+    try:
+        response = client.get(f"/api/internal/probe/sessions/{session_id}/trace")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert trace["events"]
+    selected = [item for item in trace["events"] if item["event_type"] == "response_strategy_selected"]
+    processed = [item for item in trace["events"] if item["event_type"] == "inbound_processed"]
+    assert selected and processed
+    assert selected[0]["payload"]["response_strategy"]
+    assert selected[0]["payload"]["outcome_kind"] == "grounded_answer"
+    assert selected[0]["payload"]["source_refs"] == ["compiled/concepts/pricing.md"]
+    assert selected[0]["payload"]["logical_llm_call_count"] == 1
+    assert selected[0]["payload"]["provider_attempt_count"] == 1
+    assert processed[0]["payload"]["outcome_kind"] == "grounded_answer"
+    assert processed[0]["payload"]["source_refs"] == ["compiled/concepts/pricing.md"]
+    assert processed[0]["payload"]["logical_llm_call_count"] == 1
+    assert processed[0]["payload"]["provider_attempt_count"] == 1
+    assert response.status_code == 200
+    assert response.json()["events"]

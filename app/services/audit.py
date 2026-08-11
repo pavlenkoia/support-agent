@@ -26,5 +26,9 @@ def build_audit_event(
         "kb_skip_reason": retrieval.get("kb_skip_reason"),
         "outcome_type": outcome["outcome_type"],
         "outcome_status": outcome["outcome_status"],
+        "outcome_kind": route.get("outcome_kind"),
+        "source_refs": route.get("source_refs", []),
+        "logical_llm_call_count": response_strategy.get("logical_llm_call_count"),
+        "provider_attempt_count": response_strategy.get("provider_attempt_count"),
         "timestamp": datetime.now(UTC).isoformat(),
     }
