@@ -66,6 +66,41 @@ def test_ready_grounding_renderer_separates_unpunctuated_facts() -> None:
     )
 
 
+def test_clarification_finalizer_receives_generic_intent_without_kb_evidence(monkeypatch) -> None:
+    class ClarificationClient(BaseLLMClient):
+        def __init__(self) -> None:
+            self.payload: dict | None = None
+
+        def generate(self, **kwargs):
+            self.payload = json.loads(kwargs["user_prompt"])
+            return json.dumps(
+                {
+                    "route": "clarification_requested",
+                    "response_text": "Какая услуга вас заинтересовала?",
+                    "confidence": 0.9,
+                    "reason": "ambiguous_service_interest",
+                },
+                ensure_ascii=False,
+            )
+
+    client = ClarificationClient()
+    monkeypatch.setattr(direct_llm_module.settings, "direct_llm_provider", "mistral")
+
+    result = DirectLLMService(client=client).respond(
+        "Здравствуйте! Меня заинтересовала эта услуга.",
+        {"kb_status": "not_started", "grounding_status": "not_found"},
+        knowledge_mode="prompt_only",
+        response_intent="clarification",
+    )
+
+    assert result["route"] == "clarification_requested"
+    assert result["response_text"] == "Какая услуга вас заинтересовала?"
+    assert client.payload is not None
+    assert client.payload["knowledge_mode"] == "prompt_only"
+    assert client.payload["response_intent"] == "clarification"
+    assert client.payload["grounding_evidence"] == {"answer_basis": "", "facts": []}
+
+
 def test_finalizer_payload_is_allowlisted_and_excludes_internal_reasoning(monkeypatch) -> None:
     class CapturingClient(BaseLLMClient):
         def __init__(self) -> None:
@@ -127,6 +162,7 @@ def test_finalizer_payload_is_allowlisted_and_excludes_internal_reasoning(monkey
 
     assert client.payload is not None
     assert client.payload["knowledge_mode"] == "kb_grounded"
+    assert client.payload["response_intent"] == "answer"
     assert client.payload["conversation"] == [
         {"role": "user", "content": "Здравствуйте"},
         {"role": "assistant", "content": "Здравствуйте!"},

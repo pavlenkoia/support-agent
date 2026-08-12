@@ -323,13 +323,27 @@ class RoutingService:
         elif grounding_status != "ready":
             needs_customer_clarification = kb_result.get("needs_customer_clarification") is True
             if first_reply and needs_customer_clarification:
-                final_result = {
-                    "route": "clarification_requested",
-                    "response_text": self.policy.render_clarification(),
-                    "confidence": 0.0,
-                    "reason": "first_reply_needs_service_clarification",
-                    "llm_trace": [],
-                }
+                final_result = self.direct_llm.respond(
+                    payload.text,
+                    {
+                        "kb_status": "not_started",
+                        "grounding_status": "not_found",
+                        "answer_context": [],
+                        "grounded_facts": [],
+                        "answer_basis": "",
+                        "source_refs": [],
+                    },
+                    knowledge_mode="prompt_only",
+                    conversation_context=context,
+                    tool_observations=tool_result["tool_results"],
+                    first_reply_in_dialogue=first_reply,
+                    response_intent="clarification",
+                )
+                if final_result.get("route") == "retry_pending":
+                    final_result["reason"] = "clarification_finalizer_retry_pending"
+                else:
+                    final_result["route"] = "clarification_requested"
+                    final_result["reason"] = "first_reply_needs_service_clarification"
             else:
                 final_result = {
                     "route": "cannot_answer",

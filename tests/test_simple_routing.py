@@ -96,14 +96,21 @@ class RecordingWikiReader:
 
 
 class RecordingGroundedFinalizer:
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        route: str = "answer",
+        response_text: str = "Здравствуйте! Заполните форму записи на тандем.",
+    ) -> None:
         self.calls: list[dict] = []
+        self.route = route
+        self.response_text = response_text
 
     def respond(self, text: str, kb_result: dict, **kwargs: object) -> dict:
         self.calls.append({"text": text, "kb_result": kb_result, **kwargs})
         return {
-            "route": "answer",
-            "response_text": "Здравствуйте! Заполните форму записи на тандем.",
+            "route": self.route,
+            "response_text": self.response_text,
             "confidence": 0.95,
             "reason": "ready_grounding",
             "llm_trace": [{"role": "direct_llm", "step": "final_response"}],
@@ -205,7 +212,10 @@ def test_simple_llm_wiki_mode_uses_catalog_navigation_selected_pages_and_grounde
 def test_simple_llm_wiki_first_reply_with_selected_pages_asks_clarification_instead_of_refusal(tmp_path: Path) -> None:
     session_factory = make_session_factory(f"sqlite+pysqlite:///{tmp_path / 'simple-llm-wiki-no-answer.db'}")
     Base.metadata.create_all(bind=session_factory.kw["bind"])
-    finalizer = RecordingGroundedFinalizer()
+    finalizer = RecordingGroundedFinalizer(
+        route="clarification_requested",
+        response_text="Здравствуйте! Какая услуга вас заинтересовала?",
+    )
     routing = RoutingService(
         session_factory=session_factory,
         answer_engine_mode="simple_llm_wiki",
@@ -228,8 +238,12 @@ def test_simple_llm_wiki_first_reply_with_selected_pages_asks_clarification_inst
     )
 
     assert result["route"]["route"] == "clarification_requested"
-    assert result["outcome"]["outcome_payload"]["response_text"] == "Здравствуйте! Уточните, пожалуйста, ваш вопрос чуть точнее."
-    assert finalizer.calls == []
+    assert result["outcome"]["outcome_payload"]["response_text"] == "Здравствуйте! Какая услуга вас заинтересовала?"
+    assert len(finalizer.calls) == 1
+    assert finalizer.calls[0]["text"] == "Здравствуйте! Меня заинтересовала эта услуга."
+    assert finalizer.calls[0]["knowledge_mode"] == "prompt_only"
+    assert finalizer.calls[0]["response_intent"] == "clarification"
+    assert finalizer.calls[0]["kb_result"]["grounded_facts"] == []
 
 
 def test_simple_llm_wiki_selected_pages_without_missing_customer_detail_stays_cannot_answer(tmp_path: Path) -> None:

@@ -75,10 +75,13 @@ class DirectLLMService:
         conversation_context: dict | None = None,
         tool_observations: list[dict] | None = None,
         first_reply_in_dialogue: bool = False,
+        response_intent: str = "answer",
     ) -> dict:
         self._reset_llm_trace()
         if knowledge_mode not in {"prompt_only", "kb_grounded"}:
             raise ValueError(f"unsupported finalization knowledge_mode: {knowledge_mode}")
+        if response_intent not in {"answer", "clarification"}:
+            raise ValueError(f"unsupported finalization response_intent: {response_intent}")
         tool_observations = tool_observations or []
         fallback_text = self.prompt_service.render_cannot_answer()
         system_prompt = self._build_finalization_system_prompt(
@@ -114,6 +117,7 @@ class DirectLLMService:
             {
                 "task": "Прими клиентское решение по вопросу и сформулируй итоговый ответ только из подтверждённых доказательств.",
                 "knowledge_mode": knowledge_mode,
+                "response_intent": response_intent,
                 "required_json_schema": {
                     "route": "answer|cannot_answer|out_of_scope|clarification_requested",
                     "response_text": "string",
@@ -139,7 +143,8 @@ class DirectLLMService:
                     "Не добавляй подтверждённый факт только потому, что он присутствует в grounding_evidence; исключай всё, что не нужно для ответа на текущий вопрос.",
                     "Не добавляй новые факты и не показывай внутренний процесс, инструменты, источники или причины выбора ответа.",
                     "Если клиент прямо спрашивает «почему», объясни результат только подтверждёнными фактами.",
-                    "Если доказательств недостаточно для уверенного решения, используй обязательный ответ при отсутствии информации.",
+                    "Если evidence недостаточно для прямого ответа и response_intent=clarification, задай один естественный, конкретный и полезный уточняющий вопрос по текущей реплике; не говори, что клиент задал вопрос, если вопроса не было.",
+                    "Если evidence недостаточно для уверенного решения и response_intent=answer, используй обязательный ответ при отсутствии информации.",
                 ],
             },
             ensure_ascii=False,
