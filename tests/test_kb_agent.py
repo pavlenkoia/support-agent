@@ -397,5 +397,7 @@ def test_kb_agent_minimal_extraction_schema_allows_missing_missing_information(t
 
     payload = json.loads(client.calls[0]["user_prompt"])
     assert "missing_information" not in payload["required_json_schema"]
+    assert "needs_customer_clarification" in payload["required_json_schema"]
     assert result["missing_information"] == []
+    assert result["needs_customer_clarification"] is False
     assert result["grounded_facts"] == ["Прыжки обычно по выходным."]

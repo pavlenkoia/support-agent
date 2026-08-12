@@ -59,9 +59,17 @@ class RecordingCatalogRetrieval:
 
 
 class RecordingWikiReader:
-    def __init__(self, *, grounding_status: str = "ready") -> None:
+    def __init__(
+        self,
+        *,
+        grounding_status: str = "ready",
+        missing_information: list[str] | None = None,
+        needs_customer_clarification: bool = False,
+    ) -> None:
         self.calls: list[dict] = []
         self.grounding_status = grounding_status
+        self.missing_information = missing_information or []
+        self.needs_customer_clarification = needs_customer_clarification
 
     def read(self, text: str, kb_hits: list[dict], **kwargs: object) -> dict:
         self.calls.append({"text": text, "kb_hits": kb_hits, **kwargs})
@@ -72,6 +80,8 @@ class RecordingWikiReader:
             "answer_context": [{"source_ref": "compiled/concepts/booking.md", "text": "Тандем: форма записи."}],
             "grounded_facts": ["Запись на тандем доступна через форму."],
             "answer_basis": "Предложить форму записи на тандем.",
+            "missing_information": self.missing_information,
+            "needs_customer_clarification": self.needs_customer_clarification,
             "source_refs": ["compiled/concepts/booking.md"],
             "trace": {
                 "kb_architecture": "llm_wiki",
@@ -202,7 +212,11 @@ def test_simple_llm_wiki_first_reply_with_selected_pages_asks_clarification_inst
         knowledge_backend="filesystem",
         knowledge_root="/tmp/okf-wiki",
         retrieval=RecordingCatalogRetrieval(),
-        kb_agent=RecordingWikiReader(grounding_status="not_found"),
+        kb_agent=RecordingWikiReader(
+            grounding_status="not_found",
+            missing_information=["какая именно услуга интересует"],
+            needs_customer_clarification=True,
+        ),
         direct_llm=finalizer,
         orchestrator=ForbiddenLegacyOwner(),
         summary_service=ForbiddenLegacyDependency(),
@@ -216,6 +230,52 @@ def test_simple_llm_wiki_first_reply_with_selected_pages_asks_clarification_inst
     assert result["route"]["route"] == "clarification_requested"
     assert result["outcome"]["outcome_payload"]["response_text"] == "Здравствуйте! Уточните, пожалуйста, ваш вопрос чуть точнее."
     assert finalizer.calls == []
+
+
+def test_simple_llm_wiki_selected_pages_without_missing_customer_detail_stays_cannot_answer(tmp_path: Path) -> None:
+    session_factory = make_session_factory(f"sqlite+pysqlite:///{tmp_path / 'simple-llm-wiki-selected-but-not-ambiguous.db'}")
+    Base.metadata.create_all(bind=session_factory.kw["bind"])
+    routing = RoutingService(
+        session_factory=session_factory,
+        answer_engine_mode="simple_llm_wiki",
+        knowledge_backend="filesystem",
+        knowledge_root="/tmp/okf-wiki",
+        retrieval=RecordingCatalogRetrieval(),
+        kb_agent=RecordingWikiReader(grounding_status="not_found"),
+        direct_llm=RecordingGroundedFinalizer(),
+        orchestrator=ForbiddenLegacyOwner(),
+        summary_service=ForbiddenLegacyDependency(),
+        policy=TextOnlyPolicy(),
+    )
+
+    result = routing.handle_inbound(
+        InboundMessage(channel="telegram", external_user_id="igor", external_chat_id="igor", text="Какая гарантия на неизвестное оборудование?")
+    )
+
+    assert result["route"]["route"] == "cannot_answer"
+
+
+def test_simple_llm_wiki_missing_kb_fact_without_explicit_ambiguity_stays_cannot_answer(tmp_path: Path) -> None:
+    session_factory = make_session_factory(f"sqlite+pysqlite:///{tmp_path / 'simple-llm-wiki-missing-fact.db'}")
+    Base.metadata.create_all(bind=session_factory.kw["bind"])
+    routing = RoutingService(
+        session_factory=session_factory,
+        answer_engine_mode="simple_llm_wiki",
+        knowledge_backend="filesystem",
+        knowledge_root="/tmp/okf-wiki",
+        retrieval=RecordingCatalogRetrieval(),
+        kb_agent=RecordingWikiReader(grounding_status="not_found", missing_information=["гарантийный срок"]),
+        direct_llm=RecordingGroundedFinalizer(),
+        orchestrator=ForbiddenLegacyOwner(),
+        summary_service=ForbiddenLegacyDependency(),
+        policy=TextOnlyPolicy(),
+    )
+
+    result = routing.handle_inbound(
+        InboundMessage(channel="telegram", external_user_id="igor", external_chat_id="igor", text="Какая гарантия на оборудование?")
+    )
+
+    assert result["route"]["route"] == "cannot_answer"
 
 
 def test_simple_llm_wiki_fails_closed_when_retrieval_does_not_return_okf_catalog(tmp_path: Path) -> None:

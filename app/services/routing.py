@@ -321,8 +321,8 @@ class RoutingService:
                 "llm_trace": [],
             }
         elif grounding_status != "ready":
-            selected_refs_for_clarification = kb_result.get("trace", {}).get("selected_source_refs", [])
-            if first_reply and selected_refs_for_clarification:
+            needs_customer_clarification = kb_result.get("needs_customer_clarification") is True
+            if first_reply and needs_customer_clarification:
                 final_result = {
                     "route": "clarification_requested",
                     "response_text": self.policy.render_clarification(),

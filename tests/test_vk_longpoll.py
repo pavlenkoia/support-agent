@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from app.integrations.vk.longpoll import VKLongPollClient, VKLongPollState
-from app.workers.vk_main import FileLongPollStateStore, process_once
+from app.workers.vk_main import FileLongPollStateStore, process_once, process_tick
 
 
 class StubVKAPIClient:
@@ -24,6 +24,24 @@ class RecordingGateway:
     def handle_event(self, event):
         self.events.append(event)
         return {"ok": True}
+
+
+class OrderedGateway(RecordingGateway):
+    def __init__(self) -> None:
+        super().__init__()
+        self.steps: list[str] = []
+
+    def handle_event(self, event):
+        self.steps.append("inbound")
+        return super().handle_event(event)
+
+    def recover_expired_received_events(self):
+        self.steps.append("recovery")
+        return {"recovered": 0}
+
+    def process_due_retries(self):
+        self.steps.append("retry")
+        return {"processed": 0}
 
 
 class RecordingAcker:
@@ -78,6 +96,21 @@ def test_vk_process_once_routes_updates_and_acks_state() -> None:
     assert result["processed"] == 1
     assert gateway.events == [{"type": "message_new"}]
     assert acker.states[-1].ts == "777"
+
+
+def test_vk_tick_persists_new_longpoll_updates_before_due_retries() -> None:
+    client = StubVKAPIClient(poll_responses=[{"ok": True, "ts": "778", "updates": [{"type": "message_new"}]}])
+    gateway = OrderedGateway()
+
+    result = process_tick(
+        gateway=gateway,
+        poller=VKLongPollClient(api_client=client, group_id="55"),
+        acker=RecordingAcker(),
+        state=VKLongPollState(server="https://lp.vk.test", key="key", ts="10"),
+    )
+
+    assert result["processed"] == 1
+    assert gateway.steps == ["inbound", "recovery", "retry"]
 
 
 def test_vk_longpoll_treats_transport_timeout_as_empty_poll() -> None:

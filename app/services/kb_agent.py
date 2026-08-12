@@ -473,6 +473,7 @@ class KBAgentService:
         minimal_schema = settings.kb_agent_minimal_extraction_schema
         required_json_schema = {
             "grounding_status": "ready|not_found",
+            "needs_customer_clarification": "boolean: true only when the customer can clarify the request; false when the needed fact is absent from the selected pages",
             "answer_basis": "short factual synthesis for the support agent, not a customer reply",
             "grounded_facts": ["bullet-sized verified facts"],
             "cited_source_refs": ["source_ref strings used"],
@@ -490,12 +491,13 @@ class KBAgentService:
         if minimal_schema:
             rules.extend(
                 [
-                    "Верни минимальный JSON: grounding_status, answer_basis, grounded_facts, cited_source_refs, reason.",
+                    "Верни минимальный JSON: grounding_status, needs_customer_clarification, answer_basis, grounded_facts, cited_source_refs, reason.",
+                    "needs_customer_clarification=true ставь только если вопрос клиента неоднозначен и уточнение клиента может исправить это; отсутствие факта в wiki не является уточнением клиента.",
                     "Не добавляй missing_information, если можно безопасно ответить без него.",
                 ]
             )
         else:
-            rules.append("Если данных не хватает, явно перечисли чего не хватает в missing_information.")
+            rules.append("Если данных не хватает, явно перечисли чего не хватает в missing_information и укажи needs_customer_clarification=true только если это может уточнить сам клиент; отсутствие бизнес-факта в wiki — false.")
 
         user_prompt = json.dumps(
             {
@@ -545,6 +547,8 @@ class KBAgentService:
             parsed["missing_information"] = []
         if not isinstance(parsed.get("answer_basis"), str):
             parsed["answer_basis"] = str(parsed.get("answer_basis") or "").strip()
+        if not isinstance(parsed.get("needs_customer_clarification"), bool):
+            parsed["needs_customer_clarification"] = False
         grounded_facts = parsed.get("grounded_facts") or []
         if isinstance(grounded_facts, list):
             parsed["grounded_facts"] = [str(item).strip() for item in grounded_facts if str(item).strip()][:MAX_GROUNDED_FACTS]

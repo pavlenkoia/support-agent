@@ -227,6 +227,50 @@ class DeferredRetryRouting(StubRouting):
         }
 
 
+class RetryBecomesStaleDuringRouting(StubRouting):
+    def __init__(self, session_factory) -> None:
+        super().__init__(response_text="Старый ответ")
+        self.session_factory = session_factory
+        self.calls = 0
+
+    def handle_inbound(self, payload, *, persist_inbound: bool = True) -> dict:
+        self.calls += 1
+        if self.calls == 1:
+            return {
+                "case": {"conversation_id": 1, "case_id": 1, "case_status": "retry_pending"},
+                "outcome": {"outcome_type": "retry_pending", "outcome_payload": {"response_text": ""}},
+            }
+        with self.session_factory() as session:
+            conversation = session.scalar(select(Conversation).where(Conversation.external_id == f"vk:{payload.external_chat_id}"))
+            state = get_or_create_conversation_transport_state(session, conversation_id=conversation.id, platform="vk")
+            state.last_inbound_external_message_id = "101"
+            session.commit()
+        return super().handle_inbound(payload, persist_inbound=persist_inbound)
+
+
+class RetryClaimRouting(DeferredRetryRouting):
+    def __init__(self, session_factory) -> None:
+        super().__init__()
+        self.session_factory = session_factory
+        self.claimed_status: str | None = None
+
+    def handle_inbound(self, payload, *, persist_inbound: bool = True) -> dict:
+        self.calls += 1
+        self.persist_flags.append(persist_inbound)
+        if self.calls == 1:
+            return {
+                "case": {"conversation_id": 1, "case_id": 1, "case_status": "retry_pending"},
+                "outcome": {"outcome_type": "retry_pending", "outcome_payload": {"response_text": ""}},
+            }
+        with self.session_factory() as session:
+            stored = session.scalar(select(TransportEvent).where(TransportEvent.dedupe_key == "vk:message_new:2000:100"))
+            self.claimed_status = stored.status if stored is not None else None
+        return {
+            "case": {"conversation_id": 1, "case_id": 1, "case_status": "resolved"},
+            "outcome": {"outcome_type": "answer", "outcome_payload": {"response_text": "Ответ после claim"}},
+        }
+
+
 class RaceRouting(StubRouting):
     def __init__(self, session_factory, *, response_text: str = "Готовый ответ") -> None:
         super().__init__(response_text=response_text)
@@ -366,6 +410,78 @@ def test_vk_gateway_suppresses_stale_retry_when_newer_inbound_exists(tmp_path: P
         assert first is not None
         assert first.status == "suppressed"
         assert first.error_text == "vk_retry_suppressed"
+
+
+def test_vk_gateway_suppresses_retry_that_becomes_stale_during_routing(tmp_path: Path) -> None:
+    sender = RecordingVKSender()
+    db_path = tmp_path / "vk.db"
+    session_factory = make_session_factory(f"sqlite+pysqlite:///{db_path}")
+    Base.metadata.create_all(bind=session_factory.kw["bind"])
+    routing = RetryBecomesStaleDuringRouting(session_factory)
+    service = VKGatewayService(routing=routing, sender=sender, session_factory=session_factory)
+    service.queue = ImmediateQueue(service._process_generation)
+    event = {
+        "type": "message_new",
+        "group_id": 55,
+        "object": {"message": {"id": 100, "peer_id": 2000, "from_id": 3000, "text": "Первый вопрос", "date": 1780000000}},
+    }
+
+    service.handle_event(event)
+    with session_factory() as session:
+        stored = session.scalar(select(TransportEvent).where(TransportEvent.dedupe_key == "vk:message_new:2000:100"))
+        assert stored is not None
+        due_at = stored.available_at
+
+    service.process_due_retries(now=due_at + timedelta(seconds=1))
+
+    assert sender.calls == []
+    with session_factory() as session:
+        stored = session.scalar(select(TransportEvent).where(TransportEvent.dedupe_key == "vk:message_new:2000:100"))
+        assert stored is not None
+        assert stored.status == "suppressed"
+
+
+def test_vk_gateway_claims_retry_before_running_routing(tmp_path: Path) -> None:
+    db_path = tmp_path / "vk.db"
+    session_factory = make_session_factory(f"sqlite+pysqlite:///{db_path}")
+    Base.metadata.create_all(bind=session_factory.kw["bind"])
+    routing = RetryClaimRouting(session_factory)
+    sender = RecordingVKSender()
+    service = VKGatewayService(routing=routing, sender=sender, session_factory=session_factory)
+    service.queue = ImmediateQueue(service._process_generation)
+    event = {
+        "type": "message_new",
+        "group_id": 55,
+        "object": {"message": {"id": 100, "peer_id": 2000, "from_id": 3000, "text": "Первый вопрос", "date": 1780000000}},
+    }
+
+    service.handle_event(event)
+    with session_factory() as session:
+        stored = session.scalar(select(TransportEvent).where(TransportEvent.dedupe_key == "vk:message_new:2000:100"))
+        assert stored is not None
+        due_at = stored.available_at
+
+    service.process_due_retries(now=due_at + timedelta(seconds=1))
+
+    assert routing.claimed_status == "processing"
+    assert sender.calls == [("2000", "Ответ после claim")]
+
+
+def test_vk_gateway_retry_reuses_stable_vk_random_id_after_recovery(tmp_path: Path) -> None:
+    service, session_factory = make_service(tmp_path, routing=AlwaysRetryRouting())
+    event = {
+        "type": "message_new",
+        "group_id": 55,
+        "object": {"message": {"id": 100, "peer_id": 2000, "from_id": 3000, "text": "Первый вопрос", "date": 1780000000}},
+    }
+    service.handle_event(event)
+    with session_factory() as session:
+        stored = session.scalar(select(TransportEvent).where(TransportEvent.dedupe_key == "vk:message_new:2000:100"))
+        assert stored is not None
+        event_id = stored.id
+
+    assert service._retry_random_id(event_id) == service._retry_random_id(event_id)
+    assert 1 <= service._retry_random_id(event_id) <= 2_147_483_647
 
 
 def test_vk_gateway_marks_exhausted_kb_retry_for_human_handling(tmp_path: Path, monkeypatch) -> None:

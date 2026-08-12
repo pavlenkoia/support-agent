@@ -48,6 +48,14 @@ def process_once(gateway: VKGatewayService, poller: VKLongPollClient, acker: Lon
     }
 
 
+def process_tick(gateway: VKGatewayService, poller: VKLongPollClient, acker: LongPollAcker, state: VKLongPollState | None) -> dict:
+    """Journal current VK updates before replaying historical retries."""
+    result = process_once(gateway=gateway, poller=poller, acker=acker, state=state)
+    recovery_result = gateway.recover_expired_received_events()
+    retry_result = gateway.process_due_retries()
+    return result | {"recovered": recovery_result["recovered"], "retried": retry_result["processed"]}
+
+
 def main() -> None:
     gateway = VKGatewayService()
     poller = VKLongPollClient()
@@ -65,11 +73,9 @@ def main() -> None:
             continue
 
         current_state = store.load()
-        recovery_result = gateway.recover_expired_received_events()
-        retry_result = gateway.process_due_retries()
-        result = process_once(gateway=gateway, poller=poller, acker=acker, state=current_state)
+        result = process_tick(gateway=gateway, poller=poller, acker=acker, state=current_state)
         print(
-            f"vk polling tick processed={result['processed']} recovered={recovery_result['recovered']} retried={retry_result['processed']} ts={result['state']['ts']}",
+            f"vk polling tick processed={result['processed']} recovered={result['recovered']} retried={result['retried']} ts={result['state']['ts']}",
             flush=True,
         )
         time.sleep(settings.vk_poll_interval_seconds)
