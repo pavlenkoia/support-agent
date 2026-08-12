@@ -157,6 +157,7 @@ Current UI/runtime contract:
 
 - Direct-answer, KB-agent, and summary LLM clients use configurable timeout / retry settings for transient provider failures.
 - Mistral/openai-compatible roles can also use ordered CSV key pools (`*_API_KEYS`): transient/network/5xx failures retry on the same key, while auth/quota/key-specific failures fail over to the next key.
+- Production must configure at least two distinct slots for every customer-answer role: `DIRECT_LLM_API_KEYS`, `KB_AGENT_API_KEYS`, and `SUMMARY_LLM_API_KEYS`. After an env change, recreate `app`, `worker`, and `vk-worker`, then verify each process sees the intended non-secret slot count; one healthy direct/final-answer key without a reserve is not an acceptable production configuration.
 - LLM traces now preserve non-secret failover metadata (`api_key_index`, `used_failover`, `failover_count`, `failover_events`) and aggregate failover counters in usage summaries so operators can detect reserve-key usage.
 - VK long-poll transport failures that surface as transient network errors must not terminate the worker loop.
 - The stronger model should be allocated to the KB agent / wiki-reading step; the cheaper model can be used for the final customer-facing answer step.
