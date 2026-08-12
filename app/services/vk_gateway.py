@@ -13,6 +13,7 @@ from app.integrations.vk.client import VKAPIClient
 from app.integrations.vk.sender import VKSender
 from app.models.case import SupportCase
 from app.models.conversation import Conversation
+from app.models.conversation_transport_state import ConversationTransportState
 from app.models.message import Message
 from app.models.outbound_transport_send import OutboundTransportSend
 from app.models.transport_event import TransportEvent
@@ -100,7 +101,7 @@ class VKGatewayService:
                 return {"ok": True, "ignored": True, "reason": "duplicate_event", "event_type": "message_new"}
             self._sync_user_display_name(session, external_user_id=from_id)
             conversation = ensure_conversation(session, channel="vk", external_chat_id=peer_id)
-            state = get_or_create_conversation_transport_state(session, conversation_id=conversation.id, platform="vk")
+            state = self._locked_transport_state(session, conversation_id=conversation.id)
             set_last_inbound_message(session, state, external_message_id=message_id)
             if is_override_active(state, now=event_time):
                 case = resolve_case(session, inbound)
@@ -375,7 +376,7 @@ class VKGatewayService:
 
             self._sync_user_display_name(session, external_user_id=from_id)
             conversation = ensure_conversation(session, channel="vk", external_chat_id=peer_id)
-            state = get_or_create_conversation_transport_state(session, conversation_id=conversation.id, platform="vk")
+            state = self._locked_transport_state(session, conversation_id=conversation.id)
             set_last_inbound_message(session, state, external_message_id=message_id)
 
             if is_override_active(state, now=event_time):
@@ -633,7 +634,17 @@ class VKGatewayService:
                 )
             session.commit()
 
-        delivery = self.sender.send_message(peer_id=peer_id, text=reply_text, random_id=random_id)
+        delivery = self._send_retry_if_current(
+            event_id=event_id,
+            conversation_id=conversation_id,
+            inbound=inbound,
+            peer_id=peer_id,
+            reply_text=reply_text,
+            random_id=random_id,
+            now=now,
+        )
+        if delivery is None:
+            return
         sent = delivery.get("sent")
         if sent is None:
             sent = bool(delivery.get("ok"))
@@ -657,6 +668,43 @@ class VKGatewayService:
             session.commit()
         if sent and (case_id := (result.get("case") or {}).get("case_id")) is not None:
             self.routing.record_outbound_message(case_id, reply_text)
+
+    def _locked_transport_state(self, session, *, conversation_id: int) -> ConversationTransportState:
+        state = get_or_create_conversation_transport_state(session, conversation_id=conversation_id, platform="vk")
+        locked = session.scalar(
+            select(ConversationTransportState)
+            .where(ConversationTransportState.id == state.id)
+            .with_for_update()
+        )
+        if locked is None:
+            raise LookupError(f"conversation transport state disappeared: {conversation_id}")
+        return locked
+
+    def _send_retry_if_current(
+        self,
+        *,
+        event_id: int,
+        conversation_id: int,
+        inbound: InboundMessage,
+        peer_id: str,
+        reply_text: str,
+        random_id: str,
+        now: datetime,
+    ) -> dict[str, Any] | None:
+        """Last serialized stale gate immediately before the external VK send."""
+        with self.session_factory() as session:
+            event = session.get(TransportEvent, event_id)
+            state = self._locked_transport_state(session, conversation_id=conversation_id)
+            if event is None or self._is_stale_or_overridden(state, inbound, now=now):
+                if event is not None:
+                    mark_transport_event_processed(session, event, status="suppressed")
+                    event.error_text = "vk_retry_suppressed"
+                finalize_outbound_transport_send(session, random_id=random_id, send_status="failed")
+                session.commit()
+                return None
+            # Hold the conversation-state lock until messages.send returns. A new
+            # inbound or human override must serialize after this accepted send.
+            return self.sender.send_message(peer_id=peer_id, text=reply_text, random_id=random_id)
 
     def _is_stale_or_overridden(self, state, inbound: InboundMessage, *, now: datetime) -> bool:
         if state is not None and is_override_active(state, now=now):

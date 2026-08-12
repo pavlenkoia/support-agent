@@ -667,6 +667,7 @@ class KBAgentService:
                 break
         return {
             "grounding_status": "ready" if facts else "not_found",
+            "needs_customer_clarification": False,
             "answer_basis": " ".join(facts[:3]).strip(),
             "grounded_facts": facts[:MAX_GROUNDED_FACTS],
             "missing_information": [],
