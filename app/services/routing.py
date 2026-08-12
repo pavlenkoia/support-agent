@@ -321,13 +321,23 @@ class RoutingService:
                 "llm_trace": [],
             }
         elif grounding_status != "ready":
-            final_result = {
-                "route": "cannot_answer",
-                "response_text": self.policy.render_simple_cannot_answer(),
-                "confidence": 0.0,
-                "reason": f"grounding_{grounding_status}",
-                "llm_trace": [],
-            }
+            selected_refs_for_clarification = kb_result.get("trace", {}).get("selected_source_refs", [])
+            if first_reply and selected_refs_for_clarification:
+                final_result = {
+                    "route": "clarification_requested",
+                    "response_text": self.policy.render_clarification(),
+                    "confidence": 0.0,
+                    "reason": "first_reply_needs_service_clarification",
+                    "llm_trace": [],
+                }
+            else:
+                final_result = {
+                    "route": "cannot_answer",
+                    "response_text": self.policy.render_simple_cannot_answer(),
+                    "confidence": 0.0,
+                    "reason": f"grounding_{grounding_status}",
+                    "llm_trace": [],
+                }
         else:
             final_result = self.direct_llm.respond(
                 payload.text,

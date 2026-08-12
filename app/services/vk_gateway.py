@@ -549,6 +549,19 @@ class VKGatewayService:
                 session.commit()
                 return
             inbound = self._inbound_from_event(event.payload_json)
+            conversation = session.scalar(
+                select(Conversation).where(Conversation.external_id == event.conversation_external_id)
+            )
+            state = (
+                get_or_create_conversation_transport_state(session, conversation_id=conversation.id, platform="vk")
+                if conversation is not None
+                else None
+            )
+            if self._is_stale_or_overridden(state, inbound, now=now):
+                mark_transport_event_processed(session, event, status="suppressed")
+                event.error_text = "vk_retry_suppressed"
+                session.commit()
+                return
 
         try:
             result = self.routing.handle_inbound(inbound, persist_inbound=False)
@@ -629,6 +642,13 @@ class VKGatewayService:
             session.commit()
         if sent and (case_id := (result.get("case") or {}).get("case_id")) is not None:
             self.routing.record_outbound_message(case_id, reply_text)
+
+    def _is_stale_or_overridden(self, state, inbound: InboundMessage, *, now: datetime) -> bool:
+        if state is not None and is_override_active(state, now=now):
+            return True
+        if inbound.external_message_id is None or state is None or state.last_inbound_external_message_id is None:
+            return False
+        return str(state.last_inbound_external_message_id) != str(inbound.external_message_id)
 
     def _schedule_retry_pending(self, session, event: TransportEvent, result: dict[str, Any], *, now: datetime | None = None) -> None:
         route = result.get("route") or {}

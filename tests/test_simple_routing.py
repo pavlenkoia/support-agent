@@ -118,6 +118,9 @@ class TextOnlyPolicy:
     def render_simple_cannot_answer(self) -> str:
         return self._policy.render_simple_cannot_answer()
 
+    def render_clarification(self, question: str | None = None) -> str:
+        return self._policy.render_clarification(question)
+
 
 class MaliciousPromptService:
     def render_cannot_answer(self) -> str:
@@ -189,7 +192,7 @@ def test_simple_llm_wiki_mode_uses_catalog_navigation_selected_pages_and_grounde
     assert result["audit"]["selected_source_refs"] == ["compiled/concepts/booking.md"]
 
 
-def test_simple_llm_wiki_first_reply_cannot_answer_still_gets_required_greeting(tmp_path: Path) -> None:
+def test_simple_llm_wiki_first_reply_with_selected_pages_asks_clarification_instead_of_refusal(tmp_path: Path) -> None:
     session_factory = make_session_factory(f"sqlite+pysqlite:///{tmp_path / 'simple-llm-wiki-no-answer.db'}")
     Base.metadata.create_all(bind=session_factory.kw["bind"])
     finalizer = RecordingGroundedFinalizer()
@@ -207,11 +210,11 @@ def test_simple_llm_wiki_first_reply_cannot_answer_still_gets_required_greeting(
     )
 
     result = routing.handle_inbound(
-        InboundMessage(channel="telegram", external_user_id="igor", external_chat_id="igor", text="Привет, неизвестный факт")
+        InboundMessage(channel="telegram", external_user_id="igor", external_chat_id="igor", text="Здравствуйте! Меня заинтересовала эта услуга.")
     )
 
-    assert result["route"]["route"] == "cannot_answer"
-    assert result["outcome"]["outcome_payload"]["response_text"].startswith("Здравствуйте!")
+    assert result["route"]["route"] == "clarification_requested"
+    assert result["outcome"]["outcome_payload"]["response_text"] == "Здравствуйте! Уточните, пожалуйста, ваш вопрос чуть точнее."
     assert finalizer.calls == []
 
 

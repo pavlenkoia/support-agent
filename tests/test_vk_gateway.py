@@ -334,6 +334,40 @@ def test_vk_gateway_retries_pending_kb_transport_failure_without_intermediate_cu
         assert stored.status == "processed"
 
 
+def test_vk_gateway_suppresses_stale_retry_when_newer_inbound_exists(tmp_path: Path) -> None:
+    sender = RecordingVKSender()
+    routing = AlwaysRetryRouting()
+    service, session_factory = make_service(tmp_path, routing=routing, sender=sender)
+    now = datetime.now(UTC)
+    first_event = {
+        "type": "message_new",
+        "group_id": 55,
+        "object": {"message": {"id": 100, "peer_id": 2000, "from_id": 3000, "text": "Первый вопрос", "date": int(now.timestamp())}},
+    }
+    newer_event = {
+        "type": "message_new",
+        "group_id": 55,
+        "object": {"message": {"id": 101, "peer_id": 2000, "from_id": 3000, "text": "Уточняю второй вопрос", "date": int((now + timedelta(seconds=1)).timestamp())}},
+    }
+
+    service.handle_event(first_event)
+    with session_factory() as session:
+        first = session.scalar(select(TransportEvent).where(TransportEvent.dedupe_key == "vk:message_new:2000:100"))
+        assert first is not None
+        due_at = first.available_at
+
+    service.handle_event(newer_event)
+    retried = service.process_due_retries(now=due_at + timedelta(seconds=1))
+
+    assert retried["processed"] == 2
+    assert sender.calls == []
+    with session_factory() as session:
+        first = session.scalar(select(TransportEvent).where(TransportEvent.dedupe_key == "vk:message_new:2000:100"))
+        assert first is not None
+        assert first.status == "suppressed"
+        assert first.error_text == "vk_retry_suppressed"
+
+
 def test_vk_gateway_marks_exhausted_kb_retry_for_human_handling(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr("app.services.vk_gateway.settings.kb_agent_deferred_retry_max_attempts", 0)
     service, session_factory = make_service(tmp_path, routing=AlwaysRetryRouting())
