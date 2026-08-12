@@ -256,7 +256,10 @@ def test_simple_llm_wiki_selected_pages_without_missing_customer_detail_stays_ca
         knowledge_root="/tmp/okf-wiki",
         retrieval=RecordingCatalogRetrieval(),
         kb_agent=RecordingWikiReader(grounding_status="not_found"),
-        direct_llm=RecordingGroundedFinalizer(),
+        direct_llm=RecordingGroundedFinalizer(
+            route="cannot_answer",
+            response_text="Сейчас не могу дать точный ответ на этот вопрос.",
+        ),
         orchestrator=ForbiddenLegacyOwner(),
         summary_service=ForbiddenLegacyDependency(),
         policy=TextOnlyPolicy(),
@@ -269,6 +272,37 @@ def test_simple_llm_wiki_selected_pages_without_missing_customer_detail_stays_ca
     assert result["route"]["route"] == "cannot_answer"
 
 
+def test_simple_llm_wiki_first_reply_without_grounding_uses_common_finalizer(tmp_path: Path) -> None:
+    session_factory = make_session_factory(f"sqlite+pysqlite:///{tmp_path / 'simple-llm-wiki-first-missing-grounding.db'}")
+    Base.metadata.create_all(bind=session_factory.kw["bind"])
+    finalizer = RecordingGroundedFinalizer(
+        route="clarification_requested",
+        response_text="Здравствуйте! Какая услуга вас заинтересовала?",
+    )
+    routing = RoutingService(
+        session_factory=session_factory,
+        answer_engine_mode="simple_llm_wiki",
+        knowledge_backend="filesystem",
+        knowledge_root="/tmp/okf-wiki",
+        retrieval=RecordingCatalogRetrieval(),
+        kb_agent=RecordingWikiReader(grounding_status="not_found"),
+        direct_llm=finalizer,
+        orchestrator=ForbiddenLegacyOwner(),
+        summary_service=ForbiddenLegacyDependency(),
+        policy=TextOnlyPolicy(),
+    )
+
+    result = routing.handle_inbound(
+        InboundMessage(channel="telegram", external_user_id="igor", external_chat_id="igor", text="Здравствуйте! Меня заинтересовала эта услуга.")
+    )
+
+    assert result["route"]["route"] == "clarification_requested"
+    assert result["outcome"]["outcome_payload"]["response_text"] == "Здравствуйте! Какая услуга вас заинтересовала?"
+    assert len(finalizer.calls) == 1
+    assert finalizer.calls[0]["knowledge_mode"] == "prompt_only"
+    assert finalizer.calls[0]["response_intent"] == "missing_grounding"
+
+
 def test_simple_llm_wiki_missing_kb_fact_without_explicit_ambiguity_stays_cannot_answer(tmp_path: Path) -> None:
     session_factory = make_session_factory(f"sqlite+pysqlite:///{tmp_path / 'simple-llm-wiki-missing-fact.db'}")
     Base.metadata.create_all(bind=session_factory.kw["bind"])
@@ -279,7 +313,10 @@ def test_simple_llm_wiki_missing_kb_fact_without_explicit_ambiguity_stays_cannot
         knowledge_root="/tmp/okf-wiki",
         retrieval=RecordingCatalogRetrieval(),
         kb_agent=RecordingWikiReader(grounding_status="not_found", missing_information=["гарантийный срок"]),
-        direct_llm=RecordingGroundedFinalizer(),
+        direct_llm=RecordingGroundedFinalizer(
+            route="cannot_answer",
+            response_text="Сейчас не могу дать точный ответ на этот вопрос.",
+        ),
         orchestrator=ForbiddenLegacyOwner(),
         summary_service=ForbiddenLegacyDependency(),
         policy=TextOnlyPolicy(),

@@ -321,8 +321,11 @@ class RoutingService:
                 "llm_trace": [],
             }
         elif grounding_status != "ready":
-            needs_customer_clarification = kb_result.get("needs_customer_clarification") is True
-            if first_reply and needs_customer_clarification:
+            valid_llm_wiki_result = (
+                kb_result.get("kb_mode") == "llm_wiki_selected_pages"
+                and kb_result.get("kb_status") == "found"
+            )
+            if first_reply and valid_llm_wiki_result:
                 final_result = self.direct_llm.respond(
                     payload.text,
                     {
@@ -337,12 +340,11 @@ class RoutingService:
                     conversation_context=context,
                     tool_observations=tool_result["tool_results"],
                     first_reply_in_dialogue=first_reply,
-                    response_intent="clarification",
+                    response_intent="clarification" if kb_result.get("needs_customer_clarification") is True else "missing_grounding",
                 )
                 if final_result.get("route") == "retry_pending":
-                    final_result["reason"] = "clarification_finalizer_retry_pending"
-                else:
-                    final_result["route"] = "clarification_requested"
+                    final_result["reason"] = "missing_grounding_finalizer_retry_pending"
+                elif final_result.get("route") == "clarification_requested":
                     final_result["reason"] = "first_reply_needs_service_clarification"
             else:
                 final_result = {

@@ -80,7 +80,7 @@ class DirectLLMService:
         self._reset_llm_trace()
         if knowledge_mode not in {"prompt_only", "kb_grounded"}:
             raise ValueError(f"unsupported finalization knowledge_mode: {knowledge_mode}")
-        if response_intent not in {"answer", "clarification"}:
+        if response_intent not in {"answer", "clarification", "missing_grounding"}:
             raise ValueError(f"unsupported finalization response_intent: {response_intent}")
         tool_observations = tool_observations or []
         fallback_text = self.prompt_service.render_cannot_answer()
@@ -144,6 +144,7 @@ class DirectLLMService:
                     "Не добавляй новые факты и не показывай внутренний процесс, инструменты, источники или причины выбора ответа.",
                     "Если клиент прямо спрашивает «почему», объясни результат только подтверждёнными фактами.",
                     "Если evidence недостаточно для прямого ответа и response_intent=clarification, задай один естественный, конкретный и полезный уточняющий вопрос по текущей реплике; не говори, что клиент задал вопрос, если вопроса не было.",
+                    "Если response_intent=missing_grounding, сам выбери естественный клиентский результат по текущей реплике: задай один полезный уточняющий вопрос, когда уточнение клиента может помочь, иначе честно сообщи, что точного ответа сейчас нет.",
                     "Если evidence недостаточно для уверенного решения и response_intent=answer, используй обязательный ответ при отсутствии информации.",
                 ],
             },
