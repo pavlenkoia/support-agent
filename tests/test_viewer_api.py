@@ -101,7 +101,7 @@ def test_viewer_dialogs_lists_only_vk_dialogs_for_selected_day(tmp_path, monkeyp
     ]
 
 
-def test_viewer_messages_returns_only_selected_day_messages(tmp_path, monkeypatch) -> None:
+def test_viewer_messages_returns_full_case_for_selected_day(tmp_path, monkeypatch) -> None:
     reset_test_state()
     configure_viewer_auth(monkeypatch, enabled=False)
     service = make_viewer_service(tmp_path)
@@ -118,6 +118,13 @@ def test_viewer_messages_returns_only_selected_day_messages(tmp_path, monkeypatc
     assert payload["day"] == str(date(2026, 6, 30))
     assert payload["messages"] == [
         {
+            "id": "3",
+            "sent_at": "2026-06-29T18:00:00Z",
+            "direction": "inbound",
+            "author_name": "Иван Петров",
+            "text": "Вчерашнее сообщение",
+        },
+        {
             "id": "1",
             "sent_at": "2026-06-30T09:15:00Z",
             "direction": "inbound",
@@ -132,6 +139,72 @@ def test_viewer_messages_returns_only_selected_day_messages(tmp_path, monkeypatc
             "text": "Добрый день",
         },
     ]
+
+
+def test_viewer_dialogs_excludes_operator_only_vk_orphan(tmp_path, monkeypatch) -> None:
+    reset_test_state()
+    configure_viewer_auth(monkeypatch, enabled=False)
+    db_path = tmp_path / "viewer_orphan_reply.db"
+    session_factory = make_session_factory(f"sqlite+pysqlite:///{db_path}")
+    Base.metadata.create_all(bind=session_factory.kw["bind"])
+    with session_factory() as session:
+        conversation = Conversation(external_id="vk:860390886")
+        session.add(conversation)
+        session.flush()
+        support_case = SupportCase(conversation_id=conversation.id, status="open", route_mode="human_override")
+        session.add(support_case)
+        session.flush()
+        session.add(
+            Message(
+                case_id=support_case.id,
+                role="human",
+                content="Отвечу сам",
+                created_at=datetime(2026, 6, 30, 9, 17, tzinfo=UTC),
+            )
+        )
+        session.commit()
+
+    service = ViewerService(session_factory=session_factory)
+    app.dependency_overrides[get_viewer_service] = lambda: service
+    try:
+        response = client.get("/api/viewer/dialogs", params={"day": "2026-06-30"})
+    finally:
+        reset_test_state()
+
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+def test_viewer_dialogs_keeps_a_reply_day_when_case_has_older_inbound_message(tmp_path, monkeypatch) -> None:
+    reset_test_state()
+    configure_viewer_auth(monkeypatch, enabled=False)
+    db_path = tmp_path / "viewer_cross_day_dialog.db"
+    session_factory = make_session_factory(f"sqlite+pysqlite:///{db_path}")
+    Base.metadata.create_all(bind=session_factory.kw["bind"])
+    with session_factory() as session:
+        conversation = Conversation(external_id="vk:860390886")
+        session.add(conversation)
+        session.flush()
+        support_case = SupportCase(conversation_id=conversation.id, status="resolved", route_mode="human_override")
+        session.add(support_case)
+        session.flush()
+        session.add_all(
+            [
+                Message(case_id=support_case.id, role="user", content="Вопрос клиента", created_at=datetime(2026, 6, 29, 18, 0, tzinfo=UTC)),
+                Message(case_id=support_case.id, role="human", content="Ответ оператора", created_at=datetime(2026, 6, 30, 9, 17, tzinfo=UTC)),
+            ]
+        )
+        session.commit()
+
+    service = ViewerService(session_factory=session_factory)
+    app.dependency_overrides[get_viewer_service] = lambda: service
+    try:
+        response = client.get("/api/viewer/dialogs", params={"day": "2026-06-30"})
+    finally:
+        reset_test_state()
+
+    assert response.status_code == 200
+    assert response.json()[0]["conversation_id"] == "vk:860390886"
 
 
 def test_viewer_messages_labels_human_vk_reply_as_operator(tmp_path, monkeypatch) -> None:

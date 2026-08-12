@@ -65,10 +65,11 @@ def main() -> None:
             continue
 
         current_state = store.load()
+        recovery_result = gateway.recover_expired_received_events()
         retry_result = gateway.process_due_retries()
         result = process_once(gateway=gateway, poller=poller, acker=acker, state=current_state)
         print(
-            f"vk polling tick processed={result['processed']} retried={retry_result['processed']} ts={result['state']['ts']}",
+            f"vk polling tick processed={result['processed']} recovered={recovery_result['recovered']} retried={retry_result['processed']} ts={result['state']['ts']}",
             flush=True,
         )
         time.sleep(settings.vk_poll_interval_seconds)

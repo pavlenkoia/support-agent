@@ -99,6 +99,12 @@ class VKAPIClient:
             },
         )
 
+    def get_history(self, peer_id: str | int, *, count: int = 20) -> dict:
+        return self.api_call(
+            "messages.getHistory",
+            {"peer_id": str(peer_id), "count": str(max(1, count))},
+        )
+
     def get_users(self, user_ids: list[str | int], *, fields: list[str] | None = None) -> dict:
         normalized_ids = [str(user_id).strip() for user_id in user_ids if str(user_id).strip()]
         if not normalized_ids:

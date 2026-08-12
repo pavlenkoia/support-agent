@@ -4,8 +4,8 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import func, select
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy import exists, func, select
+from sqlalchemy.orm import Session, aliased, sessionmaker
 
 from app.core.config import settings
 from app.core.db import SessionLocal
@@ -40,6 +40,15 @@ class ViewerService:
     def list_dialogs_for_day(self, day: date) -> list[ViewerDialogItem]:
         day_start, day_end = self._day_bounds(day)
         with self.session_factory() as session:
+            inbound_message = aliased(Message)
+            has_inbound = exists(
+                select(inbound_message.id)
+                .join(SupportCase, SupportCase.id == inbound_message.case_id)
+                .where(
+                    SupportCase.conversation_id == Conversation.id,
+                    inbound_message.role == "user",
+                )
+            )
             display_name_expr = func.max(User.display_name)
             stmt = (
                 select(
@@ -57,7 +66,8 @@ class ViewerService:
                     Message.created_at >= day_start,
                     Message.created_at < day_end,
                 )
-                .group_by(Conversation.external_id)
+                .group_by(Conversation.id, Conversation.external_id)
+                .having(has_inbound)
                 .order_by(func.max(Message.created_at).asc())
             )
             rows = session.execute(stmt).all()
@@ -78,18 +88,19 @@ class ViewerService:
         day_start, day_end = self._day_bounds(day)
         with self.session_factory() as session:
             meta = self._load_conversation_meta(session, conversation_id)
-            stmt = (
-                select(Message)
-                .join(SupportCase, SupportCase.id == Message.case_id)
+            selected_case_ids = (
+                select(SupportCase.id)
                 .join(Conversation, Conversation.id == SupportCase.conversation_id)
+                .join(Message, Message.case_id == SupportCase.id)
                 .where(
                     Conversation.external_id == conversation_id,
                     Conversation.external_id.like("vk:%"),
                     Message.created_at >= day_start,
                     Message.created_at < day_end,
                 )
-                .order_by(Message.created_at.asc(), Message.id.asc())
+                .distinct()
             )
+            stmt = select(Message).where(Message.case_id.in_(selected_case_ids)).order_by(Message.created_at.asc(), Message.id.asc())
             messages = session.scalars(stmt).all()
 
         return ViewerDialogMessagesResponse(

@@ -11,6 +11,7 @@ from app.integrations.vk.client import VKAPIClient
 from app.integrations.vk.sender import VKSender
 from app.models.case import SupportCase
 from app.models.conversation import Conversation
+from app.models.message import Message
 from app.models.transport_event import TransportEvent
 from app.models.user import User
 from app.schemas.message import InboundMessage
@@ -118,11 +119,16 @@ class VKGatewayService:
             self._mark_generation_retry_pending(generation, result)
             return "retry_pending"
 
-        reply_text = self._build_reply_text(result)
-        if not reply_text:
-            return "retry_pending"
         case = result.get("case") or {}
         case_id = case.get("case_id")
+        reply_text = self._build_reply_text(result)
+        if not reply_text:
+            self._mark_generation_waiting_human(
+                generation,
+                case_id=case_id,
+                reason="completed_without_customer_reply",
+            )
+            return "waiting_human"
         conversation_id = case.get("conversation_id")
         if case_id is None:
             return "retry_pending"
@@ -146,7 +152,19 @@ class VKGatewayService:
                     session.commit()
                     return "superseded"
                 persist_inbound_message(session, case_id, inbound)
-                delivery = self.sender.send_message(peer_id=inbound.external_chat_id, text=reply_text)
+                try:
+                    delivery = self.sender.send_message(peer_id=inbound.external_chat_id, text=reply_text)
+                except Exception as exc:
+                    self._mark_generation_sources(
+                        session,
+                        generation,
+                        status="failed",
+                    )
+                    for source in generation.source_messages:
+                        if source.external_event_id and (event := find_transport_event(session, source.external_event_id)) is not None:
+                            event.error_text = f"delivery_exception:{type(exc).__name__}: {exc}"
+                    session.commit()
+                    return "failed"
                 sent = delivery.get("sent", delivery.get("ok"))
                 self._mark_generation_sources(session, generation, status="processed" if sent else "failed")
                 if not sent:
@@ -173,6 +191,72 @@ class VKGatewayService:
 
         return generation.run_if_current(persist_and_deliver)
 
+    def recover_expired_received_events(self, *, now: datetime | None = None) -> dict[str, int]:
+        current_time = now or datetime.now(UTC)
+        cutoff = current_time - timedelta(seconds=settings.vk_received_event_timeout_seconds)
+        with self.session_factory() as session:
+            events = session.scalars(
+                select(TransportEvent).where(
+                    TransportEvent.platform == "vk",
+                    TransportEvent.event_type == "message_new",
+                    TransportEvent.status == "received",
+                    TransportEvent.received_at <= cutoff,
+                )
+            ).all()
+            for event in events:
+                mark_transport_event_retry_pending(
+                    session,
+                    event,
+                    error_text="received_timeout_recovery",
+                    available_at=current_time,
+                )
+            session.commit()
+        return {"recovered": len(events)}
+
+    def recover_legacy_timeout_events(self, *, now: datetime | None = None) -> dict[str, int]:
+        current_time = now or datetime.now(UTC)
+        with self.session_factory() as session:
+            events = session.scalars(
+                select(TransportEvent).where(
+                    TransportEvent.platform == "vk",
+                    TransportEvent.event_type == "message_new",
+                    TransportEvent.status == "waiting_human",
+                    TransportEvent.error_text == "received_timeout_without_finalization",
+                )
+            ).all()
+            for event in events:
+                mark_transport_event_retry_pending(
+                    session,
+                    event,
+                    error_text="received_timeout_recovery",
+                    available_at=current_time,
+                )
+                conversation = session.scalar(
+                    select(Conversation).where(Conversation.external_id == event.conversation_external_id)
+                )
+                if conversation is not None:
+                    support_case = session.scalar(
+                        select(SupportCase)
+                        .where(
+                            SupportCase.conversation_id == conversation.id,
+                            SupportCase.status == "waiting_human",
+                            SupportCase.route_mode == "received_timeout_without_finalization",
+                        )
+                        .order_by(SupportCase.id.desc())
+                    )
+                    if support_case is not None:
+                        support_case.status = "open"
+                        support_case.route_mode = "retry_pending"
+                        persist_workflow_event(
+                            session,
+                            support_case.id,
+                            {"transport_event_id": event.id, "reason": "received_timeout_recovery"},
+                            event_type="inbound_recovery_scheduled",
+                            actor="system:vk_recovery",
+                        )
+            session.commit()
+        return {"recovered": len(events)}
+
     def _mark_generation_sources(self, session, generation: Generation, *, status: str) -> None:
         for source in generation.source_messages:
             if source.external_event_id and (event := find_transport_event(session, source.external_event_id)) is not None:
@@ -190,6 +274,24 @@ class VKGatewayService:
             for source in generation.source_messages:
                 if source.external_event_id and (event := find_transport_event(session, source.external_event_id)) is not None:
                     self._schedule_retry_pending(session, event, result)
+            session.commit()
+
+    def _mark_generation_waiting_human(self, generation: Generation, *, case_id: int | None, reason: str) -> None:
+        with self.session_factory() as session:
+            self._mark_generation_sources(session, generation, status="waiting_human")
+            for source in generation.source_messages:
+                if source.external_event_id and (event := find_transport_event(session, source.external_event_id)) is not None:
+                    event.error_text = reason
+            if case_id is not None and (support_case := session.get(SupportCase, case_id)) is not None:
+                support_case.status = "waiting_human"
+                support_case.route_mode = reason
+                persist_workflow_event(
+                    session,
+                    support_case.id,
+                    {"reason": reason},
+                    event_type="inbound_waiting_human",
+                    actor="system:vk_gateway",
+                )
             session.commit()
 
     def _mark_generation_sources_processed(self, generation: Generation) -> None:
@@ -584,6 +686,7 @@ class VKGatewayService:
                     "matched_send_id": matched.id,
                 }
 
+            self._recover_missing_inbound_context(session, peer_id=peer_id, conversation=conversation)
             persist_human_outbound_message(
                 session,
                 conversation_id=conversation.id,
@@ -606,6 +709,62 @@ class VKGatewayService:
                 "sent_by": "admin",
                 "override_until": state.human_override_until.isoformat() if state.human_override_until else None,
             }
+
+    def _recover_missing_inbound_context(self, session, *, peer_id: str, conversation: Conversation) -> None:
+        has_inbound = session.scalar(
+            select(Message.id)
+            .join(SupportCase, SupportCase.id == Message.case_id)
+            .where(SupportCase.conversation_id == conversation.id, Message.role == "user")
+            .limit(1)
+        )
+        if has_inbound is not None:
+            return
+
+        response = self.client.get_history(peer_id, count=20)
+        if not response.get("ok"):
+            return
+        payload = response.get("response") or {}
+        items = payload.get("items") if isinstance(payload, dict) else None
+        if not isinstance(items, list):
+            return
+
+        inbound_items = [
+            item
+            for item in items
+            if isinstance(item, dict)
+            and not bool(item.get("out"))
+            and self._string_id(item.get("peer_id")) == peer_id
+            and self._string_id(item.get("from_id"))
+            and str(item.get("text") or "").strip()
+        ]
+        if not inbound_items:
+            return
+
+        item = max(inbound_items, key=lambda candidate: int(candidate.get("date") or 0))
+        from_id = self._string_id(item.get("from_id"))
+        self._sync_user_display_name(session, external_user_id=from_id)
+        inbound = InboundMessage(
+            channel="vk",
+            external_user_id=from_id,
+            external_chat_id=peer_id,
+            text=str(item["text"]).strip(),
+            external_message_id=self._string_id(item.get("id")),
+            external_event_type="history_recovery",
+            external_event_id=f"vk:history_recovery:{peer_id}:{self._string_id(item.get('id'))}",
+            received_at=self._event_time(item),
+            raw_event={"type": "history_recovery", "object": {"message": item}},
+            metadata={"peer_id": peer_id, "from_id": from_id},
+        )
+        support_case = session.scalar(
+            select(SupportCase)
+            .where(SupportCase.conversation_id == conversation.id)
+            .order_by(SupportCase.id.desc())
+        )
+        if support_case is None:
+            support_case = SupportCase(conversation_id=conversation.id, status="open", route_mode="history_recovery")
+            session.add(support_case)
+            session.flush()
+        persist_inbound_message(session, support_case.id, inbound)
 
     def _sync_user_display_name(self, session, *, external_user_id: str) -> None:
         normalized_user_id = self._string_id(external_user_id)

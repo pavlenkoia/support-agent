@@ -17,6 +17,7 @@ from app.services.inbound_queue import InboundQueue
 from app.services.persistence import (
     activate_human_override,
     get_or_create_conversation_transport_state,
+    persist_transport_event,
 )
 from app.services.vk_gateway import VKGatewayService
 
@@ -43,6 +44,12 @@ class RecordingVKSender:
             "sent_at": datetime.now(UTC),
             "vk_response": {"ok": True, "response": int(external_message_id)},
         }
+
+
+class RaisingVKSender:
+    def send_message(self, *, peer_id: str, text: str) -> dict:
+        _ = (peer_id, text)
+        raise RuntimeError("vk sender socket closed")
 
 
 class FailingVKSender:
@@ -73,10 +80,23 @@ class FailingVKSender:
 
 
 class RecordingVKProfileClient:
-    def __init__(self, responses: dict[str, dict] | None = None, *, ok: bool = True) -> None:
+    def __init__(
+        self,
+        responses: dict[str, dict] | None = None,
+        *,
+        history: list[dict] | None = None,
+        ok: bool = True,
+    ) -> None:
         self.responses = responses or {}
+        self.history = history or []
         self.ok = ok
         self.calls: list[list[str]] = []
+        self.history_calls: list[str] = []
+
+    def get_history(self, peer_id: str | int, *, count: int = 20) -> dict:
+        _ = count
+        self.history_calls.append(str(peer_id))
+        return {"ok": self.ok, "response": {"items": self.history} if self.ok else {}}
 
     def get_users(self, user_ids: list[str | int], *, fields: list[str] | None = None) -> dict:
         normalized_ids = [str(user_id) for user_id in user_ids]
@@ -104,6 +124,15 @@ class StubRouting:
 
     def record_outbound_message(self, case_id: int, text: str) -> None:
         self.recorded_outbound.append((case_id, text))
+
+
+class EmptyReplyRouting(StubRouting):
+    def handle_inbound(self, payload, *, persist_inbound: bool = True) -> dict:
+        _ = (payload, persist_inbound)
+        return {
+            "case": {"conversation_id": 1, "case_id": 1, "case_status": "resolved"},
+            "outcome": {"outcome_type": "cannot_answer", "outcome_payload": {"response_text": ""}},
+        }
 
 
 class AlwaysRetryRouting(StubRouting):
@@ -370,24 +399,60 @@ def test_vk_gateway_reconciles_bot_message_reply_without_override(tmp_path: Path
         assert state.human_override_until is None
 
 
-def test_vk_gateway_persists_unmatched_admin_reply_for_viewer(tmp_path: Path) -> None:
-    service, session_factory = make_service(tmp_path)
+def test_vk_gateway_recovers_missing_inbound_context_before_persisting_admin_reply(tmp_path: Path) -> None:
     event_timestamp = 1780000100
+    client = RecordingVKProfileClient(
+        responses={"3002": {"id": 3002, "first_name": "Иван", "last_name": "Петров"}},
+        history=[
+            {
+                "id": 7001,
+                "peer_id": 2002,
+                "from_id": -55,
+                "out": 1,
+                "text": "Отвечу сам",
+                "date": event_timestamp,
+            },
+            {
+                "id": 7000,
+                "peer_id": 2002,
+                "from_id": 3002,
+                "out": 0,
+                "text": "Здравствуйте, хочу прыгнуть в тандеме",
+                "date": event_timestamp - 60,
+            },
+        ],
+    )
+    service, session_factory = make_service(tmp_path, client=client)
 
     result = service.handle_event(
         {
             "type": "message_reply",
             "group_id": 55,
-            "object": {"message": {"id": 7001, "peer_id": 2002, "text": "Отвечу сам", "date": event_timestamp}},
+            "object": {
+                "id": 7001,
+                "peer_id": 2002,
+                "from_id": 9002,
+                "text": "Отвечу сам",
+                "date": event_timestamp,
+            },
         }
     )
 
     assert result["sent_by"] == "admin"
+    assert client.history_calls == ["2002"]
+    assert client.calls == [["3002"]]
     with session_factory() as session:
         messages = session.scalars(select(Message).order_by(Message.id)).all()
-        assert [(message.role, message.content) for message in messages] == [("human", "Отвечу сам")]
-        assert messages[0].created_at.replace(tzinfo=UTC) == datetime.fromtimestamp(event_timestamp, tz=UTC)
+        assert [(message.role, message.content) for message in messages] == [
+            ("user", "Здравствуйте, хочу прыгнуть в тандеме"),
+            ("human", "Отвечу сам"),
+        ]
+        assert messages[0].created_at.replace(tzinfo=UTC) == datetime.fromtimestamp(event_timestamp - 60, tz=UTC)
+        assert messages[1].created_at.replace(tzinfo=UTC) == datetime.fromtimestamp(event_timestamp, tz=UTC)
         assert messages[0].support_case.conversation.external_id == "vk:2002"
+        user = session.scalar(select(User).where(User.external_id == "vk:3002"))
+        assert user is not None
+        assert user.display_name == "Иван Петров"
 
 
 def test_vk_gateway_unmatched_admin_reply_activates_override_and_suppresses_inbound(tmp_path: Path) -> None:
@@ -492,7 +557,117 @@ def test_vk_gateway_persists_structured_vk_send_error_details(tmp_path: Path) ->
             text("select status, error_text from transport_events where dedupe_key = 'vk:message_new:2005:104'")
         ).one()
         assert row[0] == "failed"
-        assert row[1] == (
-            "vk_api_error; error_code=901; "
-            "error_msg=Can't send messages for users from blacklist"
+
+
+
+def test_vk_gateway_marks_empty_completed_reply_for_human_handling(tmp_path: Path) -> None:
+    service, session_factory = make_service(tmp_path, routing=EmptyReplyRouting())
+
+    result = service.handle_event(
+        {
+            "type": "message_new",
+            "group_id": 55,
+            "object": {"message": {"id": 106, "peer_id": 2007, "from_id": 3007, "text": "Можно купить?", "date": 1780000700}},
+        }
+    )
+
+    assert result["queued"] is True
+    with session_factory() as session:
+        event = session.scalar(select(TransportEvent).where(TransportEvent.dedupe_key == "vk:message_new:2007:106"))
+        assert event is not None
+        assert event.status == "waiting_human"
+        assert event.error_text == "completed_without_customer_reply"
+
+
+
+def test_vk_gateway_recovers_expired_received_event_by_retrying_automatically(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr("app.services.vk_gateway.settings.vk_received_event_timeout_seconds", 1)
+    monkeypatch.setattr("app.services.vk_gateway.settings.kb_agent_deferred_retry_delay_seconds", 0)
+    sender = RecordingVKSender()
+    service, session_factory = make_service(tmp_path, sender=sender)
+    service.queue = InboundQueue(service._process_generation, quiet_seconds=60, max_wait_seconds=60)
+    service.handle_event(
+        {
+            "type": "message_new",
+            "group_id": 55,
+            "object": {"message": {"id": 107, "peer_id": 2008, "from_id": 3008, "text": "Можно купить?", "date": 1780000800}},
+        }
+    )
+
+    result = service.recover_expired_received_events(now=datetime.now(UTC) + timedelta(seconds=2))
+
+    assert result == {"recovered": 1}
+    with session_factory() as session:
+        event = session.scalar(select(TransportEvent).where(TransportEvent.dedupe_key == "vk:message_new:2008:107"))
+        assert event is not None
+        assert event.status == "retry_pending"
+        assert event.retry_attempts == 1
+        assert event.error_text == "received_timeout_recovery"
+        due_at = event.available_at
+
+    assert service.process_due_retries(now=due_at + timedelta(seconds=1)) == {"processed": 1}
+    assert sender.calls == [("2008", "Готовый ответ")]
+    with session_factory() as session:
+        event = session.scalar(select(TransportEvent).where(TransportEvent.dedupe_key == "vk:message_new:2008:107"))
+        assert event is not None
+        assert event.status == "processed"
+
+
+
+def test_vk_gateway_recovers_only_legacy_timeout_waiting_human_events(tmp_path: Path) -> None:
+    service, session_factory = make_service(tmp_path)
+    with session_factory() as session:
+        timeout_event, _ = persist_transport_event(
+            session,
+            platform="vk",
+            event_type="message_new",
+            dedupe_key="vk:message_new:2009:108",
+            payload_json={"type": "message_new", "object": {"message": {"id": 108, "peer_id": 2009, "from_id": 3009, "text": "Вопрос"}}},
+            external_event_id="vk:message_new:2009:108",
+            external_message_id="108",
+            conversation_external_id="vk:2009",
         )
+        timeout_event.status = "waiting_human"
+        timeout_event.error_text = "received_timeout_without_finalization"
+        human_event, _ = persist_transport_event(
+            session,
+            platform="vk",
+            event_type="message_new",
+            dedupe_key="vk:message_new:2010:109",
+            payload_json={"type": "message_new", "object": {"message": {"id": 109, "peer_id": 2010, "from_id": 3010, "text": "Вопрос"}}},
+            external_event_id="vk:message_new:2010:109",
+            external_message_id="109",
+            conversation_external_id="vk:2010",
+        )
+        human_event.status = "waiting_human"
+        human_event.error_text = "kb_agent_retry_exhausted"
+        session.commit()
+
+    assert service.recover_legacy_timeout_events(now=datetime.now(UTC)) == {"recovered": 1}
+    with session_factory() as session:
+        timeout_event = session.scalar(select(TransportEvent).where(TransportEvent.dedupe_key == "vk:message_new:2009:108"))
+        human_event = session.scalar(select(TransportEvent).where(TransportEvent.dedupe_key == "vk:message_new:2010:109"))
+        assert timeout_event.status == "retry_pending"
+        assert timeout_event.error_text == "received_timeout_recovery"
+        assert human_event.status == "waiting_human"
+        assert human_event.error_text == "kb_agent_retry_exhausted"
+
+
+def test_vk_gateway_marks_event_failed_when_sender_raises(tmp_path: Path) -> None:
+    service, session_factory = make_service(tmp_path, sender=RaisingVKSender())
+
+    result = service.handle_event(
+        {
+            "type": "message_new",
+            "group_id": 55,
+            "object": {"message": {"id": 105, "peer_id": 2006, "from_id": 3006, "text": "Можно купить?", "date": 1780000600}},
+        }
+    )
+
+    assert result["queued"] is True
+    with session_factory() as session:
+        row = session.execute(
+            text("select status, error_text from transport_events where dedupe_key = 'vk:message_new:2006:105'")
+        ).one()
+        assert row[0] == "failed"
+        assert row[1] == "delivery_exception:RuntimeError: vk sender socket closed"
