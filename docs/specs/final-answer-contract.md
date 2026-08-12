@@ -21,7 +21,9 @@ There are two knowledge modes:
 1. `prompt_only`: the active system prompt explicitly and completely answers the current factual question. The planner selects `answer_from_prompt`; retrieval and the KB agent are skipped; the common final model still writes the customer answer.
 2. `kb_grounded`: the system prompt alone is not sufficient. Retrieval and the KB agent run; only a compact grounded packet reaches the common final model.
 
-The mode is an application-owned control value. It is not derived by exposing planner output to the final model.
+For a first substantive turn with a valid KB pass but non-ready grounding, the same `prompt_only` finalizer owns the customer wording. The application may state only the generic response intent: a known critical ambiguity requires clarification; otherwise missing grounding lets the finalizer choose a useful clarification or an honest `cannot_answer`. This is not a new classifier, domain keyword branch, or KB answer source.
+
+The mode and response intent are application-owned control values. They are not derived by exposing planner output to the final model.
 
 ## Finalization input allowlist
 
