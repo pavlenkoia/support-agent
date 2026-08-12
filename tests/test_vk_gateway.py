@@ -28,10 +28,10 @@ class RecordingVKSender:
         self.next_message_id = 9001
         self.next_random_id = 700001
 
-    def send_message(self, *, peer_id: str, text: str) -> dict:
+    def send_message(self, *, peer_id: str, text: str, random_id: str | None = None) -> dict:
         self.calls.append((peer_id, text))
         external_message_id = str(self.next_message_id)
-        random_id = str(self.next_random_id)
+        resolved_random_id = random_id or str(self.next_random_id)
         self.next_message_id += 1
         self.next_random_id += 1
         return {
@@ -39,7 +39,7 @@ class RecordingVKSender:
             "sent": True,
             "peer_id": peer_id,
             "text": text,
-            "random_id": random_id,
+            "random_id": resolved_random_id,
             "external_message_id": external_message_id,
             "sent_at": datetime.now(UTC),
             "vk_response": {"ok": True, "response": int(external_message_id)},
@@ -47,23 +47,86 @@ class RecordingVKSender:
 
 
 class RaisingVKSender:
-    def send_message(self, *, peer_id: str, text: str) -> dict:
-        _ = (peer_id, text)
+    def send_message(self, *, peer_id: str, text: str, random_id: str | None = None) -> dict:
+        _ = (peer_id, text, random_id)
         raise RuntimeError("vk sender socket closed")
+
+
+class PendingJournalAssertingVKSender:
+    """Requires the gateway to journal a generated VK random_id before sending."""
+
+    def __init__(self, session_factory) -> None:
+        self.session_factory = session_factory
+        self.random_ids: list[str] = []
+
+    def send_message(self, *, peer_id: str, text: str, random_id: str | None = None) -> dict:
+        assert random_id is not None
+        with self.session_factory() as session:
+            pending = session.scalar(
+                select(OutboundTransportSend).where(
+                    OutboundTransportSend.platform == "vk",
+                    OutboundTransportSend.peer_external_id == peer_id,
+                    OutboundTransportSend.random_id == random_id,
+                    OutboundTransportSend.send_status == "pending",
+                    OutboundTransportSend.content_text == text,
+                )
+            )
+            assert pending is not None, "outbound VK message must be journaled before messages.send"
+        self.random_ids.append(random_id)
+        return {
+            "ok": True,
+            "sent": True,
+            "peer_id": peer_id,
+            "text": text,
+            "random_id": random_id,
+            "external_message_id": "9001",
+            "sent_at": datetime.now(UTC),
+            "vk_response": {"ok": True, "response": 9001},
+        }
+
+
+class InterleavingVKSender(PendingJournalAssertingVKSender):
+    """Emits VK's outbound event before messages.send returns."""
+
+    def __init__(self, session_factory) -> None:
+        super().__init__(session_factory)
+        self.gateway: VKGatewayService | None = None
+
+    def send_message(self, *, peer_id: str, text: str, random_id: str | None = None) -> dict:
+        delivery = super().send_message(peer_id=peer_id, text=text, random_id=random_id)
+        assert self.gateway is not None
+        reply_result = self.gateway.handle_event(
+            {
+                "type": "message_reply",
+                "group_id": 55,
+                "object": {
+                    "message": {
+                        "id": int(delivery["external_message_id"]),
+                        "peer_id": int(peer_id),
+                        "from_id": -55,
+                        "out": 1,
+                        "text": text,
+                        "date": int(datetime.now(UTC).timestamp()),
+                    }
+                },
+            }
+        )
+        assert reply_result["sent_by"] == "bot"
+        return delivery
 
 
 class FailingVKSender:
     def __init__(self) -> None:
         self.calls: list[tuple[str, str]] = []
 
-    def send_message(self, *, peer_id: str, text: str) -> dict:
+    def send_message(self, *, peer_id: str, text: str, random_id: str | None = None) -> dict:
         self.calls.append((peer_id, text))
         return {
             "ok": False,
             "sent": False,
             "peer_id": peer_id,
             "text": text,
-            "random_id": "700999",
+            "random_id": random_id or "700999",
             "external_message_id": None,
             "sent_at": datetime.now(UTC),
             "reason": "vk_api_error",
@@ -365,6 +428,54 @@ def test_vk_gateway_ignores_profile_lookup_failures_and_keeps_processing(tmp_pat
         user = session.scalar(select(User).where(User.external_id == "vk:3007"))
         assert user is not None
         assert user.display_name is None
+
+
+def test_vk_gateway_journals_outbound_before_sending_to_vk(tmp_path: Path) -> None:
+    service, session_factory = make_service(tmp_path)
+    sender = PendingJournalAssertingVKSender(session_factory)
+    service.sender = sender
+
+    inbound_result = service.handle_event(
+        {
+            "type": "message_new",
+            "group_id": 55,
+            "object": {"message": {"id": 111, "peer_id": 2011, "from_id": 3011, "text": "Здравствуйте", "date": 1780000000}},
+        }
+    )
+
+    assert inbound_result["queued"] is True
+    assert len(sender.random_ids) == 1
+    with session_factory() as session:
+        send = session.scalar(select(OutboundTransportSend).where(OutboundTransportSend.external_message_id == "9001"))
+        assert send is not None
+        assert send.send_status == "sent"
+
+
+def test_vk_gateway_reconciles_reply_arriving_before_send_returns_without_human_copy(tmp_path: Path) -> None:
+    service, session_factory = make_service(tmp_path)
+    sender = InterleavingVKSender(session_factory)
+    sender.gateway = service
+    service.sender = sender
+
+    inbound_result = service.handle_event(
+        {
+            "type": "message_new",
+            "group_id": 55,
+            "object": {"message": {"id": 112, "peer_id": 2012, "from_id": 3012, "text": "Здравствуйте", "date": 1780000000}},
+        }
+    )
+
+    assert inbound_result["queued"] is True
+    with session_factory() as session:
+        messages = session.scalars(select(Message).order_by(Message.id)).all()
+        assert [(message.role, message.content) for message in messages] == [("user", "Здравствуйте")]
+        sends = session.scalars(select(OutboundTransportSend)).all()
+        assert len(sends) == 1
+        assert sends[0].send_status == "reconciled"
+        assert sends[0].external_message_id == "9001"
+        state = session.scalar(select(ConversationTransportState))
+        assert state is not None
+        assert state.human_override_until is None
 
 
 def test_vk_gateway_reconciles_bot_message_reply_without_override(tmp_path: Path) -> None:

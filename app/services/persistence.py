@@ -209,6 +209,26 @@ def persist_outbound_transport_send(
     return record
 
 
+def finalize_outbound_transport_send(
+    session: Session,
+    *,
+    random_id: str,
+    external_message_id: str | None = None,
+    sent_at: datetime | None = None,
+    send_status: str = "sent",
+) -> OutboundTransportSend:
+    record = session.scalar(select(OutboundTransportSend).where(OutboundTransportSend.random_id == str(random_id)))
+    if record is None:
+        raise LookupError(f"outbound transport send not found for random_id={random_id}")
+    if external_message_id:
+        record.external_message_id = str(external_message_id)
+    record.sent_at = normalize_timestamp(sent_at)
+    if record.send_status == "pending":
+        record.send_status = send_status
+    session.flush()
+    return record
+
+
 def reconcile_outbound_transport_send(
     session: Session,
     record: OutboundTransportSend,

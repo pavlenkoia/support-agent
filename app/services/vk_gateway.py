@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import random
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -19,6 +20,7 @@ from app.services.case_resolution import ensure_conversation, resolve_case
 from app.services.inbound_queue import Generation, InboundQueue
 from app.services.persistence import (
     activate_human_override,
+    finalize_outbound_transport_send,
     find_recent_outbound_transport_match,
     find_transport_event,
     get_or_create_conversation_transport_state,
@@ -152,8 +154,26 @@ class VKGatewayService:
                     session.commit()
                     return "superseded"
                 persist_inbound_message(session, case_id, inbound)
+                random_id = str(random.randint(1, 2_147_483_647))
+                persist_outbound_transport_send(
+                    session,
+                    platform="vk",
+                    conversation_id=current_conversation_id,
+                    case_id=case_id,
+                    peer_external_id=inbound.external_chat_id,
+                    random_id=random_id,
+                    content_text=reply_text,
+                    send_status="pending",
+                )
+                # VK can emit message_reply before messages.send returns. Commit the
+                # correlation record first so that event cannot be imported as human.
+                session.commit()
                 try:
-                    delivery = self.sender.send_message(peer_id=inbound.external_chat_id, text=reply_text)
+                    delivery = self.sender.send_message(
+                        peer_id=inbound.external_chat_id,
+                        text=reply_text,
+                        random_id=random_id,
+                    )
                 except Exception as exc:
                     self._mark_generation_sources(
                         session,
@@ -163,6 +183,7 @@ class VKGatewayService:
                     for source in generation.source_messages:
                         if source.external_event_id and (event := find_transport_event(session, source.external_event_id)) is not None:
                             event.error_text = f"delivery_exception:{type(exc).__name__}: {exc}"
+                    finalize_outbound_transport_send(session, random_id=random_id, send_status="failed")
                     session.commit()
                     return "failed"
                 sent = delivery.get("sent", delivery.get("ok"))
@@ -171,16 +192,12 @@ class VKGatewayService:
                     for source in generation.source_messages:
                         if source.external_event_id and (event := find_transport_event(session, source.external_event_id)) is not None:
                             event.error_text = self._format_delivery_error(delivery)
+                    finalize_outbound_transport_send(session, random_id=random_id, send_status="failed")
                     session.commit()
                     return "retry_pending"
-                persist_outbound_transport_send(
+                finalize_outbound_transport_send(
                     session,
-                    platform="vk",
-                    conversation_id=current_conversation_id,
-                    case_id=case_id,
-                    peer_external_id=inbound.external_chat_id,
-                    random_id=str(delivery["random_id"]),
-                    content_text=reply_text,
+                    random_id=random_id,
                     external_message_id=delivery.get("external_message_id"),
                     sent_at=delivery.get("sent_at"),
                 )
@@ -566,15 +583,29 @@ class VKGatewayService:
             if conversation_id is None:
                 conversation = session.scalar(select(Conversation).where(Conversation.external_id == self._conversation_external_id(peer_id)))
                 conversation_id = conversation.id if conversation is not None else None
-            if conversation_id is not None:
-                state = get_or_create_conversation_transport_state(session, conversation_id=conversation_id, platform="vk")
-                if is_override_active(state, now=now):
-                    mark_transport_event_processed(session, event, status="suppressed")
-                    session.commit()
-                    return
+            if conversation_id is None:
+                session.commit()
+                return
+            case_id = (result.get("case") or {}).get("case_id")
+            state = get_or_create_conversation_transport_state(session, conversation_id=conversation_id, platform="vk")
+            if is_override_active(state, now=now):
+                mark_transport_event_processed(session, event, status="suppressed")
+                session.commit()
+                return
+            random_id = str(random.randint(1, 2_147_483_647))
+            persist_outbound_transport_send(
+                session,
+                platform="vk",
+                conversation_id=conversation_id,
+                case_id=case_id,
+                peer_external_id=peer_id,
+                random_id=random_id,
+                content_text=reply_text,
+                send_status="pending",
+            )
             session.commit()
 
-        delivery = self.sender.send_message(peer_id=peer_id, text=reply_text)
+        delivery = self.sender.send_message(peer_id=peer_id, text=reply_text, random_id=random_id)
         sent = delivery.get("sent")
         if sent is None:
             sent = bool(delivery.get("ok"))
@@ -585,17 +616,12 @@ class VKGatewayService:
             mark_transport_event_processed(session, event, status="processed" if sent else "failed")
             if not sent:
                 event.error_text = self._format_delivery_error(delivery)
-            elif conversation_id is not None:
-                case_id = (result.get("case") or {}).get("case_id")
+                finalize_outbound_transport_send(session, random_id=random_id, send_status="failed")
+            else:
                 state = get_or_create_conversation_transport_state(session, conversation_id=conversation_id, platform="vk")
-                persist_outbound_transport_send(
+                finalize_outbound_transport_send(
                     session,
-                    platform="vk",
-                    conversation_id=conversation_id,
-                    case_id=case_id,
-                    peer_external_id=peer_id,
-                    random_id=str(delivery["random_id"]),
-                    content_text=reply_text,
+                    random_id=random_id,
                     external_message_id=delivery.get("external_message_id"),
                     sent_at=delivery.get("sent_at"),
                 )
