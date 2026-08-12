@@ -1,5 +1,7 @@
 # Simple Answer Engine Implementation Plan
 
+> **SUPERSEDED — DO NOT EXECUTE.** This full-corpus plan was rejected after the 2026-08-12 production regression. The delivered production architecture is `simple_llm_wiki` and preserves compact OKF catalog navigation, selective full-page reads, coverage review, grounded extraction, and evidence-bounded finalization. See `docs/architecture/llm-wiki-knowledge-contract.md`, `docs/architecture/overview.md`, and `docs/specs/support-agent-spec.md`.
+
 > **For Hermes:** Use subagent-driven-development skill to implement this plan task-by-task. Follow strict RED-GREEN, two-stage review (spec compliance, then code quality), Docker-first verification, and do not touch production without Igor's explicit approval.
 
 **Goal:** Replace the active planner/KB-agent/finalizer chain with one full-corpus, KB-grounded answer engine while preserving transports, persistence, human override and operator observability.

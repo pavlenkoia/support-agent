@@ -1,5 +1,7 @@
 # Simple Answer Engine — Corrective Plan
 
+> **SUPERSEDED — DO NOT EXECUTE.** This plan only hardened the rejected `simple_full_corpus` candidate and is retained for incident history. The production correction is commit `b086edaa681cdd94bad1740d013d7e46761d6f54`: `simple_llm_wiki` with semantic OKF navigation, selective full-page reads, mandatory coverage review, grounded extraction, and finalization. Canonical contracts are `docs/architecture/llm-wiki-knowledge-contract.md`, `docs/architecture/overview.md`, and `docs/specs/support-agent-spec.md`.
+
 > **Execution rule:** one task per separate implementation session. Never execute the next task automatically. Production, active profile, runtime env and running containers are frozen.
 
 **Goal:** make the existing `simple_full_corpus` candidate fail-closed and auditable without reopening the architecture or patching production in place.

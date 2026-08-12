@@ -1,6 +1,8 @@
 # Спецификация: упрощённое ядро ответа support-agent
 
-**Статус:** согласовано для реализации; код и production ещё не изменены  
+> **SUPERSEDED — НЕ ИСПОЛНЯТЬ.** Full-corpus архитектура из этого документа вызвала production-регрессию и отменена 2026-08-12. Канонический текущий контракт: `docs/architecture/llm-wiki-knowledge-contract.md`, `docs/architecture/overview.md` и `docs/specs/support-agent-spec.md`. Production использует `simple_llm_wiki`: компактный OKF-каталог → semantic navigation → selective full-page reads → coverage review → grounded extraction → finalization.
+
+**Статус:** историческая отменённая спецификация; `simple_full_corpus` запрещён для production
 **Проект:** `/home/tian/support-agent`  
 **Цель:** заменить planner/KB-agent/finalizer loop одним предсказуемым ядром, которое формирует клиентский ответ одним LLM-вызовом и использует внешнюю compiled KB как единственный источник бизнес-фактов.
 

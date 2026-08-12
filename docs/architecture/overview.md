@@ -151,7 +151,7 @@ Each package has a monotonically increasing revision. A new source event or huma
 
 The repository keeps transport-level persistence separate from business dialogue content:
 - `transport_events` — raw inbound/outbound transport-event journal with dedupe key and processing status
-- `outbound_transport_sends` — bot-send reconciliation records used to match later transport-side echo/activity events
+- `outbound_transport_sends` — bot-send reconciliation records used to match later transport-side echo/activity events; a VK bot delivery creates and commits a `pending` row with its generated `random_id` before calling `messages.send`, then finalizes it to `sent` or `failed`
 - `conversation_transport_states` — per-conversation transport state such as last bot reply, last admin reply, and active human-override window
 
 Raw source events remain individually auditable; after an actual delivery, `messages` contains exactly one combined `user` turn and one `assistant` turn for the package. This transport layer exists around the current `RoutingService`; it does not replace the existing case/message runtime.
