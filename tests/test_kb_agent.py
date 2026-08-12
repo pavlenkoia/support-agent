@@ -257,6 +257,59 @@ def test_kb_agent_can_skip_coverage_review_via_settings(tmp_path: Path) -> None:
     assert len(client.calls) == 2
 
 
+def test_kb_agent_required_coverage_review_overrides_skip_setting(tmp_path: Path) -> None:
+    booking = tmp_path / "booking-and-schedule.md"
+    booking.write_text("# Booking and Schedule\n\nПрыжки обычно по выходным.\n", encoding="utf-8")
+    client = SequentialClient(
+        [
+            {
+                "user_intent": "расписание",
+                "information_needs": ["когда проходят прыжки"],
+                "selected_source_refs": [str(booking)],
+                "reason": "picked booking page",
+            },
+            {
+                "coverage_status": "enough",
+                "missing_facts": [],
+                "additional_source_refs": [],
+                "reason": "coverage_checked",
+            },
+            {
+                "grounding_status": "ready",
+                "answer_basis": "Прыжки обычно по выходным.",
+                "grounded_facts": ["Прыжки обычно по выходным."],
+                "missing_information": [],
+                "cited_source_refs": [str(booking)],
+                "reason": "selected_pages_grounded",
+            },
+        ]
+    )
+    service = KBAgentService(client=client)
+    kb_hits = [
+        {"source_ref": str(tmp_path / "index.md"), "source_type": "wiki_index", "retrieval_mode": "llm_wiki_catalog", "text": "# Wiki Index"},
+        {"source_ref": str(booking), "source_type": "wiki_page_card", "page_title": "Booking and Schedule", "linked_pages": [], "page_summary": "Расписание прыжков.", "page_preview": "Прыжки обычно по выходным.", "retrieval_mode": "llm_wiki_catalog", "text": "# Booking and Schedule"},
+    ]
+
+    old_value = settings.kb_agent_skip_coverage_review
+    settings.kb_agent_skip_coverage_review = True
+    try:
+        result = service.read(
+            "Когда обычно проходят прыжки?",
+            kb_hits,
+            require_coverage_review=True,
+        )
+    finally:
+        settings.kb_agent_skip_coverage_review = old_value
+
+    assert result["grounding_status"] == "ready"
+    assert result["trace"]["review"]["reason"] == "coverage_checked"
+    assert [call["response_format"] for call in client.calls] == [
+        {"type": "json_object"},
+        {"type": "json_object"},
+        {"type": "json_object"},
+    ]
+
+
 def test_kb_agent_can_use_deterministic_navigation_with_followup_context(tmp_path: Path) -> None:
     booking = tmp_path / "booking-and-schedule.md"
     booking.write_text("# Booking and Schedule\n\nПрыжки обычно по выходным. Для групп около 20 человек возможна договоренность на другой день.\n", encoding="utf-8")

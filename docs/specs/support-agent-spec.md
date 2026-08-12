@@ -2,7 +2,7 @@
 
 ## Current target behavior
 
-> Candidate mode: `ANSWER_ENGINE_MODE=simple_full_corpus` is implemented for isolated verification only; the default remains the legacy bounded loop until Igor explicitly approves production cutover.
+> Production mode is `ANSWER_ENGINE_MODE=simple_llm_wiki`. It intentionally removes the legacy planner loop while retaining the complete OKF contract: catalog navigation, selective full-page reading, coverage review, grounded extraction, and evidence-bounded finalization. `simple_full_corpus` is deprecated and forbidden for production.
 
 The support agent is a **bounded, policy-driven conversational agent**.
 
@@ -32,6 +32,9 @@ It is not a ticket router and not an escalation-first bot.
 20. Transport-level override must be re-checked immediately before a VK reply is sent.
 21. Planner actions are capability-bound: `use_tool` is valid only for an explicitly advertised runtime capability. A request outside that set is rejected before tool execution as internal `planner_action_rejected`, never customer-facing `cannot_answer` by itself.
 22. A defensive runtime capability mismatch (`tool_unavailable`) must immediately advance to KB/finalization; neither it nor a rejected planner action may repeat `use_tool` or consume another bounded-loop iteration.
+23. The production simple runtime must never load the whole compiled corpus into the answering prompt. It must start from the compact OKF catalog and pass only selected full pages to the KB agent.
+24. `simple_llm_wiki` must require coverage review at its call boundary; a stale `KB_AGENT_SKIP_COVERAGE_REVIEW=true` setting must not weaken this production invariant.
+25. The first customer-visible response, including `cannot_answer`, must begin with exactly one `Здравствуйте!`.
 
 ## Decision loop
 

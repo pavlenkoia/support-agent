@@ -2,7 +2,7 @@
 
 ## Core runtime
 
-> The default runtime remains the legacy bounded loop. A temporary `simple_full_corpus` candidate mode routes through `SimpleAnswerEngine` for isolated parity checks only; it must not be deployed without explicit approval.
+> Production uses the simple `simple_llm_wiki` runtime. It removes the legacy planner loop but preserves the mandatory OKF knowledge path: compact catalog, semantic LLM navigation, selective full-page reads, LLM coverage review, grounded extraction, and customer finalization. `simple_full_corpus` is a deprecated regression path and must not be deployed.
 
 This repository now targets a **bounded support-agent loop** rather than a linear `classify -> KB -> escalation` pipeline.
 
@@ -13,14 +13,28 @@ Runtime layers:
 - **React + Tailwind viewer-web** published separately on port `3002` for read-only dialog browsing, with optional shared-key login, long-lived `HttpOnly` cookie sessions, installable online-first PWA shell, theme toggle, mobile master-detail overlay navigation with slide-in / swipe-back detail transitions, and touch-driven day navigation in the dialog list
 - **Viewer Push worker** for opt-in Web Push delivery from a transactional PostgreSQL outbox to authenticated viewer PWA installations
 - **PostgreSQL** as system of record for cases, messages, workflow events, and transport state
-- **Bounded orchestrator loop** for per-turn decision making
+- **Simple LLM-wiki answer path** for production turns, without the legacy planner loop
 - **Separate KB agent** for Karpathy-style wiki navigation, selective page reads, and grounded fact extraction
 - **External compiled knowledge base** outside the repository
 - **External prompt files** (`SYSTEM_PROMPT.md`, `KB_AGENT_PROMPT.md`) outside the repository
 - **Optional runtime tools** for current-date / calculation / environment-aware checks
 - **Provider-aware LLM client layer** with bounded retry / timeout handling for transient failures and ordered multi-key failover for Mistral/openai-compatible roles
 
-## Per-turn orchestration contract
+## Production per-turn contract
+
+The production path is:
+
+1. build bounded dialogue context;
+2. load only the compact OKF index/page-card catalog;
+3. let the KB agent choose at most three starting pages semantically;
+4. read those pages in full;
+5. run coverage review and add at most two pages when required;
+6. extract grounded facts and a compact answer basis;
+7. finalize one customer answer from the allowlisted evidence packet.
+
+The runtime must not send every full KB page to a model as a substitute for wiki navigation. The `simple_llm_wiki` caller requires coverage review even if a stale global skip flag is present.
+
+## Legacy bounded-loop contract
 
 Each inbound turn is processed as a bounded loop with explicit actions and outcomes.
 

@@ -99,6 +99,8 @@ class RoutingService:
                 persist_inbound_message(session, case["case_id"], payload)
             if self.answer_engine_mode == "simple_full_corpus":
                 return self._handle_simple_inbound(session, case, payload)
+            if self.answer_engine_mode == "simple_llm_wiki":
+                return self._handle_simple_llm_wiki_inbound(session, case, payload)
             context = build_context(session, payload, case, summary_service=self.summary_service)
             knowledge_query = self._build_knowledge_query(context)
             turn_classification = {
@@ -256,6 +258,182 @@ class RoutingService:
         persist_workflow_event(session, case["case_id"], audit, event_type="inbound_processed", actor="system:routing")
         session.commit()
         return {"case": case, "context": context, "retrieval": retrieval, "kb_result": {}, "route": {key: value for key, value in route.items() if key != "reply"}, "outcome": outcome, "audit": audit}
+
+    def _handle_simple_llm_wiki_inbound(self, session, case: dict, payload: InboundMessage) -> dict:
+        messages = session.scalars(
+            select(Message).where(Message.case_id == case["case_id"]).order_by(Message.id.desc()).limit(11)
+        ).all()
+        history = [
+            {"role": message.role, "content": message.content}
+            for message in reversed(messages)
+            if message.role in {"user", "assistant"}
+        ]
+        if history and history[-1]["role"] == "user" and history[-1]["content"] == payload.text:
+            history.pop()
+        context = {
+            "user_message": payload.text,
+            "recent_messages": history[-10:],
+            "case_state": {
+                "case_id": case["case_id"],
+                "case_status": case["case_status"],
+                "conversation_id": case["conversation_id"],
+            },
+        }
+        first_reply = not any(item["role"] == "assistant" for item in context["recent_messages"])
+        tool_result = self.tool_runtime.collect(text=payload.text, kb_hits=[], conversation_context=context)
+        retrieval = self.retrieval.retrieve(
+            payload.text,
+            self.knowledge_backend,
+            str(self.knowledge_root or ""),
+            current_query=payload.text,
+        )
+        if (
+            retrieval.get("kb_architecture") != "llm_wiki"
+            or retrieval.get("kb_mode") != "llm_wiki_catalog"
+        ):
+            kb_result = {
+                "kb_status": retrieval.get("kb_status", "not_found"),
+                "kb_mode": retrieval.get("kb_mode", "invalid"),
+                "grounding_status": "not_found",
+                "answer_context": [],
+                "grounded_facts": [],
+                "answer_basis": "",
+                "source_refs": [],
+                "trace": {
+                    "kb_architecture": retrieval.get("kb_architecture"),
+                    "reason": "simple_llm_wiki_requires_okf_catalog",
+                },
+            }
+        else:
+            kb_result = self.kb_agent.read(
+                payload.text,
+                retrieval.get("kb_snippets", []),
+                conversation_context=context,
+                require_coverage_review=True,
+            )
+        grounding_status = str(kb_result.get("grounding_status") or "not_found")
+        if grounding_status in {"retry_pending", "llm_unavailable"}:
+            final_result = {
+                "route": "retry_pending",
+                "response_text": "",
+                "confidence": 0.0,
+                "reason": grounding_status,
+                "llm_trace": [],
+            }
+        elif grounding_status != "ready":
+            final_result = {
+                "route": "cannot_answer",
+                "response_text": self.policy.render_simple_cannot_answer(),
+                "confidence": 0.0,
+                "reason": f"grounding_{grounding_status}",
+                "llm_trace": [],
+            }
+        else:
+            final_result = self.direct_llm.respond(
+                payload.text,
+                kb_result,
+                knowledge_mode="kb_grounded",
+                conversation_context=context,
+                tool_observations=tool_result["tool_results"],
+                first_reply_in_dialogue=first_reply,
+            )
+
+        route_name = str(final_result.get("route") or "cannot_answer")
+        response_text = str(final_result.get("response_text") or "")
+        if route_name == "retry_pending":
+            response_text = ""
+        elif route_name == "out_of_scope":
+            response_text = self.policy.finalize_simple_customer_text(
+                self.policy.render_out_of_scope(),
+                first_reply_in_dialogue=first_reply,
+            )
+        elif route_name == "cannot_answer":
+            response_text = self.policy.finalize_simple_customer_text(
+                self.policy.render_simple_cannot_answer(),
+                first_reply_in_dialogue=first_reply,
+            )
+        else:
+            response_text = self.policy.finalize_simple_customer_text(
+                response_text,
+                first_reply_in_dialogue=first_reply,
+            )
+
+        kb_trace = kb_result.get("trace") if isinstance(kb_result.get("trace"), dict) else {}
+        kb_llm_trace = kb_trace.get("llm_trace") if isinstance(kb_trace.get("llm_trace"), list) else []
+        final_llm_trace = final_result.get("llm_trace") if isinstance(final_result.get("llm_trace"), list) else []
+        all_llm_trace = [*kb_llm_trace, *final_llm_trace]
+        selected_refs = [str(ref) for ref in kb_trace.get("selected_source_refs", []) if str(ref)]
+        source_refs = [str(ref) for ref in kb_result.get("source_refs", []) if str(ref)]
+        response_strategy = {
+            "answer_engine": "simple_llm_wiki",
+            "kb_architecture": "llm_wiki",
+            "navigation_mode": "llm",
+            "coverage_review_mode": "llm",
+            "extraction_mode": "grounded",
+            "selected_source_refs": selected_refs,
+            "logical_llm_call_count": len(all_llm_trace),
+            "provider_attempt_count": sum(int(item.get("attempts") or 1) for item in all_llm_trace),
+            "llm_trace": all_llm_trace,
+            "tool_observation_kinds": [item.get("kind") for item in tool_result["tool_results"]],
+        }
+        route = {
+            "route": route_name,
+            "reply": {"response_text": response_text},
+            "reason": str(final_result.get("reason") or "simple_llm_wiki"),
+            "route_reason": str(final_result.get("reason") or "simple_llm_wiki"),
+            "route_confidence": float(final_result.get("confidence") or 0.0),
+            "answer_engine": "simple_llm_wiki",
+            "outcome_kind": route_name,
+            "source_refs": source_refs,
+        }
+        outcome = self.outcome.execute(route, case, context, retrieval, payload.text)
+        support_case = session.scalar(select(SupportCase).where(SupportCase.id == case["case_id"]))
+        if support_case is not None:
+            support_case.status = case["case_status"]
+            support_case.route_mode = route_name
+        audit = build_audit_event(case, route, retrieval, outcome, {"turn_type": "simple_llm_wiki"}, response_strategy)
+        audit.update(
+            {
+                "kb_architecture": "llm_wiki",
+                "navigation_mode": "llm",
+                "coverage_review_mode": "llm",
+                "extraction_mode": "grounded",
+                "selected_source_refs": selected_refs,
+            }
+        )
+        persist_workflow_event(
+            session,
+            case["case_id"],
+            {
+                "answer_engine": "simple_llm_wiki",
+                "kb_architecture": "llm_wiki",
+                "navigation_mode": "llm",
+                "coverage_review_mode": "llm",
+                "extraction_mode": "grounded",
+                "selected_source_refs": selected_refs,
+                "source_refs": source_refs,
+            },
+            event_type="turn_classified",
+            actor="system:routing",
+        )
+        persist_workflow_event(
+            session,
+            case["case_id"],
+            {"response_strategy": response_strategy, "grounding_status": grounding_status, "source_refs": source_refs},
+            event_type="response_strategy_selected",
+            actor="system:routing",
+        )
+        persist_workflow_event(session, case["case_id"], audit, event_type="inbound_processed", actor="system:routing")
+        session.commit()
+        return {
+            "case": case,
+            "context": context,
+            "retrieval": retrieval,
+            "kb_result": kb_result,
+            "route": {key: value for key, value in route.items() if key != "reply"},
+            "outcome": outcome,
+            "audit": audit,
+        }
 
     def persist_inbound_message(self, case_id: int, payload: InboundMessage) -> None:
         with self.session_factory() as session:

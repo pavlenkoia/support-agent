@@ -34,6 +34,72 @@ class ForbiddenLegacyDependency:
         raise AssertionError(f"legacy dependency must not be used in simple mode: {name}")
 
 
+class RecordingCatalogRetrieval:
+    def __init__(self) -> None:
+        self.calls: list[dict] = []
+
+    def retrieve(self, query: str, knowledge_backend: str, knowledge_root: str, **kwargs: object) -> dict:
+        self.calls.append(
+            {
+                "query": query,
+                "knowledge_backend": knowledge_backend,
+                "knowledge_root": knowledge_root,
+                **kwargs,
+            }
+        )
+        return {
+            "kb_status": "found",
+            "kb_mode": "llm_wiki_catalog",
+            "kb_architecture": "llm_wiki",
+            "navigation_mode": "llm",
+            "coverage_review_mode": "llm",
+            "extraction_mode": "grounded",
+            "kb_snippets": [{"source_ref": "index/catalog.json", "retrieval_mode": "llm_wiki_catalog"}],
+        }
+
+
+class RecordingWikiReader:
+    def __init__(self, *, grounding_status: str = "ready") -> None:
+        self.calls: list[dict] = []
+        self.grounding_status = grounding_status
+
+    def read(self, text: str, kb_hits: list[dict], **kwargs: object) -> dict:
+        self.calls.append({"text": text, "kb_hits": kb_hits, **kwargs})
+        return {
+            "kb_status": "found",
+            "kb_mode": "llm_wiki_selected_pages",
+            "grounding_status": self.grounding_status,
+            "answer_context": [{"source_ref": "compiled/concepts/booking.md", "text": "Тандем: форма записи."}],
+            "grounded_facts": ["Запись на тандем доступна через форму."],
+            "answer_basis": "Предложить форму записи на тандем.",
+            "source_refs": ["compiled/concepts/booking.md"],
+            "trace": {
+                "kb_architecture": "llm_wiki",
+                "navigation_mode": "llm",
+                "coverage_review_mode": "llm",
+                "extraction_mode": "grounded",
+                "navigation": {"selected_source_refs": ["compiled/concepts/booking.md"]},
+                "review": {"coverage_status": "enough"},
+                "selected_source_refs": ["compiled/concepts/booking.md"],
+            },
+        }
+
+
+class RecordingGroundedFinalizer:
+    def __init__(self) -> None:
+        self.calls: list[dict] = []
+
+    def respond(self, text: str, kb_result: dict, **kwargs: object) -> dict:
+        self.calls.append({"text": text, "kb_result": kb_result, **kwargs})
+        return {
+            "route": "answer",
+            "response_text": "Здравствуйте! Заполните форму записи на тандем.",
+            "confidence": 0.95,
+            "reason": "ready_grounding",
+            "llm_trace": [{"role": "direct_llm", "step": "final_response"}],
+        }
+
+
 class TextOnlyPolicy:
     def __init__(self, profile_root: Path | None = None, prompt_service=None) -> None:
         from app.services.policy import PolicyService
@@ -81,6 +147,104 @@ def test_simple_mode_routes_once_without_legacy_orchestrator(tmp_path: Path, cha
     assert result["route"]["answer_engine"] == "simple_full_corpus"
     assert len(engine.calls) == 1
     assert engine.calls[0]["question"] == "Сколько стоит?"
+
+
+def test_simple_llm_wiki_mode_uses_catalog_navigation_selected_pages_and_grounded_finalization(tmp_path: Path) -> None:
+    session_factory = make_session_factory(f"sqlite+pysqlite:///{tmp_path / 'simple-llm-wiki.db'}")
+    Base.metadata.create_all(bind=session_factory.kw["bind"])
+    retrieval = RecordingCatalogRetrieval()
+    wiki_reader = RecordingWikiReader()
+    finalizer = RecordingGroundedFinalizer()
+    routing = RoutingService(
+        session_factory=session_factory,
+        answer_engine_mode="simple_llm_wiki",
+        knowledge_backend="filesystem",
+        knowledge_root="/tmp/okf-wiki",
+        retrieval=retrieval,
+        kb_agent=wiki_reader,
+        direct_llm=finalizer,
+        orchestrator=ForbiddenLegacyOwner(),
+        summary_service=ForbiddenLegacyDependency(),
+    )
+
+    result = routing.handle_inbound(
+        InboundMessage(
+            channel="telegram",
+            external_user_id="igor",
+            external_chat_id="igor",
+            text="Привет, звоню по телефону никто не берет трубку. Хотели бы прыгнуть в тандеме.",
+        )
+    )
+
+    assert result["route"]["route"] == "answer"
+    assert result["route"]["answer_engine"] == "simple_llm_wiki"
+    assert result["outcome"]["outcome_payload"]["response_text"].startswith("Здравствуйте!")
+    assert retrieval.calls[0]["knowledge_root"] == "/tmp/okf-wiki"
+    assert wiki_reader.calls[0]["kb_hits"][0]["retrieval_mode"] == "llm_wiki_catalog"
+    assert wiki_reader.calls[0]["require_coverage_review"] is True
+    assert finalizer.calls[0]["kb_result"]["kb_mode"] == "llm_wiki_selected_pages"
+    assert result["audit"]["kb_architecture"] == "llm_wiki"
+    assert result["audit"]["navigation_mode"] == "llm"
+    assert result["audit"]["coverage_review_mode"] == "llm"
+    assert result["audit"]["selected_source_refs"] == ["compiled/concepts/booking.md"]
+
+
+def test_simple_llm_wiki_first_reply_cannot_answer_still_gets_required_greeting(tmp_path: Path) -> None:
+    session_factory = make_session_factory(f"sqlite+pysqlite:///{tmp_path / 'simple-llm-wiki-no-answer.db'}")
+    Base.metadata.create_all(bind=session_factory.kw["bind"])
+    finalizer = RecordingGroundedFinalizer()
+    routing = RoutingService(
+        session_factory=session_factory,
+        answer_engine_mode="simple_llm_wiki",
+        knowledge_backend="filesystem",
+        knowledge_root="/tmp/okf-wiki",
+        retrieval=RecordingCatalogRetrieval(),
+        kb_agent=RecordingWikiReader(grounding_status="not_found"),
+        direct_llm=finalizer,
+        orchestrator=ForbiddenLegacyOwner(),
+        summary_service=ForbiddenLegacyDependency(),
+        policy=TextOnlyPolicy(),
+    )
+
+    result = routing.handle_inbound(
+        InboundMessage(channel="telegram", external_user_id="igor", external_chat_id="igor", text="Привет, неизвестный факт")
+    )
+
+    assert result["route"]["route"] == "cannot_answer"
+    assert result["outcome"]["outcome_payload"]["response_text"].startswith("Здравствуйте!")
+    assert finalizer.calls == []
+
+
+def test_simple_llm_wiki_fails_closed_when_retrieval_does_not_return_okf_catalog(tmp_path: Path) -> None:
+    class LegacyRetrieval:
+        def retrieve(self, *args: object, **kwargs: object) -> dict:
+            return {
+                "kb_status": "found",
+                "kb_mode": "retrieved_snippets",
+                "kb_snippets": [{"text": "legacy snippet"}],
+            }
+
+    session_factory = make_session_factory(f"sqlite+pysqlite:///{tmp_path / 'simple-llm-wiki-invalid-kb.db'}")
+    Base.metadata.create_all(bind=session_factory.kw["bind"])
+    finalizer = RecordingGroundedFinalizer()
+    routing = RoutingService(
+        session_factory=session_factory,
+        answer_engine_mode="simple_llm_wiki",
+        knowledge_backend="filesystem",
+        knowledge_root="/tmp/not-okf",
+        retrieval=LegacyRetrieval(),
+        kb_agent=ForbiddenLegacyDependency(),
+        direct_llm=finalizer,
+        policy=TextOnlyPolicy(),
+    )
+
+    result = routing.handle_inbound(
+        InboundMessage(channel="telegram", external_user_id="igor", external_chat_id="igor", text="Как записаться?")
+    )
+
+    assert result["route"]["route"] == "cannot_answer"
+    assert result["kb_result"]["trace"]["reason"] == "simple_llm_wiki_requires_okf_catalog"
+    assert finalizer.calls == []
 
 
 def test_simple_policy_can_sanitize_text_but_cannot_change_engine_kind(tmp_path: Path) -> None:
