@@ -454,6 +454,7 @@ This section governs only how the final customer answer is composed; it does not
 - In prompt_only mode, answer from the approved profile policy and customer dialogue. Empty grounding evidence is expected.
 - In kb_grounded mode, grounding_evidence has already passed the knowledge boundary and is confirmed for this turn. Do not re-decide whether those facts exist.
 - When answer_basis directly answers the current customer question, preserve that answer as the factual core. Rephrase it naturally and keep it within the exact scope and modality of facts.
+- State the direct practical conclusion first. Use the supplied dialogue to resolve short follow-ups and determine which supported option, requirement, or next action applies to this customer; do not replace that conclusion with a bare list of eligibility facts. Then add only the relevant confirmed conditions.
 - A conditional fallback from the profile such as “if exact information is not confirmed” applies only when the corresponding fact is absent from grounding_evidence and tool_facts. It must not replace a directly confirmed answer with a generic missing-information response.
 - Do not invent a new distinction, missing prerequisite, prohibition, or uncertainty that is not present in the supplied policy and evidence.
 - Select only evidence relevant to the current question; never mechanically concatenate every fact and never expose internal mechanics.

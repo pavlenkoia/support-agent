@@ -10,10 +10,12 @@ def test_ready_grounding_is_finalized_with_system_prompt_and_compact_evidence(mo
         def __init__(self) -> None:
             self.calls = 0
             self.payload: dict | None = None
+            self.system_prompt = ""
 
         def generate(self, **kwargs):
             self.calls += 1
             self.payload = json.loads(kwargs["user_prompt"])
+            self.system_prompt = kwargs["system_prompt"]
             return json.dumps(
                 {
                     "route": "answer",
@@ -44,6 +46,7 @@ def test_ready_grounding_is_finalized_with_system_prompt_and_compact_evidence(mo
     assert client.calls == 1
     assert client.payload is not None
     assert client.payload["grounding_evidence"]["answer_basis"] == "Да, прыгнуть можно."
+    assert "State the direct practical conclusion first" in client.system_prompt
     assert result["route"] == "answer"
     assert result["response_text"] == "Да, прыгнуть можно. Отсутствие этой экипировки само по себе не мешает прыжку."
     assert result["reason"] == "finalized_from_grounding"

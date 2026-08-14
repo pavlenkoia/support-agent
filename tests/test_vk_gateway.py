@@ -52,6 +52,18 @@ class RaisingVKSender:
         raise RuntimeError("vk sender socket closed")
 
 
+class FailOnceVKSender(RecordingVKSender):
+    def __init__(self) -> None:
+        super().__init__()
+        self.attempts: list[tuple[str, str, str | None]] = []
+
+    def send_message(self, *, peer_id: str, text: str, random_id: str | None = None) -> dict:
+        self.attempts.append((peer_id, text, random_id))
+        if len(self.attempts) == 1:
+            raise RuntimeError("vk sender socket closed after request")
+        return super().send_message(peer_id=peer_id, text=text, random_id=random_id)
+
+
 class PendingJournalAssertingVKSender:
     """Requires the gateway to journal a generated VK random_id before sending."""
 
@@ -227,6 +239,23 @@ class DeferredRetryRouting(StubRouting):
         }
 
 
+class TwoFailuresThenAnswerRouting(StubRouting):
+    def __init__(self) -> None:
+        super().__init__(response_text="Ответ на оба сообщения")
+        self.calls = 0
+        self.handled_texts: list[str] = []
+
+    def handle_inbound(self, payload, *, persist_inbound: bool = True) -> dict:
+        self.calls += 1
+        self.handled_texts.append(payload.text)
+        if self.calls <= 2:
+            return {
+                "case": {"conversation_id": 1, "case_id": 1, "case_status": "retry_pending"},
+                "outcome": {"outcome_type": "retry_pending", "outcome_payload": {"response_text": ""}},
+            }
+        return super().handle_inbound(payload, persist_inbound=persist_inbound)
+
+
 class RetryBecomesStaleDuringRouting(StubRouting):
     def __init__(self, session_factory) -> None:
         super().__init__(response_text="Старый ответ")
@@ -376,9 +405,158 @@ def test_vk_gateway_retries_pending_kb_transport_failure_without_intermediate_cu
         stored = session.scalar(select(TransportEvent).where(TransportEvent.dedupe_key == "vk:message_new:2000:100"))
         assert stored is not None
         assert stored.status == "processed"
+        persisted_messages = list(session.scalars(select(Message).order_by(Message.id)))
+        assert [(message.role, message.content) for message in persisted_messages] == [
+            ("user", "Есть ли ограничения по весу?"),
+        ]
+        assert routing.recorded_outbound == [(1, "Ответ после повтора")]
 
 
-def test_vk_gateway_suppresses_stale_retry_when_newer_inbound_exists(tmp_path: Path) -> None:
+def test_vk_gateway_retry_reuses_journaled_reply_after_ambiguous_send_failure(tmp_path: Path) -> None:
+    sender = FailOnceVKSender()
+    routing = DeferredRetryRouting()
+    service, session_factory = make_service(tmp_path, routing=routing, sender=sender)
+    event = {
+        "type": "message_new",
+        "group_id": 55,
+        "object": {"message": {"id": 100, "peer_id": 2000, "from_id": 3000, "text": "Есть ли ограничения по весу?", "date": 1780000000}},
+    }
+
+    service.handle_event(event)
+    with session_factory() as session:
+        stored = session.scalar(select(TransportEvent).where(TransportEvent.dedupe_key == "vk:message_new:2000:100"))
+        assert stored is not None
+        first_due_at = stored.available_at
+
+    service.process_due_retries(now=first_due_at + timedelta(seconds=1))
+
+    with session_factory() as session:
+        stored = session.scalar(select(TransportEvent).where(TransportEvent.dedupe_key == "vk:message_new:2000:100"))
+        assert stored is not None
+        assert stored.status == "retry_pending"
+        second_due_at = stored.available_at
+        sends = list(session.scalars(select(OutboundTransportSend)))
+        assert [(send.send_status, send.content_text) for send in sends] == [("pending", "Ответ после повтора")]
+        messages = list(session.scalars(select(Message).order_by(Message.id)))
+        assert [(message.role, message.content) for message in messages] == [
+            ("user", "Есть ли ограничения по весу?"),
+        ]
+
+    service.process_due_retries(now=second_due_at + timedelta(seconds=1))
+
+    assert len(routing.persist_flags) == 2, "journal replay must not regenerate a different customer answer"
+    assert [attempt[1] for attempt in sender.attempts] == ["Ответ после повтора", "Ответ после повтора"]
+    assert len({attempt[2] for attempt in sender.attempts}) == 1
+    with session_factory() as session:
+        stored = session.scalar(select(TransportEvent).where(TransportEvent.dedupe_key == "vk:message_new:2000:100"))
+        assert stored is not None
+        assert stored.status == "processed"
+        messages = list(session.scalars(select(Message).order_by(Message.id)))
+        assert [(message.role, message.content) for message in messages] == [
+            ("user", "Есть ли ограничения по весу?"),
+        ]
+    assert routing.recorded_outbound == [(1, "Ответ после повтора")]
+
+
+def test_vk_gateway_retries_all_unanswered_messages_in_order_as_one_turn(tmp_path: Path) -> None:
+    sender = RecordingVKSender()
+    routing = TwoFailuresThenAnswerRouting()
+    service, session_factory = make_service(tmp_path, routing=routing, sender=sender)
+    now = datetime.now(UTC)
+    first_event = {
+        "type": "message_new",
+        "group_id": 55,
+        "object": {"message": {"id": 100, "peer_id": 2000, "from_id": 3000, "text": "больше требований никаких нет?", "date": int(now.timestamp())}},
+    }
+    second_event = {
+        "type": "message_new",
+        "group_id": 55,
+        "object": {"message": {"id": 101, "peer_id": 2000, "from_id": 3000, "text": "какой-то инструктаж проходят", "date": int((now + timedelta(seconds=1)).timestamp())}},
+    }
+
+    service.handle_event(first_event)
+    service.handle_event(second_event)
+    with session_factory() as session:
+        retry_events = list(
+            session.scalars(
+                select(TransportEvent)
+                .where(TransportEvent.status == "retry_pending")
+                .order_by(TransportEvent.id)
+            )
+        )
+        assert [event.external_message_id for event in retry_events] == ["100", "101"]
+        due_at = max(event.available_at for event in retry_events)
+
+    retried = service.process_due_retries(now=due_at + timedelta(seconds=1))
+
+    assert retried["processed"] == 2
+    assert routing.handled_texts[-1] == "больше требований никаких нет?\nкакой-то инструктаж проходят"
+    assert sender.calls == [("2000", "Ответ на оба сообщения")]
+    with session_factory() as session:
+        persisted_messages = list(session.scalars(select(Message).order_by(Message.id)))
+        assert [(message.role, message.content) for message in persisted_messages] == [
+            ("user", "больше требований никаких нет?\nкакой-то инструктаж проходят"),
+        ]
+
+
+def test_vk_gateway_partial_group_claim_is_rolled_back_and_not_counted(tmp_path: Path) -> None:
+    routing = AlwaysRetryRouting()
+    service, session_factory = make_service(tmp_path, routing=routing)
+    now = datetime.now(UTC)
+    service.handle_event({
+        "type": "message_new",
+        "group_id": 55,
+        "object": {"message": {"id": 100, "peer_id": 2000, "from_id": 3000, "text": "Первый вопрос", "date": int(now.timestamp())}},
+    })
+    with session_factory() as session:
+        event = session.scalar(select(TransportEvent).where(TransportEvent.dedupe_key == "vk:message_new:2000:100"))
+        assert event is not None
+        event_id = event.id
+
+    processed = service._process_retry_event(
+        event_id,
+        source_event_ids=[event_id, event_id + 9999],
+        now=now + timedelta(minutes=1),
+    )
+
+    assert processed == 0
+    with session_factory() as session:
+        event = session.get(TransportEvent, event_id)
+        assert event is not None
+        assert event.status == "retry_pending"
+
+
+def test_vk_gateway_waits_for_newest_unanswered_retry_schedule(tmp_path: Path) -> None:
+    sender = RecordingVKSender()
+    routing = TwoFailuresThenAnswerRouting()
+    service, session_factory = make_service(tmp_path, routing=routing, sender=sender)
+    now = datetime.now(UTC)
+    for message_id, text_value in [(100, "Первый вопрос"), (101, "Второе уточнение")]:
+        service.handle_event({
+            "type": "message_new",
+            "group_id": 55,
+            "object": {"message": {"id": message_id, "peer_id": 2000, "from_id": 3000, "text": text_value, "date": int(now.timestamp())}},
+        })
+    with session_factory() as session:
+        events = list(session.scalars(select(TransportEvent).order_by(TransportEvent.id)))
+        events[0].available_at = now
+        events[1].available_at = now + timedelta(seconds=30)
+        session.commit()
+
+    early = service.process_due_retries(now=now + timedelta(seconds=1))
+
+    assert early["processed"] == 0
+    assert len(routing.handled_texts) == 2
+    assert sender.calls == []
+
+    due = service.process_due_retries(now=now + timedelta(seconds=31))
+
+    assert due["processed"] == 2
+    assert routing.handled_texts[-1] == "Первый вопрос\nВторое уточнение"
+    assert sender.calls == [("2000", "Ответ на оба сообщения")]
+
+
+def test_vk_gateway_keeps_unanswered_messages_grouped_when_retry_is_still_unavailable(tmp_path: Path) -> None:
     sender = RecordingVKSender()
     routing = AlwaysRetryRouting()
     service, session_factory = make_service(tmp_path, routing=routing, sender=sender)
@@ -406,10 +584,17 @@ def test_vk_gateway_suppresses_stale_retry_when_newer_inbound_exists(tmp_path: P
     assert retried["processed"] == 2
     assert sender.calls == []
     with session_factory() as session:
-        first = session.scalar(select(TransportEvent).where(TransportEvent.dedupe_key == "vk:message_new:2000:100"))
-        assert first is not None
-        assert first.status == "suppressed"
-        assert first.error_text == "vk_retry_suppressed"
+        stored = list(
+            session.scalars(
+                select(TransportEvent)
+                .where(TransportEvent.dedupe_key.in_(["vk:message_new:2000:100", "vk:message_new:2000:101"]))
+                .order_by(TransportEvent.id)
+            )
+        )
+        assert [(event.external_message_id, event.status) for event in stored] == [
+            ("100", "retry_pending"),
+            ("101", "retry_pending"),
+        ]
 
 
 def test_vk_gateway_suppresses_retry_that_becomes_stale_during_routing(tmp_path: Path) -> None:

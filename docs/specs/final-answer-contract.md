@@ -96,3 +96,4 @@ Internal planner, KB, route, LLM, and tool traces remain available in `response_
 5. Exact replay of case 594 answers the payment-method question from ready KB evidence instead of applying the “information not confirmed” fallback.
 6. A prompt-sufficient regression still answers from `SYSTEM_PROMPT.md` without reading KB.
 7. Targeted tests, the full suite, production image/hash checks, and literal internal production probes all pass before the change is reported complete.
+8. Exact isolated replay of case 700 preserves the unanswered follow-ups in chronological order and the final answer states the practical conclusion implied by grounded evidence and dialogue before listing relevant conditions.
