@@ -68,10 +68,13 @@ A normal final answer must:
 
 1. answer the practical customer question first;
 2. use natural customer-facing language;
-3. include only relevant confirmed conditions or the next useful step;
-4. preserve modality (`usually`, `may`, `depends`, conditional scope);
-5. avoid mentioning KB, prompts, tools, traces, routes, evidence, reasoning, or internal decisions;
-6. obey the common first-reply greeting boundary without duplicating a greeting.
+3. keep the most recent explicit customer constraint or preference active across short follow-ups, unless the customer changes it or asks for a comparison;
+4. acknowledge a newly stated or narrowed constraint in the first sentence before applying grounded facts;
+5. include only relevant confirmed conditions or the next useful step;
+6. when the customer asks whether other requirements exist, avoid an exhaustive “none” claim if grounded evidence contains relevant conditions or is not exhaustive;
+7. preserve modality (`usually`, `may`, `depends`, conditional scope);
+8. avoid mentioning KB, prompts, tools, traces, routes, evidence, reasoning, or internal decisions;
+9. obey the common first-reply greeting boundary without duplicating a greeting.
 
 No domain-specific question handler, keyword branch, canned FAQ shortcut, or mechanical fact renderer is part of the normal path.
 
@@ -96,4 +99,4 @@ Internal planner, KB, route, LLM, and tool traces remain available in `response_
 5. Exact replay of case 594 answers the payment-method question from ready KB evidence instead of applying the “information not confirmed” fallback.
 6. A prompt-sufficient regression still answers from `SYSTEM_PROMPT.md` without reading KB.
 7. Targeted tests, the full suite, production image/hash checks, and literal internal production probes all pass before the change is reported complete.
-8. Exact isolated replay of case 700 preserves the unanswered follow-ups in chronological order and the final answer states the practical conclusion implied by grounded evidence and dialogue before listing relevant conditions.
+8. Exact isolated replay of a historical multi-message failure preserves the unanswered follow-ups in chronological order, sends the combined newline-delimited turn through the common finalizer, keeps the customer's latest explicit constraint active, and produces exactly one practical answer before listing relevant conditions.
