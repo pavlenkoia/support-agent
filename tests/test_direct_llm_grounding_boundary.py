@@ -48,6 +48,7 @@ def test_ready_grounding_is_finalized_with_system_prompt_and_compact_evidence(mo
     assert client.payload["grounding_evidence"]["answer_basis"] == "Да, прыгнуть можно."
     assert "State the direct practical conclusion first" in client.system_prompt
     assert "explicitly acknowledge that constraint or preference" in client.system_prompt
+    assert "Keep the most recent explicit customer constraint or preference active" in client.system_prompt
     assert "do not claim that none exist" in client.system_prompt
     assert result["route"] == "answer"
     assert result["response_text"] == "Да, прыгнуть можно. Отсутствие этой экипировки само по себе не мешает прыжку."

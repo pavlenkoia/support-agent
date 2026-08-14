@@ -489,6 +489,7 @@ class KBAgentService:
             "answer_basis должен быть короткой служебной опорой для финального support-agent ответа.",
             "Resolve short or elliptical follow-ups using only the explicit conversation_context; keep the current user message as the question and recover its subject from the recent dialogue instead of treating it as a standalone topic.",
             "When the current user asks about other or remaining conditions, extract all relevant requirements present in the selected pages; do not return not_found merely because the subject appears only in conversation_context.",
+            "Keep the most recent explicit customer constraint or preference in conversation_context active for the current follow-up. Do not extract an excluded earlier alternative unless the current user asks to compare or changes that constraint.",
         ]
         if minimal_schema:
             rules.extend(
