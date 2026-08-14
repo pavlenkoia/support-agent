@@ -357,6 +357,9 @@ def test_kb_agent_can_use_deterministic_navigation_with_followup_context(tmp_pat
     assert result["grounding_status"] == "ready"
     assert result["source_refs"] == [str(booking)]
     assert result["trace"]["navigation"]["reason"].startswith("deterministic_navigation:")
+    extraction_prompt = json.loads(client.calls[-1]["user_prompt"])
+    assert any("Resolve short or elliptical follow-ups" in rule for rule in extraction_prompt["rules"])
+    assert any("all relevant requirements" in rule for rule in extraction_prompt["rules"])
     assert result["trace"]["selected_source_refs"] == [str(booking)]
     assert len(client.calls) == 1
 

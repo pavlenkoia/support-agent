@@ -487,6 +487,8 @@ class KBAgentService:
             "Не дополняй выводы догадками и не отвечай в клиентском стиле.",
             "Явное общее правило из страницы можно считать подтверждённым для частного случая только когда его формулировка прямо охватывает все или остальные категории; процитируй это правило как факт и укажи страницу.",
             "answer_basis должен быть короткой служебной опорой для финального support-agent ответа.",
+            "Resolve short or elliptical follow-ups using only the explicit conversation_context; keep the current user message as the question and recover its subject from the recent dialogue instead of treating it as a standalone topic.",
+            "When the current user asks about other or remaining conditions, extract all relevant requirements present in the selected pages; do not return not_found merely because the subject appears only in conversation_context.",
         ]
         if minimal_schema:
             rules.extend(
