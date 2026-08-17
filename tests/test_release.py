@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
+from scripts.build_runtime_profile import build_runtime_profile
 from scripts.release import (
     APP_SERVICES,
     ReleaseVerificationError,
+    verify_canonical_profile_build,
+    verify_profile_artifacts,
     verify_release_evidence,
 )
 
@@ -76,3 +81,52 @@ def test_verify_release_evidence_rejects_missing_runtime_service() -> None:
             release_started_at=100.0,
             expected_runtime_manifest="same-manifest",
         )
+
+
+def test_verify_profile_artifacts_accepts_exact_canonical_tree(tmp_path) -> None:
+    canonical = tmp_path / "canonical"
+    runtime = tmp_path / "runtime"
+    for root in (canonical, runtime):
+        (root / "kb" / "compiled" / "concepts").mkdir(parents=True)
+        (root / "SYSTEM_PROMPT.md").write_text("generic support contract\n", encoding="utf-8")
+        (root / "KB_AGENT_PROMPT.md").write_text("generic wiki reader contract\n", encoding="utf-8")
+        (root / "kb" / "index.json").write_text('{"pages": []}\n', encoding="utf-8")
+        (root / "kb" / "compiled" / "concepts" / "facts.md").write_text("facts\n", encoding="utf-8")
+
+    verify_profile_artifacts(runtime, canonical)
+
+
+def test_verify_profile_artifacts_rejects_runtime_prompt_drift(tmp_path) -> None:
+    canonical = tmp_path / "canonical"
+    runtime = tmp_path / "runtime"
+    for root in (canonical, runtime):
+        (root / "kb").mkdir(parents=True)
+        (root / "SYSTEM_PROMPT.md").write_text("generic support contract\n", encoding="utf-8")
+        (root / "KB_AGENT_PROMPT.md").write_text("generic wiki reader contract\n", encoding="utf-8")
+    (runtime / "SYSTEM_PROMPT.md").write_text("scenario patch\n", encoding="utf-8")
+
+    with pytest.raises(ReleaseVerificationError, match=r"profile artifact mismatch: SYSTEM_PROMPT\.md"):
+        verify_profile_artifacts(runtime, canonical)
+
+
+def test_verify_profile_artifacts_rejects_extra_runtime_file(tmp_path) -> None:
+    canonical = tmp_path / "canonical"
+    runtime = tmp_path / "runtime"
+    for root in (canonical, runtime):
+        root.mkdir()
+        (root / "SYSTEM_PROMPT.md").write_text("generic support contract\n", encoding="utf-8")
+    (runtime / "legacy-prompt.md").write_text("stale scenario\n", encoding="utf-8")
+
+    with pytest.raises(ReleaseVerificationError, match="profile artifact tree mismatch"):
+        verify_profile_artifacts(runtime, canonical)
+
+
+def test_verify_canonical_profile_build_rejects_stale_generated_artifact(tmp_path) -> None:
+    repository_source = Path(__file__).resolve().parents[1] / "deploy" / "profile-source"
+    canonical = tmp_path / "runtime-profile"
+    build_runtime_profile(repository_source, canonical)
+    verify_canonical_profile_build(repository_source, canonical)
+
+    (canonical / "SYSTEM_PROMPT.md").write_text("stale generated prompt\n", encoding="utf-8")
+    with pytest.raises(ReleaseVerificationError, match=r"profile artifact mismatch: SYSTEM_PROMPT\.md"):
+        verify_canonical_profile_build(repository_source, canonical)

@@ -55,7 +55,7 @@ def test_ready_grounding_is_finalized_with_system_prompt_and_compact_evidence(mo
     assert result["reason"] == "finalized_from_grounding"
 
 
-def test_ready_grounding_renderer_separates_unpunctuated_facts() -> None:
+def test_legacy_ready_grounding_renderer_is_disabled() -> None:
     result = DirectLLMService(client=None)._render_ready_grounding(
         {
             "grounded_facts": [
@@ -66,10 +66,7 @@ def test_ready_grounding_renderer_separates_unpunctuated_facts() -> None:
         }
     )
 
-    assert result == (
-        "Очки, шлем, комбинезон и перчатки не выдаются. "
-        "Их отсутствие само по себе не мешает прыжку. Берцы можно взять в прокате на месте."
-    )
+    assert result == ""
 
 
 def test_clarification_finalizer_receives_generic_intent_without_kb_evidence(monkeypatch) -> None:

@@ -207,7 +207,7 @@ def test_tool_runtime_does_not_treat_office_hours_as_weekend_jump_check(monkeypa
     assert [item["kind"] for item in result["tool_results"]] == ["calendar_weekday"]
 
 
-def test_direct_llm_grounded_fallback_ignores_weekend_kb_for_office_question() -> None:
+def test_legacy_grounded_fallback_is_disabled_for_all_business_questions() -> None:
     service = DirectLLMService(client=None)
 
     result = service._fallback_answer_from_grounding(
@@ -229,9 +229,7 @@ def test_direct_llm_grounded_fallback_ignores_weekend_kb_for_office_question() -
         reason="test_fallback",
     )
 
-    assert result is not None
-    assert "Прыжки обычно проходят по выходным" not in result["response_text"]
-    assert "офисе по будням" in result["response_text"]
+    assert result is None
 
 
 def test_tool_runtime_projects_public_period_metadata_without_weekend_dates_or_exact_date_list(monkeypatch) -> None:
@@ -266,7 +264,7 @@ def test_tool_runtime_public_period_projection_preserves_single_date_weekday_obs
     assert projected == result["tool_results"][0]
 
 
-def test_ready_grounding_cannot_finish_as_clarification(monkeypatch) -> None:
+def test_ready_grounding_does_not_trigger_application_side_answer_override(monkeypatch) -> None:
     class ClarifyingClient:
         def generate(self, **kwargs):
             return '{"route":"clarification_requested","response_text":"Какой именно вариант услуги вас интересует?","confidence":0.9,"reason":"model_requested_clarification"}'
@@ -287,10 +285,9 @@ def test_ready_grounding_cannot_finish_as_clarification(monkeypatch) -> None:
         conversation_context={"recent_messages": [{"role": "user", "content": "Можно записаться на следующую неделю?"}]},
     )
 
-    assert result["route"] == "answer"
-    assert "Прыжки обычно проходят по выходным" in result["response_text"]
-    assert "Какой именно вариант" not in result["response_text"]
-
+    assert result["route"] == "clarification_requested"
+    assert result["response_text"] == "Какой именно вариант услуги вас интересует?"
+    assert result["reason"] == "model_requested_clarification"
 
 def test_ready_grounding_is_finalized_by_customer_facing_model(monkeypatch) -> None:
     class ContextAwareClient:
@@ -375,7 +372,7 @@ def test_ready_grounding_sends_answer_basis_and_facts_without_internal_trace_to_
     assert result["reason"] == "finalized"
 
 
-def test_direct_llm_runtime_error_returns_grounded_kb_answer(monkeypatch) -> None:
+def test_direct_llm_runtime_error_fails_closed_without_customer_reply(monkeypatch) -> None:
     class BrokenClient:
         def generate(self, **kwargs):
             raise RuntimeError("IncompleteRead")
@@ -398,12 +395,13 @@ def test_direct_llm_runtime_error_returns_grounded_kb_answer(monkeypatch) -> Non
         },
     )
 
-    assert result["route"] == "answer"
-    assert "+7 (351) 214-30-30" in result["response_text"]
-    assert result["reason"] == "prompt_runtime_grounded_fallback:RuntimeError"
+    assert result["route"] == "retry_pending"
+    assert result["response_text"] == ""
+    assert result["reason"] == "final_response_error:RuntimeError"
+    assert result["llm_trace"][0]["step"] == "final_response_failed_closed"
 
 
-def test_direct_llm_ready_grounding_never_degrades_to_cannot_answer_when_secondary_fallback_fails(monkeypatch) -> None:
+def test_direct_llm_ready_grounding_is_not_rendered_by_application_fallback(monkeypatch) -> None:
     class BrokenClient:
         def generate(self, **kwargs):
             raise RuntimeError("IncompleteRead")
@@ -425,13 +423,13 @@ def test_direct_llm_ready_grounding_never_degrades_to_cannot_answer_when_seconda
         },
     )
 
-    assert result["route"] == "answer"
-    assert result["response_text"] == "При весе 120 кг тандем-прыжок невозможен."
-    assert result["reason"] == "prompt_runtime_grounded_fallback:RuntimeError"
-    assert result["llm_trace"][0]["step"] == "grounded_fallback"
+    assert result["route"] == "retry_pending"
+    assert result["response_text"] == ""
+    assert result["reason"] == "final_response_error:RuntimeError"
+    assert result["llm_trace"][0]["step"] == "final_response_failed_closed"
 
 
-def test_direct_llm_runtime_error_prefers_kb_answer_basis(monkeypatch) -> None:
+def test_direct_llm_runtime_error_does_not_emit_kb_answer_basis_verbatim(monkeypatch) -> None:
     class BrokenClient:
         def generate(self, **kwargs):
             raise RuntimeError("IncompleteRead")
@@ -460,11 +458,9 @@ def test_direct_llm_runtime_error_prefers_kb_answer_basis(monkeypatch) -> None:
         },
     )
 
-    assert result["route"] == "answer"
-    assert "+7 (351) 214-30-30" in result["response_text"]
-    assert "пятницу после 12:00" not in result["response_text"]
-    assert "3–4 часа" not in result["response_text"]
-    assert "прыгнуть завтра" not in result["response_text"]
+    assert result["route"] == "retry_pending"
+    assert result["response_text"] == ""
+    assert result["reason"] == "final_response_error:RuntimeError"
 
 
 def test_tool_runtime_resolves_month_range_to_weekend_dates(monkeypatch) -> None:
@@ -511,7 +507,7 @@ def test_tool_runtime_normalizes_month_list_without_trailing_request_clause(monk
     assert period["structured"]["original_period"] == "в августе и сентябре"
 
 
-def test_direct_llm_period_fallback_preserves_requested_period_and_adds_conditions() -> None:
+def test_legacy_period_fallback_is_disabled() -> None:
     service = DirectLLMService(client=None)
 
     result = service._fallback_answer_from_grounding(
@@ -536,14 +532,10 @@ def test_direct_llm_period_fallback_preserves_requested_period_and_adds_conditio
         reason="planner_requested_but_no_tool_match",
     )
 
-    assert result is not None
-    assert "с мая по сентябрь" in result["response_text"]
-    assert "после этих месяцев" not in result["response_text"].lower()
-    assert "анонс" in result["response_text"].lower()
-    assert "погод" in result["response_text"].lower()
+    assert result is None
 
 
-def test_direct_llm_period_fallback_does_not_duplicate_preposition() -> None:
+def test_legacy_period_fallback_never_writes_customer_text() -> None:
     service = DirectLLMService(client=None)
     result = service._fallback_answer_from_grounding(
         text="Будут прыжки в тандеме в августе и сентябре?",
@@ -557,12 +549,10 @@ def test_direct_llm_period_fallback_does_not_duplicate_preposition() -> None:
         reason="calendar_period_tool_guard",
     )
 
-    assert result is not None
-    assert result["response_text"].startswith("В августе и сентябре")
-    assert "В период в августе" not in result["response_text"]
+    assert result is None
 
 
-def test_direct_llm_period_guard_keeps_calendar_dates_out_of_customer_reply(monkeypatch) -> None:
+def test_direct_llm_period_failure_does_not_emit_application_written_reply(monkeypatch) -> None:
     class IncorrectCalendarClient:
         def generate(self, **kwargs):
             raise AssertionError("calendar-period response must not delegate dates to the model")
@@ -596,7 +586,6 @@ def test_direct_llm_period_guard_keeps_calendar_dates_out_of_customer_reply(monk
         ],
     )
 
-    assert "02.05.2026" not in result["response_text"]
-    assert "03.05.2026" not in result["response_text"]
-    assert "анонс" in result["response_text"].lower()
-    assert "погод" in result["response_text"].lower()
+    assert result["route"] == "retry_pending"
+    assert result["response_text"] == ""
+    assert result["reason"] == "final_response_error:AssertionError"

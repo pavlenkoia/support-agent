@@ -10,8 +10,8 @@ It is not a ticket router and not an escalation-first bot.
 
 ## Main invariants
 
-1. The agent must stay within an explicit domain scope from the external profile.
-2. The agent must prefer authoritative answers from the active system prompt when it explicitly answers the request; otherwise it must use grounded KB and runtime-tool evidence for substantive requests.
+1. The agent must stay within the domain represented by the active factual Wiki.
+2. The system prompt is a generic behavior contract and is never a business-fact source; substantive answers must use grounded KB and runtime-tool evidence.
 3. Substantive KB reasoning must pass through a dedicated KB agent that reads the compiled wiki selectively rather than treating lexical snippets as the final reasoning surface.
 4. The customer-facing support agent and the KB agent must use separate external prompt files.
 5. The agent must not fabricate facts when KB/tool evidence is missing.
@@ -22,11 +22,11 @@ It is not a ticket router and not an escalation-first bot.
 10. If the first request is outside the domain, the final outcome must be `out_of_scope`.
 11. If a critical ambiguity blocks a safe answer, the final outcome must be `clarification_requested`.
 12. The main runtime flow must not silently switch into human or Hermes escalation.
-13. A transient LLM-provider failure must not discard already gathered KB facts when a short grounded fallback answer is still possible.
-14. Broad but clearly in-domain openers with an explicit topic should prefer a safe overview answer over unnecessary clarification. An unresolved reference such as «эта услуга» remains a critical ambiguity: after a valid KB lookup with non-ready grounding, the common final model must write the useful clarification rather than routing to a static template or mechanically promoting raw KB snippets to `answer_from_kb`.
+13. Exhausted LLM-provider recovery must produce `retry_pending` with empty customer text; application code must not synthesize a domain answer.
+14. Broad and contextual language is interpreted semantically from dialogue plus the complete compact Wiki catalog, not by application keyword lists or question-specific branches.
 15. When the KB agent returns `grounding_status=ready`, its compact `answer_basis` and grounded facts are evidence for the customer-facing final model. That model must answer the main customer question first, use only necessary confirmed facts, and must not invent requirements, prohibitions, or stronger conditions. Direct mechanical joining of all facts is not a normal answer path.
 16. The customer-facing final model receives a newly constructed allowlisted packet, never the broad runtime context: no planner action/reason, route/loop/audit metadata, KB navigation/review reasons, raw KB pages, raw tool payloads, case identifiers, duplicate dialogue forms, or dialogue roles outside `user|assistant` may enter its request. The dialogue projection is capped at the last 10 valid items. `knowledge_mode` is an explicit application control, not a value inferred from planner reasoning exposed to the model. A legacy finalizer without `respond(...)` fails closed rather than bypassing this boundary through `answer(...)`.
-17. In `kb_grounded` mode, ready evidence has already passed the KB boundary. A conditional system-prompt fallback for missing/unconfirmed information must not override a corresponding fact present in ready grounding. The final model still selects relevance and writes natural customer prose; it does not mechanically concatenate facts.
+17. In `kb_grounded` mode, the final model selects relevant ready evidence and writes natural customer prose; it does not mechanically concatenate facts.
 18. Channel-specific transport workers must reuse the same application runtime rather than creating a second support agent.
 19. VK transport-level manual-admin intervention must silence auto-replies for 1 hour from the last unmatched `message_reply`.
 20. Transport-level override must be re-checked immediately before a VK reply is sent.
@@ -43,8 +43,8 @@ Per inbound turn:
 2. finalize a planner-approved `social_reply` without KB lookup or final answer-model generation; only a first-turn `out_of_scope` may finalize directly
 3. force a KB read before accepting `out_of_scope` on a contextual follow-up
 4. for substantive in-domain turns, assess the next action
-5. if the active system prompt explicitly answers the request, choose `answer_from_prompt` and finalize without KB retrieval
-6. otherwise optionally gather runtime tool observations and KB facts
+5. gather runtime tool observations when needed and run semantic Wiki navigation for substantive domain facts
+6. never answer a substantive business question from the system prompt
 7. run the dedicated KB agent over the compiled wiki material already gathered when KB is needed
 8. finalize through the customer-output boundary with only the relevant evidence
 9. emit one of the allowed outcomes
@@ -70,8 +70,8 @@ Example class of task:
 - After complete recovery exhaustion, the customer-facing runtime must record `retry_pending` with empty text and perform no outbound delivery. It must never expose a provider exception, raw KB material, or `cannot_answer` caused by LLM API failure. `cannot_answer` remains reserved for genuinely insufficient grounding.
 - The runtime must expose non-secret failover observability: warning logs on key-slot switches plus `api_key_index` / `used_failover` / `failover_count` / `failover_events` (reason class and `Retry-After` where supplied) in LLM trace metadata.
 - The KB agent is the stronger reasoning step and should be allowed to use the stronger model tier than the final answering step.
-- If the planner or final answer step fails after KB retrieval succeeded, the runtime should prefer a grounded degradation path over a template refusal whenever the KB agent's extracted `grounded_facts` or `answer_basis` support a safe short answer. It must not select sentences from arbitrary loaded KB pages.
-- Deterministic degradations must be based on retrieved facts generically, not on one-off question-specific hardcodes.
+- If final answer generation fails after provider recovery, return `retry_pending` with empty customer text and preserve gathered evidence only in trace state for retry.
+- Deterministic application code must not generate business answers from retrieved facts, question words, or one-off branches.
 - The KB agent runtime must support feature-flagged hardening controls for structured-output reliability:
   - deterministic navigation over wiki page cards
   - optional coverage-review bypass when page selection is already sufficiently narrow
@@ -151,11 +151,12 @@ Requirements:
 - the shipped HTTP surface includes create/list/get/send/wait/messages/trace/close operations under `/api/internal/probe/...`
 - the normalized probe channel reported by the API is `internal_test`
 
-## External prompt contract
+## Versioned prompt contract
 
-The runtime contract depends on hot-editable external prompt files:
-- `SYSTEM_PROMPT.md` — customer-facing support agent behavior, tool obligations, and output format rules
-- `KB_AGENT_PROMPT.md` — KB wiki-reader behavior, page-selection logic, and grounded fact extraction rules
+The runtime contract is built from reviewed source under `deploy/profile-source/` and compiled into `deploy/runtime-profile/`:
+- `SYSTEM_PROMPT.md` — generic customer-facing role, evidence boundary, dialogue behavior, and output rules; no business facts or scenarios
+- `KB_AGENT_PROMPT.md` — generic semantic page selection, coverage review, and grounded extraction rules; no business-topic special cases
+- `kb/` — the only customer-facing business-fact source
 
 ## Outcome semantics
 

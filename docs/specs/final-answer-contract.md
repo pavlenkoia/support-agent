@@ -2,7 +2,7 @@
 
 ## Purpose
 
-The support agent has one common customer-facing finalization boundary for normal substantive answers. That boundary turns approved profile policy plus question-relevant evidence into a natural customer reply. It must not repeat upstream planning or knowledge-navigation work.
+The support agent has one common customer-facing finalization boundary for normal substantive answers. That boundary turns the generic profile behavior contract plus question-relevant evidence into a natural customer reply. It must not repeat upstream planning or knowledge-navigation work.
 
 ## Canonical flow
 
@@ -16,10 +16,10 @@ active SYSTEM_PROMPT.md
 → one ready-to-send answer
 ```
 
-There are two knowledge modes:
+There are two finalization modes:
 
-1. `prompt_only`: the active system prompt explicitly and completely answers the current factual question. The planner selects `answer_from_prompt`; retrieval and the KB agent are skipped; the common final model still writes the customer answer.
-2. `kb_grounded`: the system prompt alone is not sufficient. Retrieval and the KB agent run; only a compact grounded packet reaches the common final model.
+1. `prompt_only`: no business fact is required, for example for a social response or a genuinely necessary clarification. The common final model may use the role/style contract and dialogue, but may not state a business fact.
+2. `kb_grounded`: a business fact is required. The KB agent runs and only a compact grounded packet reaches the common final model.
 
 For a first substantive turn with a valid KB pass but non-ready grounding, the same `prompt_only` finalizer owns the customer wording. The application may state only the generic response intent: a known critical ambiguity requires clarification; otherwise missing grounding lets the finalizer choose a useful clarification or an honest `cannot_answer`. This is not a new classifier, domain keyword branch, or KB answer source.
 
@@ -27,11 +27,11 @@ The mode and response intent are application-owned control values. They are not 
 
 ## Finalization input allowlist
 
-The finalization contract is appended at system-message priority after the active profile prompt. This keeps approved business policy intact while making the evidence boundary authoritative over lower-priority prompt payload text. It is generic runtime policy: it contains no domain question, case number, keyword, or expected business answer.
+The finalization contract is appended at system-message priority after the active profile prompt. The profile prompt contains role, safety, dialogue, and style rules but no business facts. The evidence boundary is authoritative for every factual claim.
 
 The final model may receive only:
 
-- the full active `SYSTEM_PROMPT.md` as approved profile policy, followed in the same system message by the application-owned generic finalization contract;
+- the full active `SYSTEM_PROMPT.md` as a generic behavior contract, followed in the same system message by the application-owned generic finalization contract;
 - `knowledge_mode` (`prompt_only` or `kb_grounded`);
 - the current customer question;
 - at most the last 10 valid current-case dialogue items as `{role, content}`, with roles restricted to `user|assistant`;
@@ -53,11 +53,11 @@ There is no legacy `answer(...)` bypass for KB-ready customer finalization. A co
 
 ## Evidence semantics
 
-- `SYSTEM_PROMPT.md` is authoritative for role, scope, safety, approved policy, and facts explicitly stated there.
-- In `prompt_only`, the final model answers from the system prompt and dialogue; empty KB evidence is expected.
+- `SYSTEM_PROMPT.md` is authoritative only for role, scope, safety, dialogue behavior, and style. It is not a source of business facts.
+- In `prompt_only`, empty KB evidence is expected and the final model may produce only non-factual social text or a necessary clarification.
 - In `kb_grounded`, `grounding_status=ready` means the supplied KB evidence has already passed the KB boundary. The final model must not re-decide whether that evidence exists.
 - `answer_basis` is the compact intended answer from the KB agent. `grounded_facts` define the supported factual scope and modality. The final model may rephrase them naturally but may not add, strengthen, contradict, or silently discard facts needed to answer the current question.
-- Conditional profile fallbacks such as “if exact information is not confirmed” apply only when the corresponding fact is absent from the supplied grounded evidence. They must not override evidence that explicitly satisfies the condition.
+
 - If `answer_basis` and `grounded_facts` conflict, the final model must stay within the exact grounded facts and avoid the unsupported part of the basis.
 - Evidence is not mandatory prose. The final model selects only facts needed for the current question and must not mechanically concatenate all facts.
 - A ready grounded answer must not be downgraded to `clarification_requested` or `cannot_answer` merely because the final model prefers to re-open the decision.
@@ -81,10 +81,10 @@ No domain-specific question handler, keyword branch, canned FAQ shortcut, or mec
 ## Terminal paths outside normal finalization
 
 - `social_reply` may remain a short dedicated social response path without KB work.
-- first-turn `out_of_scope` renders approved policy text directly.
+- first-turn `out_of_scope` may render only generic non-business policy text.
 - genuine missing grounding may render `cannot_answer`.
 - provider recovery exhaustion remains `retry_pending` with no customer text.
-- on final-model transport failure after ready grounding, the existing bounded grounded degradation may answer from the compact grounded packet; raw KB pages remain forbidden.
+- on final-model transport failure after ready grounding, the runtime fails closed as `retry_pending` with empty customer text; application code must not render a business answer from KB prose.
 
 ## Required auditability
 
@@ -94,9 +94,9 @@ Internal planner, KB, route, LLM, and tool traces remain available in `response_
 
 1. A captured final-model payload contains the allowlisted fields and no internal planner/route/KB/tool mechanics.
 2. `planner_reason` and `planner_action` cannot appear anywhere in the serialized final-model user prompt.
-3. `prompt_only` performs zero retrieval and zero KB-agent calls, while the common final model still runs.
+3. `prompt_only` performs zero retrieval and zero KB-agent calls and cannot emit a business fact.
 4. `kb_grounded` uses ready evidence and the common final model, without mechanical fact joining.
 5. Exact replay of case 594 answers the payment-method question from ready KB evidence instead of applying the “information not confirmed” fallback.
-6. A prompt-sufficient regression still answers from `SYSTEM_PROMPT.md` without reading KB.
+6. A non-factual social or clarification regression can use `SYSTEM_PROMPT.md` without reading KB; a substantive factual request cannot.
 7. Targeted tests, the full suite, production image/hash checks, and literal internal production probes all pass before the change is reported complete.
 8. Exact isolated replay of a historical multi-message failure preserves the unanswered follow-ups in chronological order, sends the combined newline-delimited turn through the common finalizer, keeps the customer's latest explicit constraint active, and produces exactly one practical answer before listing relevant conditions.

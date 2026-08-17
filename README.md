@@ -11,14 +11,14 @@ Application-first skeleton for the **Агент поддержки** project.
 - read-only VK dialog viewer web UI on port `3002`, including installable online-first PWA shell
 - internal probe session API for governor-driven live runtime checks without customer-channel traffic
 - external knowledge-layer contract
-- bounded support-agent loop with planner -> tool/KB gathering -> finalize (legacy default)
-- candidate `ANSWER_ENGINE_MODE=simple_full_corpus` path: one full-corpus call with validated source refs; it remains disabled by default pending isolated parity approval
+- production `simple_llm_wiki` path: semantic catalog navigation -> selective full-page reads -> coverage review -> grounded extraction -> finalization
+- legacy planner loop and `simple_full_corpus` remain non-production compatibility paths
 - separate KB agent for Karpathy-style wiki navigation and selective page reading
-- external hot-editable prompt files for the customer-facing agent and the KB agent
+- reviewed, versioned prompt/profile source compiled into a release artifact for the customer-facing agent and KB agent
 - provider-aware LLM client with bounded retries/backoff for transient failures
 - ordered multi-key failover for Mistral/openai-compatible roles via `*_API_KEYS` pools
 - failover observability in LLM trace/usage summaries without exposing secrets
-- grounded fallback answers when KB is present but the final LLM answer step fails
+- fail-closed finalization: exhausted final-model recovery returns `retry_pending` with no customer message
 - transport persistence for raw events, outbound-send reconciliation, and VK human-override state
 - pytest smoke tests
 
@@ -30,16 +30,13 @@ Application-first skeleton for the **Агент поддержки** project.
 - `scripts/` — helper scripts
 - `migrations/` — DB migrations placeholder
 
-## External knowledge layer
+## Versioned profile and external runtime mount
 
-The support knowledge base is intentionally stored **outside** this repository.
-
-This repository only defines the application-side contract to an external knowledge source.
-Deployment-specific paths and environment values must be provided locally and are **not** documented here with machine-specific absolute paths.
+Reviewed prompts and factual Wiki source live under `deploy/profile-source/`. `scripts/build_runtime_profile.py` validates and compiles that committed source into the ignored local artifact `deploy/runtime-profile/`. Production mounts an external runtime copy. `scripts/release.py` independently rebuilds the current source and refuses a release unless both the local artifact and external runtime tree match that rebuild exactly, including absence of stale extra files. Runtime paths, generated artifacts, and secrets remain local and are not committed.
 
 Current runtime shape:
-- external `SYSTEM_PROMPT.md` for the customer-facing support agent
-- external `KB_AGENT_PROMPT.md` for the wiki-reading KB agent
+- generic `SYSTEM_PROMPT.md` for role and communication behavior only
+- generic `KB_AGENT_PROMPT.md` for semantic wiki navigation and grounded extraction only
 - compiled external KB pages used as the factual source of truth
 - optional runtime tools (for example weekday/date checks) before final answer generation
 - provider key pools via `DIRECT_LLM_API_KEYS`, `KB_AGENT_API_KEYS`, and `SUMMARY_LLM_API_KEYS` (CSV, first key primary, later keys reserve/failover)
@@ -68,13 +65,13 @@ docker compose up --build
 
 ### Production release
 
-Do **not** deploy production by selecting individual Compose services. From a clean, committed checkout use:
+Do **not** deploy production by selecting individual Compose services. First build a fresh ignored artifact from the clean committed source, promote that exact tree to the external runtime profile through the reviewed profile-swap procedure, then run:
 
 ```bash
 python3 scripts/release.py
 ```
 
-This is the only supported production command: it rebuilds and force-recreates all application-plane services (`app`, `worker`, `vk-worker`, `viewer-web`, `viewer-push-worker`) without recreating PostgreSQL, then writes a non-secret release receipt only after version, source-manifest, health, worker-liveness, and controlled grounded-fallback checks pass. See [production release operations](docs/operations/production-releases.md).
+This is the only supported production service-release command: it first rebuild-verifies `deploy/runtime-profile/` against the committed source and verifies exact external runtime-profile parity, then rebuilds and force-recreates all application-plane services (`app`, `worker`, `vk-worker`, `viewer-web`, `viewer-push-worker`) without recreating PostgreSQL. It writes a non-secret receipt only after version, source-manifest, health, worker-liveness, and controlled fail-closed finalizer checks pass. See [production release operations](docs/operations/production-releases.md).
 
 By default the Compose stack reads runtime env from `${SUPPORT_AGENT_RUNTIME_ROOT_HOST:-/home/tian/support-agent-runtime}/app.env` rather than from a repo-local `.env` file.
 
@@ -161,8 +158,8 @@ Current UI/runtime contract:
 - LLM traces now preserve non-secret failover metadata (`api_key_index`, `used_failover`, `failover_count`, `failover_events`) and aggregate failover counters in usage summaries so operators can detect reserve-key usage.
 - VK long-poll transport failures that surface as transient network errors must not terminate the worker loop.
 - The stronger model should be allocated to the KB agent / wiki-reading step; the cheaper model can be used for the final customer-facing answer step.
-- If KB facts were already gathered and the final answer-generation call fails, the runtime degrades to a short grounded answer synthesized from the retrieved KB instead of a template refusal.
-- Broad but clearly in-domain openers (for example `Подскажите пожалуйста по прыжкам`) should prefer a short KB overview before asking clarification.
+- If the final answer-generation call exhausts provider recovery, the runtime returns `retry_pending` with empty text. Application code never synthesizes a business answer from keywords or retrieved prose.
+- Broad or ambiguous wording is interpreted by the LLM from dialogue context and the semantic Wiki catalog; application code contains no topic dictionary or business FAQ branch for it.
 - Date/tool paths must not loop on repeated `use_tool` after the tool result is already present; the next step must advance to KB or answer generation.
 - Relative-date words (`сегодня`, `завтра`, `послезавтра`) must resolve from the runtime current date for the active request, not from a guessed calendar day extracted elsewhere in the sentence.
 - Day-only date parsing must not mistake clock-time phrases such as `к 15:00` / `к 15 часам` for a calendar day-of-month.

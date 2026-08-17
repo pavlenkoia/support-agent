@@ -223,7 +223,7 @@ def test_direct_llm_keeps_legacy_five_hit_cap_for_non_catalog_snippets() -> None
     assert len(payload["kb_snippets"]) == 5
 
 
-def test_direct_llm_falls_back_to_grounded_jump_process_answer_on_llm_error() -> None:
+def test_direct_llm_fails_closed_on_llm_error_without_rendering_kb_text() -> None:
     service = DirectLLMService(client=AlwaysFailClient())
     kb_hits = [
         {
@@ -239,14 +239,12 @@ def test_direct_llm_falls_back_to_grounded_jump_process_answer_on_llm_error() ->
 
     result = service.answer("как проходят прыжки7", kb_hits)
 
-    assert result["decision"] == "answer"
-    assert result["reason"] == "llm_fallback:RuntimeError"
-    assert "Калачево" in result["response_text"]
-    assert "2500 м" in result["response_text"]
-    assert "800–900 м" in result["response_text"]
+    assert result["decision"] == "handoff"
+    assert result["reason"] == "llm_error:RuntimeError"
+    assert result["response_text"] == ""
 
 
-def test_direct_llm_falls_back_to_grounded_certificate_answer_on_llm_error() -> None:
+def test_direct_llm_never_emits_grounded_business_facts_on_llm_error() -> None:
     service = DirectLLMService(client=AlwaysFailClient())
     kb_hits = [
         {
@@ -261,7 +259,6 @@ def test_direct_llm_falls_back_to_grounded_certificate_answer_on_llm_error() -> 
 
     result = service.answer("нужен ли распечатанный сертификат?", kb_hits)
 
-    assert result["decision"] == "answer"
-    assert result["reason"] == "llm_fallback:RuntimeError"
-    assert "распечатанном виде" in result["response_text"]
-    assert "6 месяцев" in result["response_text"]
+    assert result["decision"] == "handoff"
+    assert result["reason"] == "llm_error:RuntimeError"
+    assert result["response_text"] == ""

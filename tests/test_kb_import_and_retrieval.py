@@ -1,53 +1,49 @@
 from pathlib import Path
 
 from app.services.retrieval import RetrievalService
-from scripts.import_kb import compile_profile
+from scripts.build_runtime_profile import build_runtime_profile
 
-RAW_FILES = {
-    "certificates-source.md": "# Certificates\n",
-    "general-info-source.md": "# General info\n",
-    "faq-main-source.md": "# FAQ main\n",
-    "faq-short-source.md": "# FAQ short\n",
-}
+ROOT = Path(__file__).resolve().parents[1]
+SOURCE = ROOT / "deploy" / "profile-source"
 
 
 def make_profile(tmp_path: Path) -> Path:
     profile_root = tmp_path / "profile"
-    raw_dir = profile_root / "kb" / "raw" / "documents"
-    raw_dir.mkdir(parents=True)
-    for name, content in RAW_FILES.items():
-        (raw_dir / name).write_text(content, encoding="utf-8")
-    compile_profile(profile_root)
+    build_runtime_profile(SOURCE, profile_root)
     return profile_root
 
 
-def test_compiled_kb_supports_an2_ticket_purchase_question(tmp_path: Path) -> None:
+def test_compiled_kb_exposes_complete_semantic_catalog(tmp_path: Path) -> None:
     profile_root = make_profile(tmp_path)
-    query = "Здравствуйте. Хотим приобрести билет в кабину Ан-2, и в салон. Скажите лучше заранее как то приобрести или по месту 27 числа?"
-
     retrieval = RetrievalService().retrieve(
-        query,
+        "Произвольная формулировка не должна запускать словарный префильтр.",
         knowledge_backend="filesystem",
         knowledge_root=str(profile_root / "kb"),
     )
 
     assert retrieval["kb_status"] == "found"
     assert retrieval["kb_mode"] == "llm_wiki_catalog"
-    assert retrieval["kb_total_pages"] == 8
-    snippets = retrieval["kb_snippets"]
-    assert snippets
-    assert snippets[0]["source_ref"].endswith("kb/index.md")
-    assert snippets[0]["source_type"] == "wiki_index"
+    assert retrieval["kb_total_pages"] == 10
+    cards = retrieval["kb_snippets"]
+    assert len(cards) == 11
+    assert cards[0]["source_type"] == "wiki_index"
+    page_cards = cards[1:]
+    assert len(page_cards) == 10
+    assert {card["source_type"] for card in page_cards} == {"wiki_page_card"}
+    refs = {card["source_ref"] for card in page_cards}
+    assert "compiled/concepts/booking-and-schedule.md" in refs
+    assert "compiled/concepts/flight-services.md" in refs
 
-    booking = next(snippet for snippet in snippets if snippet["source_ref"].endswith("concepts/booking-and-schedule.md"))
-    flights = next(snippet for snippet in snippets if snippet["source_ref"].endswith("concepts/flight-services.md"))
 
-    assert booking["source_type"] == "wiki_page_card"
-    assert booking["page_title"] == "Booking and Schedule"
-    assert "согласовывать заранее" in booking["text"]
-    assert "[[flight-services]]" in booking["text"]
+def test_compiled_kb_catalog_descriptions_are_factual_not_reply_scenarios(tmp_path: Path) -> None:
+    profile_root = make_profile(tmp_path)
+    retrieval = RetrievalService().retrieve(
+        "любой вопрос",
+        knowledge_backend="filesystem",
+        knowledge_root=str(profile_root / "kb"),
+    )
 
-    assert flights["source_type"] == "wiki_page_card"
-    assert flights["page_title"] == "Flight Services"
-    assert "АН-2" in flights["text"]
-    assert "[[booking-and-schedule]]" in flights["text"]
+    catalog_text = "\n".join(str(card.get("text") or "") for card in retrieval["kb_snippets"])
+    assert "Если клиент" not in catalog_text
+    assert "customer-facing" not in catalog_text
+    assert "готовый ответ" not in catalog_text

@@ -120,23 +120,6 @@ class ToolRuntimeService:
             }
         )
 
-        kb_text = "\n".join(str(hit.get("text", "")) for hit in kb_hits).lower()
-        if any(token in kb_text for token in ("выходн", "суббот", "воскрес")) and self._is_jump_schedule_request(text, conversation_context):
-            availability = "может соответствовать правилу про выходные" if is_weekend else "не соответствует правилу про выходные"
-            observations.append(
-                {
-                    "kind": "weekend_rule_check",
-                    "summary": (
-                        "По календарной проверке дата "
-                        f"{parsed_date.isoformat()} — это {weekday_ru}, поэтому она {availability}."
-                    ),
-                    "structured": {
-                        "weekday_ru": weekday_ru,
-                        "is_weekend": is_weekend,
-                    },
-                }
-            )
-
         return {
             "tool_status": "used",
             "tool_results": observations,
@@ -315,24 +298,6 @@ class ToolRuntimeService:
         stripped_after = after.lstrip()
         return stripped_after.startswith((":", "час")) or before.endswith("к ")
 
-    @staticmethod
-    def _is_jump_schedule_request(text: str, conversation_context: dict | None = None) -> bool:
-        parts = [str(text or "")]
-        if isinstance(conversation_context, dict):
-            recent_messages = conversation_context.get("recent_messages", [])
-            if isinstance(recent_messages, list):
-                parts.extend(str(item.get("content") or "") for item in recent_messages if isinstance(item, dict))
-
-        combined = "\n".join(parts).lower()
-        jump_markers = ("прыж", "тандем", "полет", "полёт", "аэродром", "инструкт")
-        schedule_markers = ("выходн", "суббот", "воскрес", "сегодня", "завтра", "послезавтра", "дата", "когда")
-        office_markers = ("офис", "сертифик", "подар")
-
-        if any(marker in combined for marker in jump_markers):
-            return True
-        if any(marker in combined for marker in office_markers):
-            return False
-        return any(marker in combined for marker in schedule_markers)
 
     @staticmethod
     def _nearest_day_only_date(current_date: date, day: int) -> date | None:

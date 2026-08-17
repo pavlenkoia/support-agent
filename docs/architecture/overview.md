@@ -4,7 +4,7 @@
 
 > Production uses the simple `simple_llm_wiki` runtime. It removes the legacy planner loop but preserves the mandatory OKF knowledge path: compact catalog, semantic LLM navigation, selective full-page reads, LLM coverage review, grounded extraction, and customer finalization. `simple_full_corpus` is a deprecated regression path and must not be deployed.
 
-This repository now targets a **bounded support-agent loop** rather than a linear `classify -> KB -> escalation` pipeline.
+The production target is the direct `simple_llm_wiki` path. The bounded planner loop remains only as a non-production compatibility path.
 
 Runtime layers:
 - **FastAPI app** for inbound API, health checks, the internal probe-session API, and the read-only VK dialog viewer API
@@ -15,8 +15,8 @@ Runtime layers:
 - **PostgreSQL** as system of record for cases, messages, workflow events, and transport state
 - **Simple LLM-wiki answer path** for production turns, without the legacy planner loop
 - **Separate KB agent** for Karpathy-style wiki navigation, selective page reads, and grounded fact extraction
-- **External compiled knowledge base** outside the repository
-- **External prompt files** (`SYSTEM_PROMPT.md`, `KB_AGENT_PROMPT.md`) outside the repository
+- **Versioned factual Wiki source and generic prompts** under `deploy/profile-source/`
+- **Compiled runtime profile artifact** under `deploy/runtime-profile/`, copied to the external production mount only after validation
 - **Optional runtime tools** for current-date / calculation / environment-aware checks
 - **Provider-aware LLM client layer** with bounded retry / timeout handling for transient failures and ordered multi-key failover for Mistral/openai-compatible roles
 
@@ -83,21 +83,8 @@ Provides grounded facts from:
 - a dedicated KB agent that plans wiki navigation, selectively reads full pages, and returns grounded facts / answer basis
 - runtime tools (for example calendar/day-of-week checks)
 
-### 3. Prompt layer
-Behavior is controlled by external hot-editable prompt files:
-- `SYSTEM_PROMPT.md` for the customer-facing support agent
-- `KB_AGENT_PROMPT.md` for the KB wiki-reader agent
-
-### 4. Policy layer
-Renders final user-facing fallback wording without hard-coding domain-specific channels into core state names.
-
-Examples:
-- core outcome: `cannot_answer`
-- policy decides whether the text says:
-  - ask a contact channel
-  - ask to write elsewhere
-  - provide a generic refusal
-  - simply state that the answer is unavailable
+### 3. Prompt and profile layer
+`SYSTEM_PROMPT.md` defines only the role, evidence boundary, dialogue behavior, and output style. `KB_AGENT_PROMPT.md` defines only semantic page navigation, coverage review, and grounded extraction. Business facts, contacts, services, prices, and operating rules live only in the factual Wiki pages. The reviewed source and compiled runtime artifact are versioned; production releases reject an external mount that differs from that artifact.
 
 ## Final outcomes
 
@@ -118,25 +105,14 @@ The application-level outcomes are now:
    - `DIRECT_LLM_API_KEYS`, `KB_AGENT_API_KEYS`, and `SUMMARY_LLM_API_KEYS` accept ordered CSV key pools; legacy single-key vars remain valid as the primary slot
    - `last_call_info` / LLM trace preserve `api_key_index`, `used_failover`, `failover_count`, and failover events including non-secret reason class and `Retry-After`
    - warning logs and LLM-usage summaries show reserve-key use
-5. **Planner over-clarification is constrained**:
-   - if the active `SYSTEM_PROMPT.md` explicitly and completely answers a factual request, the planner chooses `answer_from_prompt`; no KB read is performed merely to reconfirm it
-   - if KB has not been read yet and the opener is broad but clearly in-domain, prefer `read_kb`
-   - if KB is already found and the customer's explicit topic supports a short safe overview, prefer `answer_from_kb`
-   - if the topic is still unresolved (for example, the customer refers only to «эта услуга»), preserve the planner's `ask_clarification`; raw KB snippets must not mechanically override it
-4. **The KB agent is the heavy reasoning step**. The stronger model is allocated to page selection / selective reading / coverage review / grounded extraction.
-5. **Ready grounding is final-answer evidence, not a phrase list.** When the KB agent returns `grounding_status=ready`, the customer-facing final model receives the active system prompt plus a newly constructed allowlisted packet: explicit `knowledge_mode`, current question, at most the last 10 valid `user|assistant` current-case dialogue items, compact `answer_basis`, grounded facts, and normalized customer-relevant tool summaries. It must answer the main question first and omit evidence that is not needed for that answer. The old `answer(...)` compatibility path is not a finalization fallback: a finalizer without the common `respond(...)` contract fails closed.
-6. **The customer finalizer receives no execution reasoning.** Planner action/reason, route and loop metadata, case state, duplicated dialogue forms, full selected pages, planner/navigation/review traces, raw tool payloads, and audit fields remain in operator telemetry but never enter the final-model request. In `kb_grounded`, ready evidence satisfies corresponding conditional “if unconfirmed” profile fallbacks; the model may phrase and filter relevant evidence but must not replace it with a missing-information fallback. On final-model transport failure only, a generic grounded fallback may use compact ready grounding; it must not invent information.
-7. **Deterministic fallbacks must stay generic**. The core must not hardcode one business question as the only fallback path; the degradation path must work across in-domain topics such as certificates, schedules, and rules.
-8. **Date/tool paths must advance after the tool result is gathered**. A live runtime must not repeat `use_tool` for the same turn once the relevant tool result is already present.
-9. **Relative-date resolution is runtime-anchored**. Words such as `сегодня`, `завтра`, and `послезавтра` must resolve from the active request's runtime date, and clock-time phrases like `к 15:00` must not be misread as a calendar day.
-10. **Weekend schedule heuristics are intent-scoped**. Weekend-only availability checks are valid for jump/schedule questions, not for office/certificate questions that happen to coexist with weekend wording in KB snippets.
-11. **The KB agent now supports a hardened selective-read mode** for less JSON-disciplined models and for safer prod operation on the current Mistral tier:
-   - deterministic lexical navigation can replace free-form LLM navigation when enabled
-   - coverage review can be skipped when the selected page set is already narrowly scoped
-   - grounded extraction can request a minimal JSON schema instead of a larger object with optional fields
-   - JSON parsing for KB-agent steps accepts fenced or wrapped objects before failing hard
-   - rollout is controlled entirely by runtime flags so prod/test contours can diverge without forking code
-9. **Failover is observable without leaking secrets**:
+5. **The KB agent resolves broad and contextual language semantically.** Core application code does not contain business-topic dictionaries, FAQ branches, or prompt-only factual shortcuts.
+6. **The KB agent is the heavy reasoning step**. The stronger model is allocated to page selection / selective reading / coverage review / grounded extraction.
+7. **Ready grounding is final-answer evidence, not a phrase list.** The customer-facing final model receives only the current question, bounded `user|assistant` history, compact `answer_basis`, grounded facts, and normalized tool summaries. It must answer the main question first and omit irrelevant evidence.
+8. **The customer finalizer receives no execution reasoning.** Planner/route metadata, case state, full pages, navigation traces, raw tool payloads, and audit fields remain operator telemetry. If final-model recovery is exhausted, the runtime returns `retry_pending` with empty text; application code does not render a business answer from keywords or KB prose.
+9. **Date/tool paths must advance after the tool result is gathered**. A live runtime must not repeat a calendar calculation for the same turn once the relevant tool result is already present.
+10. **Relative-date resolution is runtime-anchored**. Words such as `сегодня`, `завтра`, and `послезавтра` resolve from the active request's runtime date, and clock-time phrases like `к 15:00` must not be misread as a calendar day. The calendar tool contains no business schedule heuristics.
+11. **Production knowledge navigation remains semantic.** Keyword dictionaries, deterministic business-topic routing, coverage-review bypasses, and whole-corpus prompting are not production paths.
+12. **Failover is observable without leaking secrets**:
    - warning logs are emitted when the client switches from one key slot to another
    - `last_call_info` / LLM trace preserve `api_key_index`, `used_failover`, `failover_count`, and structured `failover_events`
    - LLM usage summaries aggregate `failover_count` and `failover_calls` so operators can tell when reserve keys are in active use

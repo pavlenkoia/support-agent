@@ -17,6 +17,7 @@ deploy/env/app.env
 # Runtime artifacts
 logs/
 postgres_data/
+deploy/runtime-profile*/
 
 # Tooling artifacts
 .codex/
@@ -24,8 +25,10 @@ graphify-out/
 viewer-web/node_modules/
 viewer-web/dist/
 
-# Local knowledge-base artifacts
+# Generated local KB import output
 kb/
+!deploy/profile-source/kb/
+!deploy/profile-source/kb/**
 
 # Editors / OS
 .DS_Store

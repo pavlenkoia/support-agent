@@ -92,16 +92,6 @@ class DirectLLMService:
         grounding_evidence = self._build_finalization_evidence(kb_packet)
         finalization_conversation = self._build_finalization_conversation(conversation_context)
         tool_facts = self._build_finalization_tool_facts(tool_observations)
-        calendar_period_guard = self._fallback_answer_from_grounding(
-            text,
-            kb_packet.get("answer_context", []),
-            kb_hits=kb_packet.get("answer_context", []),
-            conversation_context={**(conversation_context or {}), "tool_observations": tool_observations},
-            reason="calendar_period_tool_guard",
-        ) if any(item.get("kind") == "calendar_period_weekends" for item in tool_observations) else None
-        if calendar_period_guard is not None:
-            calendar_period_guard["llm_trace"] = []
-            return calendar_period_guard
 
         if settings.direct_llm_provider == "stub" and not self._client_injected:
             return self._respond_stub(
@@ -131,10 +121,10 @@ class DirectLLMService:
                 "tool_facts": tool_facts,
                 "output_rules": [
                     "Верни только JSON-объект по указанной схеме.",
-                    "Ответь на текущий вопрос клиента, используя точные факты системного промпта и, когда knowledge_mode=kb_grounded, подтверждённые grounding_evidence и tool_facts.",
-                    "При knowledge_mode=prompt_only пустой grounding_evidence ожидаем: отвечай по явно заданным фактам и правилам системного промпта, не требуя KB.",
-                    "При knowledge_mode=kb_grounded считай переданные grounding_evidence уже подтверждёнными на предыдущем этапе: не переоценивай, существуют ли эти сведения, и не отбрасывай факт, необходимый для прямого ответа на текущий вопрос.",
-                    "Условные правила системного промпта вида «если точная информация не подтверждена» применяй только когда соответствующего факта нет в grounding_evidence и tool_facts; они не должны заменять явно подтверждённый факт общей резервной формулировкой.",
+                    "Ответь на текущий вопрос клиента, используя только grounding_evidence и tool_facts как источники фактов.",
+                    "Системный промпт задаёт роль и правила общения, но не является источником сведений о предметной области.",
+                    "При knowledge_mode=prompt_only пустой grounding_evidence ожидаем: можно сформировать только социальный ответ или уточнение без фактических утверждений.",
+                    "При knowledge_mode=kb_grounded считай grounding_evidence подтверждённым на предыдущем этапе и не выходи за его фактические границы.",
                     "answer_basis задаёт компактный смысл требуемого ответа, а facts ограничивают его подтверждённую фактическую область; если между ними есть противоречие, не выходи за точные facts.",
                     "Факты в grounding_evidence — это доказательства, а не порядок построения фразы; не пересказывай цепочку вывода вместо результата.",
                     "Сохраняй точную модальность подтверждённых фактов: «обычно», «может», «зависит», «рекомендуется» нельзя усиливать до «только», «всегда», «точно», «обязательно» или другого более сильного утверждения.",
@@ -162,87 +152,23 @@ class DirectLLMService:
             parsed: dict[str, Any] = json.loads(raw)
         except Exception as exc:
             self._record_llm_call("final_response")
-            grounded_fallback = None
-            grounded_context = self._grounded_fallback_context(kb_packet)
-            fallback_context = grounded_context or kb_packet.get("answer_context") or []
-            grounded_fallback_eligible = bool(
-                kb_packet.get("kb_status") == "found"
-                and kb_packet.get("grounding_status") == "ready"
-                and fallback_context
-            )
-            if grounded_fallback_eligible:
-                grounded_fallback = self._fallback_answer_from_grounding(
-                    text,
-                    fallback_context,
-                    kb_hits=fallback_context,
-                    conversation_context={
-                        **(conversation_context or {}),
-                        "tool_observations": tool_observations,
-                    },
-                    reason=f"prompt_runtime_grounded_fallback:{type(exc).__name__}",
-                    preserve_context_order=bool(grounded_context),
-                )
-                if grounded_fallback is None:
-                    response_text = self._render_ready_grounding(kb_packet)
-                    if response_text:
-                        grounded_fallback = {
-                            "response_text": response_text,
-                            "confidence": 0.76,
-                            "reason": f"prompt_runtime_grounded_fallback:{type(exc).__name__}",
-                        }
             self._active_llm_trace.append(
                 {
                     "role": "direct_llm",
-                    "step": "grounded_fallback",
+                    "step": "final_response_failed_closed",
                     "error": type(exc).__name__,
-                    "grounded_fallback_eligible": grounded_fallback_eligible,
-                    "grounded_facts_count": len(grounded_context),
-                    "answer_basis_available": bool(str(kb_packet.get("answer_basis") or "").strip()),
-                    "grounded_fallback_emitted": grounded_fallback is not None,
-                    "grounded_fallback_rejection_reason": None if grounded_fallback is not None else "no_ready_grounding",
+                    "customer_reply_emitted": False,
                 }
             )
-            if grounded_fallback is not None:
-                return {
-                    "route": "answer",
-                    "response_text": self._prepend_standard_greeting_if_missing(
-                        grounded_fallback["response_text"],
-                        first_reply_in_dialogue=first_reply_in_dialogue,
-                    ),
-                    "confidence": grounded_fallback["confidence"],
-                    "reason": grounded_fallback["reason"],
-                    "llm_trace": list(self._active_llm_trace),
-                }
-            if isinstance(exc, LLMRecoveryExhausted):
-                return {
-                    "route": "retry_pending",
-                    "response_text": "",
-                    "confidence": 0.0,
-                    "reason": "llm_recovery_exhausted",
-                    "llm_trace": list(self._active_llm_trace),
-                }
             return {
-                "route": "cannot_answer",
-                "response_text": fallback_text,
+                "route": "retry_pending",
+                "response_text": "",
                 "confidence": 0.0,
-                "reason": f"prompt_runtime_error:{type(exc).__name__}",
+                "reason": "llm_recovery_exhausted" if isinstance(exc, LLMRecoveryExhausted) else f"final_response_error:{type(exc).__name__}",
                 "llm_trace": list(self._active_llm_trace),
             }
 
         normalized = self._normalize_prompt_reply(parsed, fallback_text=fallback_text)
-        if (
-            normalized["route"] == "clarification_requested"
-            and kb_packet.get("kb_status") == "found"
-            and kb_packet.get("grounding_status") == "ready"
-        ):
-            grounded_response = self._render_ready_grounding(kb_packet)
-            if grounded_response:
-                normalized = {
-                    "route": "answer",
-                    "response_text": grounded_response,
-                    "confidence": max(float(normalized["confidence"]), 0.76),
-                    "reason": "ready_grounding_overrode_clarification",
-                }
         normalized["response_text"] = self._prepend_standard_greeting_if_missing(
             normalized["response_text"],
             first_reply_in_dialogue=first_reply_in_dialogue,
@@ -265,20 +191,9 @@ class DirectLLMService:
         return []
 
     def _render_ready_grounding(self, kb_packet: dict[str, Any]) -> str:
-        """Last-resort customer answer from the KB-agent answer basis, then facts."""
-        answer_basis = str(kb_packet.get("answer_basis") or "").strip()
-        if answer_basis:
-            return self._sanitize_customer_text(self._as_customer_sentence(answer_basis))
-        facts = kb_packet.get("grounded_facts")
-        if isinstance(facts, list):
-            rendered = " ".join(
-                self._as_customer_sentence(fact)
-                for fact in facts[:3]
-                if isinstance(fact, str) and fact.strip()
-            )
-            if rendered:
-                return self._sanitize_customer_text(rendered)
-        return self._sanitize_customer_text(self._as_customer_sentence(str(kb_packet.get("answer_basis") or "")))
+        """Legacy compatibility hook; final customer prose must be generated by the final model."""
+        del kb_packet
+        return ""
 
     @staticmethod
     def _as_customer_sentence(text: str) -> str:
@@ -449,17 +364,16 @@ class DirectLLMService:
 ## Runtime finalization contract
 
 The application has selected knowledge_mode={knowledge_mode}.
-This section governs only how the final customer answer is composed; it does not replace the approved business policy above.
+This section governs how the final customer answer is composed; the profile prompt above defines role and communication style only.
 
-- In prompt_only mode, answer from the approved profile policy and customer dialogue. Empty grounding evidence is expected.
-- In kb_grounded mode, grounding_evidence has already passed the knowledge boundary and is confirmed for this turn. Do not re-decide whether those facts exist.
+- In prompt_only mode, do not make factual claims about the subject domain. Produce only a social response or a necessary clarification.
+- In kb_grounded mode, grounding_evidence has already passed the knowledge boundary and is the only source of subject-domain facts for this turn.
 - When answer_basis directly answers the current customer question, preserve that answer as the factual core. Rephrase it naturally and keep it within the exact scope and modality of facts.
 - State the direct practical conclusion first. Use the supplied dialogue to resolve short follow-ups and determine which supported option, requirement, or next action applies to this customer; do not replace that conclusion with a bare list of eligibility facts. Then add only the relevant confirmed conditions.
 - When the current customer message states or narrows a constraint or preference, explicitly acknowledge that constraint or preference in the first sentence before applying the grounded facts. Do not answer as though the message were a new standalone request.
 - Keep the most recent explicit customer constraint or preference active across later short follow-ups. Do not switch back to an earlier alternative unless the customer changes the constraint or asks for a comparison.
 - When the customer asks whether other requirements exist, do not claim that none exist if grounding_evidence contains relevant conditions. List those confirmed conditions; if the evidence is not exhaustive, avoid an exhaustive "no other requirements" claim.
-- A conditional fallback from the profile such as “if exact information is not confirmed” applies only when the corresponding fact is absent from grounding_evidence and tool_facts. It must not replace a directly confirmed answer with a generic missing-information response.
-- Do not invent a new distinction, missing prerequisite, prohibition, or uncertainty that is not present in the supplied policy and evidence.
+- Do not invent a new distinction, missing prerequisite, prohibition, or uncertainty that is not present in the supplied evidence.
 - Select only evidence relevant to the current question; never mechanically concatenate every fact and never expose internal mechanics.
 """.strip()
         return f"{active_system_prompt.rstrip()}\n\n{contract}"
@@ -474,17 +388,7 @@ This section governs only how the final customer answer is composed; it does not
         first_reply_in_dialogue: bool,
         fallback_text: str,
     ) -> dict:
-        lowered = text.lower()
-        if any(token in lowered for token in ("цен", "стоим")):
-            reply = "Здравствуйте! Все цены доступны по ссылке https://vk.cc/cYzS5j." if first_reply_in_dialogue else "Все цены доступны по ссылке https://vk.cc/cYzS5j."
-            return {"route": "answer", "response_text": reply, "confidence": 0.9, "reason": "stub_pricing_rule"}
-        if any(token in lowered for token in ("суп", "рецепт", "марс", "погод")):
-            return {"route": "out_of_scope", "response_text": "Я помогаю только по вопросам прыжков, сертификатов и связанных услуг в Челябинске.", "confidence": 0.9, "reason": "stub_out_of_scope"}
-        grounded = self._compose_grounded_fallback_answer(text, kb_packet.get("answer_context", []), conversation_context=conversation_context)
-        if grounded:
-            if first_reply_in_dialogue and not grounded.lower().startswith(("здравств", "добрый")):
-                grounded = f"Здравствуйте! {grounded}"
-            return {"route": "answer", "response_text": grounded, "confidence": 0.75, "reason": "stub_grounded"}
+        del text, kb_packet, conversation_context, tool_observations, first_reply_in_dialogue
         return {"route": "cannot_answer", "response_text": fallback_text, "confidence": 0.0, "reason": "stub_cannot_answer"}
 
     def classify_turn(self, text: str, *, conversation_context: dict | None = None) -> dict:
@@ -516,7 +420,7 @@ This section governs only how the final customer answer is composed; it does not
                 "conversation_context": conversation_context or {},
                 "guidance": [
                     "Use social_turn only for greetings, short acknowledgements, or phatic openers that do not need factual lookup.",
-                    "Use knowledge_request for questions about services, pricing, rules, scheduling, certificates, or any factual/operational request.",
+                    "Use knowledge_request for any factual or operational request.",
                 ],
             },
             ensure_ascii=False,
@@ -754,15 +658,6 @@ This section governs only how the final customer answer is composed; it does not
             )
             parsed: dict[str, Any] = json.loads(raw)
         except Exception as exc:
-            fallback = self._fallback_answer_from_grounding(
-                text,
-                answer_context,
-                kb_hits=kb_hits,
-                conversation_context=conversation_context,
-                reason=f"llm_fallback:{type(exc).__name__}",
-            )
-            if fallback is not None:
-                return fallback
             return {
                 "direct_status": "insufficient_confidence",
                 "response_text": "",
@@ -1168,94 +1063,9 @@ This section governs only how the final customer answer is composed; it does not
         reason: str,
         preserve_context_order: bool = False,
     ) -> dict | None:
-        tool_observations = []
-        if isinstance(conversation_context, dict):
-            raw = conversation_context.get("tool_observations", [])
-            if isinstance(raw, list):
-                tool_observations = raw
-
-        combined_text = "\n".join(str(item.get("text", "")) for item in answer_context).lower()
-        used_kb_sources = self._extract_source_refs(answer_context) or [hit.get("source_ref") for hit in kb_hits if hit.get("source_ref")]
-
-        weekend_obs = next((item for item in tool_observations if item.get("kind") == "weekend_rule_check"), None)
-        period_obs = next((item for item in tool_observations if item.get("kind") == "calendar_period_weekends"), None)
-        if period_obs and any(token in combined_text for token in ("выходн", "суббот", "воскрес")) and self._is_jump_schedule_request(text, conversation_context):
-            period_data = period_obs.get("structured") or {}
-            original_period = str(period_data.get("original_period") or "в указанный период")
-            period_intro = original_period[:1].upper() + original_period[1:] if original_period.startswith("в ") else f"В указанный период ({original_period})"
-            return {
-                "direct_status": "ready",
-                "response_text": (
-                    f"{period_intro} прыжки обычно проходят по выходным. "
-                    "Точные даты проведения публикуются в анонсах и зависят от погоды."
-                ),
-                "used_kb_sources": used_kb_sources,
-                "confidence": 0.76,
-                "decision": "answer",
-                "reason": reason,
-            }
-
-        if weekend_obs and any(token in combined_text for token in ("выходн", "суббот", "воскрес")) and self._is_jump_schedule_request(text, conversation_context):
-            weekday_obs = next((item for item in tool_observations if item.get("kind") == "calendar_weekday"), None)
-            weekday_ru = (((weekday_obs or {}).get("structured") or {}).get("weekday_ru")) or "этот день"
-            is_weekend = bool(((weekday_obs or {}).get("structured") or {}).get("is_weekend"))
-            if is_weekend:
-                response_text = (
-                    f"Прыжки обычно проходят по выходным, а указанная дата приходится на {weekday_ru}. "
-                    "Но окончательное проведение зависит от погоды и анонсов, поэтому лучше уточнить информацию ближе к дате."
-                )
-            else:
-                response_text = (
-                    f"По календарю указанная дата приходится на {weekday_ru}, а в базе знаний сказано, что прыжки обычно проходят по выходным. "
-                    "Значит, на эту дату ориентироваться на обычные прыжковые выходные не стоит."
-                )
-            return {
-                "direct_status": "ready",
-                "response_text": response_text,
-                "used_kb_sources": used_kb_sources,
-                "confidence": 0.78,
-                "decision": "answer",
-                "reason": reason,
-            }
-
-        if preserve_context_order:
-            response_text = " ".join(self._collect_grounding_sentences(answer_context)[:3]).strip()
-        else:
-            response_text = self._compose_grounded_fallback_answer(
-                text,
-                answer_context,
-                conversation_context=conversation_context,
-            )
-        if not response_text:
-            return None
-
-        return {
-            "direct_status": "ready",
-            "response_text": response_text,
-            "used_kb_sources": used_kb_sources,
-            "confidence": 0.76,
-            "decision": "answer",
-            "reason": reason,
-        }
-
-    @staticmethod
-    def _is_jump_schedule_request(text: str, conversation_context: dict | None = None) -> bool:
-        parts = [str(text or "")]
-        if isinstance(conversation_context, dict):
-            recent_messages = conversation_context.get("recent_messages", [])
-            if isinstance(recent_messages, list):
-                parts.extend(str(item.get("content") or "") for item in recent_messages if isinstance(item, dict))
-
-        combined = "\n".join(parts).lower()
-        jump_markers = ("прыж", "тандем", "полет", "полёт", "аэродром", "инструкт")
-        schedule_markers = ("выходн", "суббот", "воскрес", "сегодня", "завтра", "послезавтра", "дата", "когда")
-        office_markers = ("офис", "сертифик", "подар")
-
-        if any(marker in combined for marker in jump_markers):
-            return True
-        if any(marker in combined for marker in office_markers):
-            return False
-        return any(marker in combined for marker in schedule_markers)
+        """Legacy compatibility hook; application-side business answer rendering is disabled."""
+        del text, answer_context, kb_hits, conversation_context, reason, preserve_context_order
+        return None
 
     def _compose_grounded_fallback_answer(
         self,
@@ -1264,38 +1074,9 @@ This section governs only how the final customer answer is composed; it does not
         *,
         conversation_context: dict | None = None,
     ) -> str:
-        sentences = self._collect_grounding_sentences(answer_context)
-        if not sentences:
-            return ""
-
-        query_terms = self._fallback_query_terms(text, conversation_context)
-        scored: list[tuple[float, int, str]] = []
-        for idx, sentence in enumerate(sentences):
-            normalized_sentence = self._normalize_match_text(sentence)
-            score = float(sum(1 for term in query_terms if term and term in normalized_sentence))
-            if any(ch.isdigit() for ch in sentence):
-                score += 0.15
-            scored.append((score, idx, sentence))
-
-        scored.sort(key=lambda item: (-item[0], item[1]))
-        top_score = scored[0][0] if scored else 0.0
-        score_threshold = 1.0 if len(query_terms) <= 2 else max(1.5, top_score - 0.5)
-        prioritized = [sentence for score, _, sentence in scored if score >= score_threshold and score > 0]
-        if prioritized:
-            selection_cap = 3 if len(query_terms) <= 2 else 2
-            selected = prioritized[:selection_cap]
-            if self._looks_like_reason_followup(text):
-                causal = [
-                    sentence for sentence in prioritized
-                    if any(token in self._normalize_match_text(sentence) for token in ("потому", "так", "поэт", "причин", "из"))
-                ]
-                if causal:
-                    selected = causal[:2]
-        else:
-            selected = sentences[:2]
-
-        response_text = re.sub(r"\s+", " ", " ".join(selected)).strip()
-        return response_text[:500].rstrip()
+        """Legacy compatibility hook; final customer prose must be generated by the final model."""
+        del text, answer_context, conversation_context
+        return ""
 
     def _collect_grounding_sentences(self, answer_context: list[dict]) -> list[str]:
         sentences: list[str] = []

@@ -8,11 +8,18 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 import time
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from urllib.request import urlopen
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from scripts.build_runtime_profile import build_runtime_profile
 
 APP_SERVICES = (
     "app",
@@ -23,8 +30,10 @@ APP_SERVICES = (
 )
 RUNTIME_CODE_SERVICES = {"app", "worker", "vk-worker"}
 OCI_REVISION_LABEL = "org.opencontainers.image.revision"
-ROOT = Path(__file__).resolve().parents[1]
 RUNTIME_ROOT = Path(os.environ.get("SUPPORT_AGENT_RUNTIME_ROOT_HOST", "/home/tian/support-agent-runtime"))
+RUNTIME_PROFILE_ROOT = Path(os.environ.get("SUPPORT_AGENT_PROFILE_ROOT_HOST", "/home/tian/support-agent-profiles/parachute"))
+CANONICAL_PROFILE_ROOT = ROOT / "deploy" / "runtime-profile"
+PROFILE_SOURCE_ROOT = ROOT / "deploy" / "profile-source"
 
 
 class ReleaseVerificationError(RuntimeError):
@@ -95,6 +104,38 @@ def source_manifest(root: Path) -> str:
     if not lines:
         raise RuntimeError("runtime source manifest is empty")
     return hashlib.sha256("\n".join(lines).encode()).hexdigest()
+
+
+def verify_profile_artifacts(runtime_root: Path, canonical_root: Path) -> None:
+    """Require every canonical prompt/KB artifact to match the mounted runtime tree."""
+    runtime_root = Path(runtime_root)
+    canonical_root = Path(canonical_root)
+    expected = [path for path in sorted(canonical_root.rglob("*")) if path.is_file()]
+    if not expected:
+        raise ReleaseVerificationError("canonical profile artifact tree is empty")
+    expected_relatives = {path.relative_to(canonical_root) for path in expected}
+    actual_relatives = {
+        path.relative_to(runtime_root)
+        for path in sorted(runtime_root.rglob("*"))
+        if path.is_file()
+    }
+    if actual_relatives != expected_relatives:
+        missing = sorted(path.as_posix() for path in expected_relatives - actual_relatives)
+        extra = sorted(path.as_posix() for path in actual_relatives - expected_relatives)
+        raise ReleaseVerificationError(f"profile artifact tree mismatch: missing={missing}, extra={extra}")
+    for canonical_path in expected:
+        relative = canonical_path.relative_to(canonical_root)
+        runtime_path = runtime_root / relative
+        if not runtime_path.is_file() or runtime_path.read_bytes() != canonical_path.read_bytes():
+            raise ReleaseVerificationError(f"profile artifact mismatch: {relative.as_posix()}")
+
+
+def verify_canonical_profile_build(source_root: Path, canonical_root: Path) -> None:
+    """Prove the checked release artifact was built from the current reviewed source."""
+    with tempfile.TemporaryDirectory(prefix="support-agent-profile-build-") as directory:
+        rebuilt = Path(directory) / "runtime-profile"
+        build_runtime_profile(source_root, rebuilt)
+        verify_profile_artifacts(canonical_root, rebuilt)
 
 
 def parse_started_at(value: str) -> float:
@@ -173,7 +214,7 @@ def verify_worker_liveness(env: Mapping[str, str]) -> dict[str, bool]:
     raise ReleaseVerificationError(f"worker liveness marker missing: {missing}")
 
 
-def verify_grounded_fallback(env: Mapping[str, str]) -> dict[str, str]:
+def verify_finalizer_fails_closed(env: Mapping[str, str]) -> dict[str, str]:
     probe = r'''import json
 from app.services import direct_llm as module
 from app.services.direct_llm import DirectLLMService
@@ -181,18 +222,15 @@ class BrokenClient:
     def generate(self, **kwargs):
         raise RuntimeError("IncompleteRead")
 module.settings.direct_llm_provider = "mistral"
-service = DirectLLMService(client=BrokenClient())
-service._fallback_answer_from_grounding = lambda *args, **kwargs: None
-result = service.respond("Можно ли в тандеме при весе 120 кг?", {
+result = DirectLLMService(client=BrokenClient()).respond("Проверочный вопрос", {
     "kb_status": "found", "grounding_status": "ready",
-    "grounded_facts": ["Максимальный вес для тандем-прыжка — до 85 кг."],
-    "answer_basis": "При весе 120 кг тандем-прыжок невозможен.",
+    "grounded_facts": ["Подтверждённый проверочный факт."],
+    "answer_basis": "Подтверждённый проверочный ответ.",
 })
-assert result["route"] == "answer", result
-assert "120 кг" in result["response_text"], result
-assert result["reason"] == "prompt_runtime_grounded_fallback:RuntimeError", result
-assert result["llm_trace"][0]["step"] == "grounded_fallback", result
-assert result["llm_trace"][0]["grounded_fallback_emitted"] is True, result
+assert result["route"] == "retry_pending", result
+assert result["response_text"] == "", result
+assert result["llm_trace"][0]["step"] == "final_response_failed_closed", result
+assert result["llm_trace"][0]["customer_reply_emitted"] is False, result
 print(json.dumps({"route": result["route"], "reason": result["reason"]}, ensure_ascii=False))'''
     result: dict[str, str] = {}
     for service in RUNTIME_CODE_SERVICES:
@@ -241,7 +279,7 @@ def run_release(*, release_id: str, expected_manifest: str, build: bool) -> Path
         receipt["evidence"] = evidence
         receipt["health"] = verify_http_health()
         receipt["worker_liveness"] = verify_worker_liveness(env)
-        receipt["grounded_fallback_probe"] = verify_grounded_fallback(env)
+        receipt["finalizer_fail_closed_probe"] = verify_finalizer_fails_closed(env)
         receipt["status"] = "success"
     except Exception as exc:
         receipt["error"] = f"{type(exc).__name__}: {exc}"
@@ -265,6 +303,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             path = run_release(release_id=release_id, expected_manifest=manifest, build=False)
         else:
             release_id = ensure_clean_checkout()
+            verify_canonical_profile_build(PROFILE_SOURCE_ROOT, CANONICAL_PROFILE_ROOT)
+            verify_profile_artifacts(RUNTIME_PROFILE_ROOT, CANONICAL_PROFILE_ROOT)
             path = run_release(release_id=release_id, expected_manifest=source_manifest(ROOT), build=True)
     except Exception as exc:
         print(f"RELEASE FAILED: {type(exc).__name__}: {exc}", file=sys.stderr)

@@ -121,10 +121,11 @@ Expected `route.route` values:
 - `cannot_answer`
 - `out_of_scope`
 - `clarification_requested`
+- `retry_pending`
 
 Notes:
-- `route_reason` may carry either a normal planner/policy reason, a grounded-degradation marker such as `llm_fallback:RuntimeError`, or `llm_recovery_exhausted` when every bounded provider retry/key slot was exhausted. The last case is `retry_pending` with an empty payload and no outbound delivery; it never becomes a provider-caused `cannot_answer`.
-- `route_confidence` reflects the final emitted answer path, including grounded fallback paths.
+- `route_reason` may carry a normal policy reason or `llm_recovery_exhausted` / `final_response_failed_closed`. Model recovery failure is `retry_pending` with an empty payload and no outbound delivery; it never becomes a provider-caused `cannot_answer` or an application-rendered KB answer.
+- `route_confidence` reflects only a successfully finalized answer path.
 - date/tool-assisted answers may still surface `answer` as the final route even when the step trace includes both tool usage and KB-agent reading.
 
 ## Internal outcome contract
@@ -134,14 +135,15 @@ Expected `outcome.outcome_type` values:
 - `cannot_answer`
 - `out_of_scope`
 - `clarification_requested`
+- `retry_pending`
 
 All user-visible final text is carried in `outcome.outcome_payload.response_text`.
 
 Additional outcome payload fields may include grounded runtime context such as:
 - `tool_observations` for date / calendar / other live-fact checks
-- `reason` preserving degraded-but-grounded lineage for internal debugging
+- `reason` preserving fail-closed lineage for internal debugging
 
-For degraded-but-grounded answers, `outcome.outcome_payload.reason` should preserve the failure lineage (for example `llm_fallback:RuntimeError`) while `response_text` remains customer-facing and free of runtime internals.
+For `retry_pending`, `outcome.outcome_payload.reason` preserves the internal failure lineage while `response_text` remains empty.
 
 ## Transport persistence side-contracts
 
