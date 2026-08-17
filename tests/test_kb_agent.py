@@ -58,6 +58,40 @@ def test_kb_agent_marks_transport_failure_retry_pending_without_reusing_unrelate
     assert result["trace"]["extraction"]["reason"] == "grounding_error:RuntimeError"
 
 
+def test_llm_wiki_navigation_with_no_information_need_is_not_missing_grounding(tmp_path: Path) -> None:
+    catalog = tmp_path / "index.md"
+    catalog.write_text("# Catalog\n", encoding="utf-8")
+    client = SequentialClient(
+        [
+            {
+                "user_intent": "initiate dialogue",
+                "information_needs": [],
+                "selected_source_refs": [],
+                "reason": "No actionable query or information need detected.",
+            }
+        ]
+    )
+    service = KBAgentService(client=client)
+
+    result = service.read(
+        "Спасибо, я поняла",
+        [
+            {
+                "source_ref": str(catalog),
+                "source_type": "wiki_index",
+                "retrieval_mode": "llm_wiki_catalog",
+                "kb_architecture": "llm_wiki",
+                "text": "# Catalog",
+            }
+        ],
+        require_coverage_review=True,
+    )
+
+    assert result["grounding_status"] == "not_found"
+    assert result["reason"] == "no_information_need"
+    assert result["trace"]["navigation"]["selected_source_refs"] == []
+
+
 def test_kb_agent_navigates_reviews_and_extracts_grounded_facts_from_selected_pages(tmp_path: Path) -> None:
     booking = tmp_path / "booking-and-schedule.md"
     booking.write_text("# Booking and Schedule\n\nПолет лучше согласовать заранее.\n", encoding="utf-8")

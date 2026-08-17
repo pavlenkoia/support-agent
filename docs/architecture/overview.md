@@ -32,7 +32,9 @@ The production path is:
 6. extract grounded facts and a compact answer basis;
 7. finalize one customer answer from the allowlisted evidence packet.
 
-The runtime must not send every full KB page to a model as a substitute for wiki navigation. The `simple_llm_wiki` caller requires coverage review even if a stale global skip flag is present.
+A successful navigation result with no information need and no selected pages is a normal `no_information_need` outcome, not a transport failure. It bypasses page reading, coverage review, and extraction; the finalizer receives an empty fact packet and may produce a non-factual dialogue response from the active system prompt and dialogue history. A genuine navigation/provider/structured-output failure remains `retry_pending` and does not emit customer text.
+
+The runtime must not send every full KB page to a model as a substitute for wiki navigation. The `simple_llm_wiki` caller requires coverage review when pages are selected, even if a stale global skip flag is present.
 
 ## Legacy bounded-loop contract
 

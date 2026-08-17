@@ -50,6 +50,7 @@ These safety invariants are retained independently of the LLM Wiki design:
 
 | Condition | Required route | Customer reply |
 |---|---|---|
+| Successful navigation with no information need and no selected page | `not_found` / `no_information_need`, then customer finalization with an empty fact packet | natural non-factual dialogue response only |
 | KB transport/provider failure | `retry_pending` followed by existing retry/waiting-human policy | empty during deferred retry |
 | Extraction has no confirmed answer-critical fact | `cannot_answer` | approved safe inability response |
 | Extraction is `ready` | `answer` | grounded answer only |

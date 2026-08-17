@@ -232,6 +232,24 @@ class KBAgentService:
             )
             if not selected_refs:
                 if trace.get("kb_architecture") == "llm_wiki":
+                    if navigation.get("_navigation_succeeded") and not navigation.get("information_needs"):
+                        return {
+                            "kb_status": "found",
+                            "kb_mode": "llm_wiki_selected_pages",
+                            "grounding_status": "not_found",
+                            "answer_context": [],
+                            "grounded_facts": [],
+                            "answer_basis": "",
+                            "missing_information": [],
+                            "source_refs": [],
+                            "reason": "no_information_need",
+                            "trace": trace | {
+                                "navigation": navigation,
+                                "review": {"coverage_status": "not_run", "reason": "no_information_need"},
+                                "selected_source_refs": [],
+                                "llm_trace": list(self._active_llm_trace),
+                            },
+                        }
                     return self._retry_pending_catalog_read(trace, navigation, "navigation_unavailable")
                 selected_refs = self._fallback_select_catalog_refs(text, kb_context, limit=MAX_CATALOG_SELECTION)
             loaded_pages = self._load_catalog_pages(kb_context, selected_refs)
@@ -372,6 +390,7 @@ class KBAgentService:
                 response_format={"type": "json_object"},
             )
             parsed = self._parse_json_response(raw)
+            parsed["_navigation_succeeded"] = True
             self._record_llm_call('navigation')
             return parsed
         except Exception as exc:

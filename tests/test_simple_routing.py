@@ -303,6 +303,42 @@ def test_simple_llm_wiki_first_reply_without_grounding_uses_common_finalizer(tmp
     assert finalizer.calls[0]["response_intent"] == "missing_grounding"
 
 
+def test_simple_llm_wiki_follow_up_without_facts_still_uses_finalizer(tmp_path: Path) -> None:
+    session_factory = make_session_factory(f"sqlite+pysqlite:///{tmp_path / 'simple-llm-wiki-follow-up-no-facts.db'}")
+    Base.metadata.create_all(bind=session_factory.kw["bind"])
+    finalizer = RecordingGroundedFinalizer(
+        route="answer",
+        response_text="Пожалуйста! Если появятся вопросы, напишите.",
+    )
+    routing = RoutingService(
+        session_factory=session_factory,
+        answer_engine_mode="simple_llm_wiki",
+        knowledge_backend="filesystem",
+        knowledge_root="/tmp/okf-wiki",
+        retrieval=RecordingCatalogRetrieval(),
+        kb_agent=RecordingWikiReader(grounding_status="not_found"),
+        direct_llm=finalizer,
+        orchestrator=ForbiddenLegacyOwner(),
+        summary_service=ForbiddenLegacyDependency(),
+        policy=TextOnlyPolicy(),
+    )
+    first = InboundMessage(channel="telegram", external_user_id="igor", external_chat_id="igor", text="Спасибо")
+    second = InboundMessage(channel="telegram", external_user_id="igor", external_chat_id="igor", text="Я поняла")
+
+    first_result = routing.handle_inbound(first)
+    routing.record_outbound_message(
+        first_result["case"]["case_id"],
+        first_result["outcome"]["outcome_payload"]["response_text"],
+    )
+    result = routing.handle_inbound(second)
+
+    assert result["route"]["route"] == "answer"
+    assert result["outcome"]["outcome_payload"]["response_text"] == "Пожалуйста! Если появятся вопросы, напишите."
+    assert len(finalizer.calls) == 2
+    assert finalizer.calls[-1]["knowledge_mode"] == "prompt_only"
+    assert finalizer.calls[-1]["response_intent"] == "missing_grounding"
+
+
 def test_simple_llm_wiki_missing_kb_fact_without_explicit_ambiguity_stays_cannot_answer(tmp_path: Path) -> None:
     session_factory = make_session_factory(f"sqlite+pysqlite:///{tmp_path / 'simple-llm-wiki-missing-fact.db'}")
     Base.metadata.create_all(bind=session_factory.kw["bind"])

@@ -325,7 +325,7 @@ class RoutingService:
                 kb_result.get("kb_mode") == "llm_wiki_selected_pages"
                 and kb_result.get("kb_status") == "found"
             )
-            if first_reply and valid_llm_wiki_result:
+            if valid_llm_wiki_result:
                 final_result = self.direct_llm.respond(
                     payload.text,
                     {
