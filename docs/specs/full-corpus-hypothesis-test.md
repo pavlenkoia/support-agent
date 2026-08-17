@@ -39,9 +39,9 @@ compact compiled-Wiki catalog/page cards
 
 `simple_full_corpus_natural` is an isolated experiment only. Do not deploy, promote, or use it as a replacement baseline without a new approved evaluation.
 
-## Telemetry and replay controls retained
+## Candidate-contour telemetry and replay controls
 
-The isolated probe contour now supports retrying the same persisted test inbound without creating a second customer message in probe history. The replay collector records, per attempt:
+The isolated candidate worktree added a probe-only helper that retries the same persisted test inbound without creating a second customer message in probe history. It was not promoted to the canonical production checkout. The replay collector recorded, per attempt:
 
 - route and literal final answer;
 - source references;
