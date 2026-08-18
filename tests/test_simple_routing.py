@@ -237,6 +237,32 @@ def test_agent_tool_loop_audits_actual_wiki_lookup_status(tmp_path: Path) -> Non
     assert result["audit"]["kb_status"] == "not_found"
 
 
+def test_agent_tool_loop_wiki_outage_emits_no_customer_template(tmp_path: Path) -> None:
+    session_factory = make_session_factory(f"sqlite+pysqlite:///{tmp_path / 'agent-loop-outage.db'}")
+    Base.metadata.create_all(bind=session_factory.kw["bind"])
+    loop = RecordingAgentLoop(
+        {
+            "kb_result": {"grounding_status": "llm_unavailable", "source_refs": []},
+            "trace": {"actions": ["wiki_lookup"]},
+            "tool_observations": [{"tool": "wiki_lookup", "status": "llm_unavailable", "source_refs": [], "grounded_facts": []}],
+        }
+    )
+    routing = RoutingService(
+        session_factory=session_factory,
+        answer_engine_mode="agent_tool_loop",
+        agent_loop=loop,
+        direct_llm=ForbiddenLegacyDependency(),
+    )
+
+    result = routing.handle_inbound(
+        InboundMessage(channel="telegram", external_user_id="igor", external_chat_id="igor", text="Вопрос")
+    )
+
+    assert result["route"]["route"] == "retry_pending"
+    assert result["outcome"]["outcome_payload"]["response_text"] == ""
+    assert result["audit"]["kb_status"] == "llm_unavailable"
+
+
 def test_simple_llm_wiki_mode_uses_catalog_navigation_selected_pages_and_grounded_finalization(tmp_path: Path) -> None:
     session_factory = make_session_factory(f"sqlite+pysqlite:///{tmp_path / 'simple-llm-wiki.db'}")
     Base.metadata.create_all(bind=session_factory.kw["bind"])

@@ -507,10 +507,13 @@ class RoutingService:
         final_route = str(final_result.get("route") or "cannot_answer")
         route_name = "answer" if final_route == "social_reply" else final_route
         outcome_kind = final_route
-        response_text = self.policy.finalize_simple_customer_text(
-            str(final_result.get("response_text") or ""),
-            first_reply_in_dialogue=first_reply,
-        )
+        if route_name == "retry_pending":
+            response_text = ""
+        else:
+            response_text = self.policy.finalize_simple_customer_text(
+                str(final_result.get("response_text") or ""),
+                first_reply_in_dialogue=first_reply,
+            )
         source_refs = [str(ref) for ref in kb_result.get("source_refs", []) if str(ref)] if grounded else []
         actions = list((loop_result.get("trace") or {}).get("actions") or [])
         tool_observations = list(loop_result.get("tool_observations") or [])
