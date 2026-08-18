@@ -7,6 +7,7 @@ from app.core.db import SessionLocal
 from app.models.case import SupportCase
 from app.models.message import Message
 from app.schemas.message import InboundMessage
+from app.services.agent_tool_loop import AgentLoopService, DirectLLMActionAgent, WikiLookupTool
 from app.services.audit import build_audit_event
 from app.services.case_resolution import reset_conversation_session, resolve_case
 from app.services.context_builder import build_context
@@ -41,6 +42,7 @@ class RoutingService:
         tool_runtime: ToolRuntimeService | None = None,
         orchestrator: OrchestratorService | None = None,
         simple_answer_engine: SimpleAnswerEngine | None = None,
+        agent_loop: AgentLoopService | None = None,
         answer_engine_mode: str | None = None,
     ) -> None:
         self.session_factory = session_factory
@@ -61,6 +63,17 @@ class RoutingService:
                 profile_root=settings.support_agent_profile_root,
                 max_corpus_chars=settings.simple_answer_max_corpus_chars,
                 temperature=settings.direct_llm_temperature,
+            )
+        self.agent_loop = agent_loop
+        if self.answer_engine_mode == "agent_tool_loop" and self.agent_loop is None:
+            self.agent_loop = AgentLoopService(
+                agent=DirectLLMActionAgent(self.direct_llm),
+                wiki_lookup=WikiLookupTool(
+                    retrieval=self.retrieval,
+                    kb_agent=self.kb_agent,
+                    knowledge_backend=self.knowledge_backend,
+                    knowledge_root=self.knowledge_root,
+                ),
             )
         self.orchestrator = orchestrator or OrchestratorService(
             retrieval=self.retrieval,
@@ -101,6 +114,8 @@ class RoutingService:
                 return self._handle_simple_inbound(session, case, payload)
             if self.answer_engine_mode == "simple_llm_wiki":
                 return self._handle_simple_llm_wiki_inbound(session, case, payload)
+            if self.answer_engine_mode == "agent_tool_loop":
+                return self._handle_agent_tool_loop_inbound(session, case, payload)
             context = build_context(session, payload, case, summary_service=self.summary_service)
             knowledge_query = self._build_knowledge_query(context)
             turn_classification = {
@@ -456,6 +471,88 @@ class RoutingService:
             "context": context,
             "retrieval": retrieval,
             "kb_result": kb_result,
+            "route": {key: value for key, value in route.items() if key != "reply"},
+            "outcome": outcome,
+            "audit": audit,
+        }
+
+    def _handle_agent_tool_loop_inbound(self, session, case: dict, payload: InboundMessage) -> dict:
+        if self.agent_loop is None:
+            raise RuntimeError("agent tool loop is not configured")
+        context = build_context(session, payload, case, summary_service=self.summary_service)
+        loop_result = self.agent_loop.run(text=payload.text, context=context)
+        kb_result = loop_result.get("kb_result") if isinstance(loop_result.get("kb_result"), dict) else {}
+        grounded = kb_result.get("grounding_status") == "ready"
+        first_reply = not any(item.get("role") == "assistant" for item in context.get("recent_messages", []) if isinstance(item, dict))
+        final_result = self.direct_llm.respond(
+            payload.text,
+            kb_result,
+            knowledge_mode="kb_grounded" if grounded else "prompt_only",
+            conversation_context=context,
+            tool_observations=list(loop_result.get("tool_observations") or []),
+            first_reply_in_dialogue=first_reply,
+            response_intent="answer" if grounded else "missing_grounding",
+        )
+        final_route = str(final_result.get("route") or "cannot_answer")
+        if not grounded and final_route == "answer":
+            final_route = "cannot_answer"
+            final_result = {**final_result, "response_text": self.policy.render_simple_cannot_answer()}
+        route_name = "answer" if final_route == "social_reply" else final_route
+        outcome_kind = final_route
+        response_text = self.policy.finalize_simple_customer_text(
+            str(final_result.get("response_text") or ""),
+            first_reply_in_dialogue=first_reply,
+        )
+        source_refs = [str(ref) for ref in kb_result.get("source_refs", []) if str(ref)] if grounded else []
+        actions = list((loop_result.get("trace") or {}).get("actions") or [])
+        tool_observations = list(loop_result.get("tool_observations") or [])
+        wiki_observations = [
+            item for item in tool_observations
+            if isinstance(item, dict) and item.get("tool") == "wiki_lookup"
+        ]
+        wiki_status = str(wiki_observations[-1].get("status") or "not_found") if wiki_observations else "not_started"
+        wiki_used = bool(wiki_observations)
+        llm_trace = [item for item in loop_result.get("llm_trace", []) if isinstance(item, dict)]
+        llm_trace.extend(item for item in final_result.get("llm_trace", []) if isinstance(item, dict))
+        retrieval = {
+            "kb_status": wiki_status,
+            "kb_snippets": [],
+            "kb_skip_reason": "agent_tool_loop_no_wiki_needed" if not wiki_used else None,
+        }
+        route = {
+            "route": route_name,
+            "reply": {"response_text": response_text},
+            "reason": outcome_kind,
+            "route_reason": outcome_kind,
+            "route_confidence": 1.0,
+            "answer_engine": "agent_tool_loop",
+            "outcome_kind": outcome_kind,
+            "source_refs": source_refs,
+        }
+        outcome = self.outcome.execute(route, case, context, retrieval, payload.text)
+        support_case = session.scalar(select(SupportCase).where(SupportCase.id == case["case_id"]))
+        if support_case is not None:
+            support_case.status = case["case_status"]
+            support_case.route_mode = route_name
+        response_strategy = {
+            "answer_engine": "agent_tool_loop",
+            "agent_actions": actions,
+            "tool_observations": tool_observations,
+            "wiki_used": wiki_used,
+            "llm_trace": llm_trace,
+            "logical_llm_call_count": len(llm_trace),
+            "provider_attempt_count": sum(int(item.get("attempts") or 1) for item in llm_trace),
+        }
+        audit = build_audit_event(case, route, retrieval, outcome, {"turn_type": "agent_tool_loop"}, response_strategy)
+        audit["agent_actions"] = actions
+        persist_workflow_event(session, case["case_id"], response_strategy, event_type="response_strategy_selected", actor="system:routing")
+        persist_workflow_event(session, case["case_id"], audit, event_type="inbound_processed", actor="system:routing")
+        session.commit()
+        return {
+            "case": case,
+            "context": context,
+            "retrieval": retrieval,
+            "kb_result": {},
             "route": {key: value for key, value in route.items() if key != "reply"},
             "outcome": outcome,
             "audit": audit,
