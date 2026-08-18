@@ -20,6 +20,9 @@ class PromptService:
     def load_system_prompt(self) -> str:
         return "Поведенческий контракт агента."
 
+    def render_cannot_answer(self) -> str:
+        return "Нет подтверждённых данных."
+
 
 def test_next_action_returns_provider_neutral_wiki_tool_call() -> None:
     client = ActionClient('{"action":"wiki_lookup","arguments":{},"reason":"нужны факты"}')
@@ -39,3 +42,21 @@ def test_next_action_returns_provider_neutral_wiki_tool_call() -> None:
     assert action["llm_trace"][0]["step"] == "agent_next_action"
     assert client.calls[0]["response_format"] == {"type": "json_object"}
     assert "wiki_lookup" in str(client.calls[0]["user_prompt"])
+
+
+def test_finalizer_prompt_requires_natural_grammatical_russian() -> None:
+    client = ActionClient('{"route":"answer","response_text":"Готовый ответ.","confidence":1,"reason":"ready"}')
+    service = DirectLLMService(client=client, prompt_service=PromptService())
+
+    service.respond(
+        "Как оформить вопрос?",
+        {"grounding_status": "ready", "grounded_facts": ["Подтверждённый факт"]},
+        knowledge_mode="kb_grounded",
+        conversation_context={"recent_messages": []},
+    )
+
+    prompt = str(client.calls[0]["user_prompt"])
+    assert "Сформулируй готовый естественный ответ на русском языке." in prompt
+    assert "Не склеивай извлечённые факты механически." in prompt
+    assert "Сохраняй смысловые связи между субъектом, действием, условием и способом действия." in prompt
+    assert "Перед отправкой проверь, что фраза грамматически закончена и не меняет подтверждённый смысл evidence." in prompt
