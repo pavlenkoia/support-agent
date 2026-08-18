@@ -494,9 +494,6 @@ class RoutingService:
             response_intent="answer" if grounded else "missing_grounding",
         )
         final_route = str(final_result.get("route") or "cannot_answer")
-        if not grounded and final_route == "answer":
-            final_route = "cannot_answer"
-            final_result = {**final_result, "response_text": self.policy.render_simple_cannot_answer()}
         route_name = "answer" if final_route == "social_reply" else final_route
         outcome_kind = final_route
         response_text = self.policy.finalize_simple_customer_text(
