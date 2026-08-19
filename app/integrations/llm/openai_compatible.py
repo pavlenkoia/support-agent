@@ -203,6 +203,7 @@ class OpenAICompatibleClient(BaseLLMClient):
         payload: dict[str, Any] = {
             "model": self.model,
             "temperature": temperature,
+            "stream": False,
             "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
