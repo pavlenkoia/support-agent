@@ -34,16 +34,6 @@ class ForbiddenLegacyDependency:
         raise AssertionError(f"legacy dependency must not be used in simple mode: {name}")
 
 
-class RecordingAgentLoop:
-    def __init__(self, result: dict) -> None:
-        self.result = result
-        self.calls: list[dict] = []
-
-    def run(self, *, text: str, context: dict) -> dict:
-        self.calls.append({"text": text, "context": context})
-        return self.result
-
-
 class RecordingCatalogRetrieval:
     def __init__(self) -> None:
         self.calls: list[dict] = []
@@ -177,90 +167,6 @@ def test_simple_mode_routes_once_without_legacy_orchestrator(tmp_path: Path, cha
     assert result["route"]["answer_engine"] == "simple_full_corpus"
     assert len(engine.calls) == 1
     assert engine.calls[0]["question"] == "Сколько стоит?"
-
-
-def test_agent_tool_loop_routes_social_reply_without_legacy_kb_dependencies(tmp_path: Path) -> None:
-    session_factory = make_session_factory(f"sqlite+pysqlite:///{tmp_path / 'agent-loop.db'}")
-    Base.metadata.create_all(bind=session_factory.kw["bind"])
-    loop = RecordingAgentLoop(
-        {
-            "kb_result": {},
-            "trace": {"actions": ["tool_not_used:unsupported_action"]},
-            "llm_trace": [{"usage": {"total_tokens": 17}, "attempts": 2}],
-            "tool_observations": [{"tool": "agent_action", "status": "not_used"}],
-        }
-    )
-    finalizer = RecordingGroundedFinalizer(route="social_reply", response_text="Пожалуйста!")
-    routing = RoutingService(
-        session_factory=session_factory,
-        answer_engine_mode="agent_tool_loop",
-        agent_loop=loop,
-        orchestrator=ForbiddenLegacyOwner(),
-        kb_agent=ForbiddenLegacyDependency(),
-        direct_llm=finalizer,
-        retrieval=ForbiddenLegacyDependency(),
-    )
-
-    result = routing.handle_inbound(
-        InboundMessage(channel="internal_test", external_user_id="igor", external_chat_id="igor", text="Спасибо")
-    )
-
-    assert result["route"]["answer_engine"] == "agent_tool_loop"
-    assert result["route"]["route"] == "answer"
-    assert result["outcome"]["outcome_payload"]["response_text"] == "Здравствуйте! Пожалуйста!"
-    assert loop.calls[0]["text"] == "Спасибо"
-    assert result["audit"]["agent_actions"] == ["tool_not_used:unsupported_action"]
-    assert result["audit"]["logical_llm_call_count"] == 2
-    assert result["audit"]["provider_attempt_count"] == 3
-    assert finalizer.calls[0]["knowledge_mode"] == "prompt_only"
-    assert finalizer.calls[0]["response_intent"] == "missing_grounding"
-
-
-def test_agent_tool_loop_audits_actual_wiki_lookup_status(tmp_path: Path) -> None:
-    session_factory = make_session_factory(f"sqlite+pysqlite:///{tmp_path / 'agent-loop-kb-status.db'}")
-    Base.metadata.create_all(bind=session_factory.kw["bind"])
-    loop = RecordingAgentLoop(
-        {
-            "kb_result": {"grounding_status": "not_found", "source_refs": []},
-            "trace": {"actions": ["wiki_lookup"]},
-            "tool_observations": [{"tool": "wiki_lookup", "status": "not_found", "source_refs": []}],
-        }
-    )
-    finalizer = RecordingGroundedFinalizer(route="cannot_answer", response_text="Сейчас не могу дать точный ответ на этот вопрос.")
-    routing = RoutingService(session_factory=session_factory, answer_engine_mode="agent_tool_loop", agent_loop=loop, direct_llm=finalizer)
-
-    result = routing.handle_inbound(
-        InboundMessage(channel="internal_test", external_user_id="igor", external_chat_id="igor", text="Какая гарантия?")
-    )
-
-    assert result["retrieval"]["kb_status"] == "not_found"
-    assert result["audit"]["kb_status"] == "not_found"
-
-
-def test_agent_tool_loop_wiki_outage_emits_no_customer_template(tmp_path: Path) -> None:
-    session_factory = make_session_factory(f"sqlite+pysqlite:///{tmp_path / 'agent-loop-outage.db'}")
-    Base.metadata.create_all(bind=session_factory.kw["bind"])
-    loop = RecordingAgentLoop(
-        {
-            "kb_result": {"grounding_status": "llm_unavailable", "source_refs": []},
-            "trace": {"actions": ["wiki_lookup"]},
-            "tool_observations": [{"tool": "wiki_lookup", "status": "llm_unavailable", "source_refs": [], "grounded_facts": []}],
-        }
-    )
-    routing = RoutingService(
-        session_factory=session_factory,
-        answer_engine_mode="agent_tool_loop",
-        agent_loop=loop,
-        direct_llm=ForbiddenLegacyDependency(),
-    )
-
-    result = routing.handle_inbound(
-        InboundMessage(channel="telegram", external_user_id="igor", external_chat_id="igor", text="Вопрос")
-    )
-
-    assert result["route"]["route"] == "retry_pending"
-    assert result["outcome"]["outcome_payload"]["response_text"] == ""
-    assert result["audit"]["kb_status"] == "llm_unavailable"
 
 
 def test_simple_llm_wiki_mode_uses_catalog_navigation_selected_pages_and_grounded_finalization(tmp_path: Path) -> None:

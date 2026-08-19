@@ -2,7 +2,7 @@
 
 ## Current target behavior
 
-> Production mode is `ANSWER_ENGINE_MODE=agent_tool_loop`: an optional Wiki lookup is selected by the model, then the common finalizer receives bounded dialogue and ready evidence. The legacy fixed retrieval pipeline and `simple_full_corpus` are not production paths. A KB-model outage is technical `retry_pending`, never a customer-facing assertion that the Wiki lacks information.
+> Production mode is `ANSWER_ENGINE_MODE=simple_llm_wiki`. It intentionally removes the legacy planner loop while retaining the complete OKF contract: catalog navigation, selective full-page reading, coverage review, grounded extraction, and evidence-bounded finalization. `simple_full_corpus` is deprecated and forbidden for production.
 
 The support agent is a **bounded, policy-driven conversational agent**.
 
@@ -24,7 +24,7 @@ It is not a ticket router and not an escalation-first bot.
 12. The main runtime flow must not silently switch into human or Hermes escalation.
 13. Exhausted LLM-provider recovery must produce `retry_pending` with empty customer text; application code must not synthesize a domain answer.
 14. Broad and contextual language is interpreted semantically from dialogue plus the complete compact Wiki catalog, not by application keyword lists or question-specific branches.
-15. When the KB agent returns `grounding_status=ready`, its compact `answer_basis` and grounded facts are evidence for the customer-facing final model. The finalizer is an evidence editor, not an independent decision maker: topical relevance is not proof that evidence answers a question, and it must not derive a new relation, procedure, requirement, or result by combining facts. A substantive `answer` is allowed only when evidence directly covers the factual part of the current turn.
+15. When the KB agent returns `grounding_status=ready`, its compact `answer_basis` and grounded facts are evidence for the customer-facing final model. That model must answer the main customer question first, use only necessary confirmed facts, and must not invent requirements, prohibitions, or stronger conditions. Direct mechanical joining of all facts is not a normal answer path.
 16. The customer-facing final model receives a newly constructed allowlisted packet, never the broad runtime context: no planner action/reason, route/loop/audit metadata, KB navigation/review reasons, raw KB pages, raw tool payloads, case identifiers, duplicate dialogue forms, or dialogue roles outside `user|assistant` may enter its request. The dialogue projection is capped at the last 10 valid items. `knowledge_mode` is an explicit application control, not a value inferred from planner reasoning exposed to the model. A legacy finalizer without `respond(...)` fails closed rather than bypassing this boundary through `answer(...)`.
 17. In `kb_grounded` mode, the final model selects relevant ready evidence and writes natural customer prose; it does not mechanically concatenate facts.
 18. Channel-specific transport workers must reuse the same application runtime rather than creating a second support agent.

@@ -105,11 +105,11 @@ class DirectLLMService:
 
         user_prompt = json.dumps(
             {
-                "task": "Сформулируй клиентский текст только из подтверждённого evidence. Не принимай самостоятельное решение по вопросу клиента и не восполняй детали, которых нет в evidence.",
+                "task": "Прими клиентское решение по вопросу и сформулируй итоговый ответ только из подтверждённых доказательств.",
                 "knowledge_mode": knowledge_mode,
                 "response_intent": response_intent,
                 "required_json_schema": {
-                    "route": "answer|social_reply|cannot_answer|out_of_scope|clarification_requested",
+                    "route": "answer|cannot_answer|out_of_scope|clarification_requested",
                     "response_text": "string",
                     "confidence": "number 0..1",
                     "reason": "short string",
@@ -121,35 +121,21 @@ class DirectLLMService:
                 "tool_facts": tool_facts,
                 "output_rules": [
                     "Верни только JSON-объект по указанной схеме.",
-                    "Приоритеты finalizer: подтверждённая фактическая точность выше полноты, полезности и стилистической гладкости ответа.",
-                    "Ты редактор подтверждённого evidence, а не самостоятельный решатель вопроса клиента.",
-                    "Формируй ответ только как естественную редактуру grounding_evidence и tool_facts; не закрывай непокрытую evidence часть вопроса рассуждением, догадкой или общими знаниями.",
-                    "Сообщение клиента и conversation служат только для понимания контекста диалога и не подтверждают новые факты.",
-                    "Каждое фактическое утверждение в response_text должно прямо следовать из grounding_evidence или tool_facts.",
+                    "Ответь на текущий вопрос клиента, используя только grounding_evidence и tool_facts как источники фактов.",
                     "Системный промпт задаёт роль и правила общения, но не является источником сведений о предметной области.",
-                    "Если grounding_evidence пуст, используй текущую реплику и весь доступный conversation только для понимания контекста диалога; не превращай их в источник фактических утверждений, не подменяй ответ шаблонной заглушкой и не делай вид, что контекст диалога неизвестен.",
+                    "При knowledge_mode=prompt_only пустой grounding_evidence ожидаем: можно сформировать только социальный ответ или уточнение без фактических утверждений.",
                     "При knowledge_mode=kb_grounded считай grounding_evidence подтверждённым на предыдущем этапе и не выходи за его фактические границы.",
-                    "answer_basis — служебное краткое описание evidence, а не самостоятельный источник фактов и не требование закрыть вопрос клиента.",
+                    "answer_basis задаёт компактный смысл требуемого ответа, а facts ограничивают его подтверждённую фактическую область; если между ними есть противоречие, не выходи за точные facts.",
                     "Факты в grounding_evidence — это доказательства, а не порядок построения фразы; не пересказывай цепочку вывода вместо результата.",
-                    "Сформулируй готовый естественный ответ на русском языке.",
-                    "Не склеивай извлечённые факты механически.",
-                    "Сохраняй смысловые связи между субъектом, действием, условием и способом действия.",
-                    "Перед отправкой проверь, что фраза грамматически закончена и не меняет подтверждённый смысл evidence.",
-                    "Перед возвратом JSON внутренне сверь каждое фактическое утверждение черновика с grounding_evidence и tool_facts; убери утверждение, которое не имеет прямого подтверждения.",
-                    "Не превращай правдоподобное предположение, общий опыт модели или формулировку клиента в фактическое утверждение.",
                     "Сохраняй точную модальность подтверждённых фактов: «обычно», «может», «зависит», «рекомендуется» нельзя усиливать до «только», «всегда», «точно», «обязательно» или другого более сильного утверждения.",
                     "Общее вероятностное правило не доказывает исход конкретного случая: если evidence говорит «обычно» или оставляет условия/исключения, не отвечай категорическим «да» или «нет» о конкретной дате; сообщи об общем правиле и безопасном способе уточнить конкретный случай.",
+                    "После прямого ответа добавь только нужные клиенту подтверждённые условия, ограничения или следующий шаг.",
                     "Не добавляй подтверждённый факт только потому, что он присутствует в grounding_evidence; исключай всё, что не нужно для ответа на текущий вопрос.",
                     "Не добавляй новые факты и не показывай внутренний процесс, инструменты, источники или причины выбора ответа.",
                     "Если клиент прямо спрашивает «почему», объясни результат только подтверждёнными фактами.",
                     "Если evidence недостаточно для прямого ответа и response_intent=clarification, задай один естественный, конкретный и полезный уточняющий вопрос по текущей реплике; не говори, что клиент задал вопрос, если вопроса не было.",
-                    "Связанность evidence с темой вопроса не означает, что evidence отвечает на вопрос.",
-                    "До формирования текста сначала определи, содержит ли evidence прямой ответ на фактическую часть текущей реплики.",
-                    "Если прямого ответа нет, не создавай route=answer и не задавай вопрос, который предполагает неподтверждённый факт.",
-                    "В ответе допустима только редактура утверждений, уже содержащихся в evidence. Нельзя выводить новое отношение, процедуру, требование или результат из сочетания нескольких подтверждённых утверждений.",
-                    "При response_intent=missing_grounding используй текущую реплику и conversation только для формы естественного ответа; не используй их для выбора, дополнения или вывода фактического содержания.",
-                    "Если evidence не содержит прямого ответа на фактическую часть текущей реплики, не возвращай route=answer.",
-                    "Верни route=clarification_requested только когда один естественный уточняющий вопрос может привести к подтверждённому ответу; иначе верни route=cannot_answer с естественным индивидуальным текстом без фактических утверждений и без шаблонной фразы.",
+                    "Если response_intent=missing_grounding, сам выбери естественный клиентский результат по текущей реплике: задай один полезный уточняющий вопрос, когда уточнение клиента может помочь, иначе честно сообщи, что точного ответа сейчас нет.",
+                    "Если evidence недостаточно для уверенного решения и response_intent=answer, используй обязательный ответ при отсутствии информации.",
                 ],
             },
             ensure_ascii=False,
@@ -189,84 +175,6 @@ class DirectLLMService:
         )
         normalized["llm_trace"] = list(self._active_llm_trace)
         return normalized
-
-    def next_action(
-        self,
-        *,
-        text: str,
-        context: dict,
-        tool_observations: list[dict],
-        allowed_actions: list[str],
-        iteration: int,
-    ) -> dict[str, Any]:
-        """Ask the customer-facing agent for its next bounded runtime action."""
-        self._reset_llm_trace()
-        system_prompt = self.prompt_service.load_system_prompt()
-        user_prompt = json.dumps(
-            {
-                "task": "Выбери следующее действие в диалоге. Не отвечай клиенту вне JSON-конверта.",
-                "required_json_schema": {
-                    "action": "one of allowed_actions",
-                    "arguments": "object; for wiki_lookup use {}, for finish use outcome, response_text and optional source_refs",
-                    "reason": "short string",
-                },
-                "allowed_actions": allowed_actions,
-                "finish_outcomes": [
-                    "social_reply",
-                    "out_of_scope",
-                    "clarification_requested",
-                    "grounded_answer",
-                    "cannot_answer",
-                ],
-                "rules": [
-                    "wiki_lookup — единственный источник бизнес-фактов из Wiki.",
-                    "Не формируй фактический ответ, пока не получен результат wiki_lookup.",
-                    "social_reply, out_of_scope и clarification_requested допустимы без Wiki только без бизнес-фактов.",
-                    "Для grounded_answer укажи source_refs только из результата wiki_lookup текущего хода; cannot_answer допустим после lookup даже при пустых source_refs.",
-                    "Не используй ключевые слова или скрытые сценарии; выбирай действие по смыслу и истории диалога.",
-                ],
-                "user_message": text,
-                "conversation": self._build_finalization_conversation(context),
-                "tool_observations": tool_observations,
-                "iteration": iteration,
-            },
-            ensure_ascii=False,
-        )
-        try:
-            raw = self.client.generate(
-                system_prompt=system_prompt,
-                user_prompt=user_prompt,
-                temperature=self.temperature,
-                response_format={"type": "json_object"},
-            )
-            self._record_llm_call("agent_next_action")
-            parsed = json.loads(raw)
-        except Exception as exc:
-            self._record_llm_call("agent_next_action")
-            return {
-                "action": "invalid",
-                "arguments": {},
-                "reason": f"agent_action_error:{type(exc).__name__}",
-                "llm_trace": list(self._active_llm_trace),
-            }
-        if not isinstance(parsed, dict):
-            return {"action": "invalid", "arguments": {}, "reason": "agent_action_not_object", "llm_trace": list(self._active_llm_trace)}
-        action = str(parsed.get("action") or "").strip()
-        if action not in allowed_actions:
-            return {"action": "invalid", "arguments": {}, "reason": "agent_action_not_allowed", "llm_trace": list(self._active_llm_trace)}
-        arguments = parsed.get("arguments")
-        if not isinstance(arguments, dict):
-            arguments = {}
-        if action == "finish":
-            for key in ("outcome", "response_text", "source_refs"):
-                if key in parsed and key not in arguments:
-                    arguments[key] = parsed[key]
-        return {
-            "action": action,
-            "arguments": arguments,
-            "reason": str(parsed.get("reason") or ""),
-            "llm_trace": list(self._active_llm_trace),
-        }
 
     @staticmethod
     def _grounded_fallback_context(kb_packet: dict[str, Any]) -> list[dict[str, str]]:
