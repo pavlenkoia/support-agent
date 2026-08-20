@@ -6,6 +6,8 @@
 
 The support agent is a **bounded, policy-driven conversational agent**.
 
+For a clear in-domain request with no direct grounded answer, the active profile may declare a no-answer customer option as allowlisted policy evidence. The common finalizer may offer that option naturally; the application never hardcodes a business contact, office hours, or customer-facing template. Future operator handoff may consume the same policy outcome.
+
 It is not a ticket router and not an escalation-first bot.
 
 ## Main invariants
