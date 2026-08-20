@@ -2,7 +2,7 @@
 
 ## Current target behavior
 
-> Production mode is `ANSWER_ENGINE_MODE=simple_llm_wiki`. It intentionally removes the legacy planner loop while retaining the complete OKF contract: catalog navigation, selective full-page reading, coverage review, grounded extraction, and evidence-bounded finalization. `simple_full_corpus` is deprecated and forbidden for production.
+> Production mode is `ANSWER_ENGINE_MODE=agent_tool_loop`: the model may select optional `wiki_lookup`, then the common finalizer always receives bounded dialogue and available evidence/observations. `simple_llm_wiki` and `simple_full_corpus` are not production paths. A Wiki technical failure is an observation for finalization, never a customer-facing assertion that the Wiki lacks information or a reason to suppress the turn.
 
 The support agent is a **bounded, policy-driven conversational agent**.
 

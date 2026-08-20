@@ -19,6 +19,12 @@ def test_canonical_profile_source_has_no_prompt_facts_or_wiki_scenarios() -> Non
     validate_profile_source(SOURCE)
 
 
+def test_canonical_profile_does_not_require_missing_evidence_refusal() -> None:
+    prompt = SOURCE.joinpath("SYSTEM_PROMPT.md").read_text(encoding="utf-8")
+    assert "не превращай отсутствие evidence в отказную формулу" in prompt
+    assert "надёжного ответа нет" not in prompt
+
+
 def test_prompts_contain_no_profile_business_literals() -> None:
     text = "\n".join(
         SOURCE.joinpath(name).read_text(encoding="utf-8").casefold()
