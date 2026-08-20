@@ -144,6 +144,26 @@ def test_retry_pending_batch_does_not_spin_until_a_new_revision_arrives() -> Non
     assert queue.flush_due(now=now + timedelta(seconds=26), background=False) == 1
 
 
+def test_newer_message_unblocks_a_generation_that_becomes_retry_pending() -> None:
+    now = datetime(2026, 8, 11, tzinfo=UTC)
+    calls: list[str] = []
+    queue: InboundQueue
+
+    def processor(payload: InboundMessage, _) -> str:
+        calls.append(payload.text)
+        if payload.text == "Первый":
+            queue.submit(inbound(text="Уточнение", message_id="2"), now=now + timedelta(seconds=1))
+            return "retry_pending"
+        return "delivered"
+
+    queue = InboundQueue(processor, quiet_seconds=0, max_wait_seconds=0)
+    queue.submit(inbound(text="Первый", message_id="1"), now=now)
+
+    assert queue.flush_due(now=now, background=False) == 1
+    assert queue.flush_due(now=now + timedelta(seconds=1), background=False) == 1
+    assert calls == ["Первый", "Первый\nУточнение"]
+
+
 def test_different_dialogs_flush_independently() -> None:
     now = datetime(2026, 8, 11, tzinfo=UTC)
     processor = RecordingProcessor()

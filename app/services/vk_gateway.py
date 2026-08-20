@@ -121,6 +121,11 @@ class VKGatewayService:
             self._mark_generation_failed(generation, str(exc))
             raise
         if self._is_retry_pending(result):
+            # A newer inbound message owns the next combined turn. Do not put an
+            # obsolete subset onto the durable retry schedule: it would be stale
+            # immediately and delay the newer customer message behind recovery.
+            if not generation.is_current():
+                return "superseded"
             self._mark_generation_retry_pending(generation, result)
             return "retry_pending"
 

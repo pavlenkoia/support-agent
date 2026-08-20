@@ -243,7 +243,11 @@ class OpenAICompatibleClient(BaseLLMClient):
                             )
                             raise RuntimeError("LLM retry deadline exceeded")
                         if remaining > 0:
-                            request_timeout = min(request_timeout, remaining)
+                            # A single request must not consume the whole shared
+                            # recovery window. Reserve an equal time slice for each
+                            # remaining attempt so a timeout can actually be retried.
+                            remaining_attempts = self.max_retries - retry_attempt + 1
+                            request_timeout = min(request_timeout, remaining / remaining_attempts)
                     with request.urlopen(req, timeout=request_timeout) as response:
                         data = json.loads(response.read().decode("utf-8"))
                     self._set_active_key_index(active_key_index)

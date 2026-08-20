@@ -412,6 +412,57 @@ def test_vk_gateway_retries_pending_kb_transport_failure_without_intermediate_cu
         assert routing.recorded_outbound == [(1, "Ответ после повтора")]
 
 
+def test_vk_gateway_newer_message_supersedes_failed_generation_without_scheduling_stale_retry(tmp_path: Path) -> None:
+    sender = RecordingVKSender()
+
+    class NewerMessageDuringFailureRouting(StubRouting):
+        def __init__(self) -> None:
+            super().__init__(response_text="Ответ на полный запрос")
+            self.calls = 0
+            self.gateway: VKGatewayService | None = None
+
+        def handle_inbound(self, payload, *, persist_inbound: bool = True) -> dict:
+            self.calls += 1
+            if self.calls == 1:
+                assert self.gateway is not None
+                self.gateway.handle_event(
+                    {
+                        "type": "message_new",
+                        "group_id": 55,
+                        "object": {"message": {"id": 101, "peer_id": 2000, "from_id": 3000, "text": "Уточнение", "date": 1780000001}},
+                    }
+                )
+                return {
+                    "case": {"conversation_id": 1, "case_id": 1, "case_status": "retry_pending"},
+                    "outcome": {"outcome_type": "retry_pending", "outcome_payload": {"response_text": ""}},
+                }
+            return super().handle_inbound(payload, persist_inbound=persist_inbound)
+
+    routing = NewerMessageDuringFailureRouting()
+    service, session_factory = make_service(tmp_path, routing=routing, sender=sender)
+    service.queue = InboundQueue(service._process_generation, quiet_seconds=0, max_wait_seconds=0)
+    routing.gateway = service
+    now = datetime.now(UTC)
+    service.handle_event(
+        {
+            "type": "message_new",
+            "group_id": 55,
+            "object": {"message": {"id": 100, "peer_id": 2000, "from_id": 3000, "text": "Первый вопрос", "date": int(now.timestamp())}},
+        }
+    )
+
+    assert service.queue.flush_due(now=now + timedelta(seconds=1), background=False) == 1
+    assert service.queue.flush_due(now=now + timedelta(seconds=2), background=False) == 1
+    assert [payload.text for payload in routing.handled_payloads] == ["Первый вопрос\nУточнение"]
+    assert sender.calls == [("2000", "Ответ на полный запрос")]
+    with session_factory() as session:
+        events = list(session.scalars(select(TransportEvent).order_by(TransportEvent.id)))
+        assert [(event.external_message_id, event.status, event.retry_attempts) for event in events] == [
+            ("100", "processed", 0),
+            ("101", "processed", 0),
+        ]
+
+
 def test_vk_gateway_retry_reuses_journaled_reply_after_ambiguous_send_failure(tmp_path: Path) -> None:
     sender = FailOnceVKSender()
     routing = DeferredRetryRouting()

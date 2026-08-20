@@ -430,3 +430,38 @@ def test_openai_compatible_client_stops_transient_retries_when_retry_deadline_is
 
     assert calls["count"] == 1
     assert client.get_last_call_info()["error"] == "retry_deadline_exceeded"
+
+
+def test_openai_compatible_client_reserves_time_for_retry_after_a_timed_out_attempt(monkeypatch) -> None:
+    """A request timeout must not consume the entire retry deadline by itself."""
+    calls = {"count": 0}
+    clock = {"value": 0.0}
+    request_timeouts: list[float] = []
+
+    def fake_urlopen(req, timeout):
+        _ = req
+        calls["count"] += 1
+        request_timeouts.append(timeout)
+        if calls["count"] == 1:
+            clock["value"] += timeout
+            raise TimeoutError("provider stalled")
+        return FakeResponse({"choices": [{"message": {"content": "ok-after-timeout"}}]})
+
+    monkeypatch.setattr("app.integrations.llm.openai_compatible.request.urlopen", fake_urlopen)
+    monkeypatch.setattr("app.integrations.llm.openai_compatible.time.perf_counter", lambda: clock["value"])
+    monkeypatch.setattr("app.integrations.llm.openai_compatible.time.sleep", lambda _: None)
+    client = OpenAICompatibleClient(
+        provider="openai_compatible",
+        base_url="https://example.test/v1",
+        api_key="token",
+        model="test-model",
+        timeout_seconds=45,
+        max_retries=1,
+        retry_backoff_seconds=0.0,
+        retry_deadline_seconds=45.0,
+    )
+
+    assert client.generate(system_prompt="sys", user_prompt="usr") == "ok-after-timeout"
+    assert calls["count"] == 2
+    assert request_timeouts[0] < 45.0
+    assert client.get_last_call_info()["attempts"] == 2

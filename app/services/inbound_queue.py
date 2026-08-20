@@ -181,7 +181,10 @@ class InboundQueue:
             batch = self._batches.get(generation.key)
             if batch is not None and batch.active_revision == generation.revision:
                 batch.active_revision = None
-                if result == "retry_pending":
+                # A newer inbound message supersedes this generation. It must be
+                # allowed to flush as a fresh combined turn even if the obsolete
+                # generation ended in a recoverable provider failure.
+                if result == "retry_pending" and batch.revision == generation.revision:
                     batch.retry_pending = True
                 if batch.cancelled:
                     del self._batches[generation.key]
