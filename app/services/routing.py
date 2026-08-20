@@ -487,10 +487,16 @@ class RoutingService:
         first_reply = not any(item.get("role") == "assistant" for item in context.get("recent_messages", []) if isinstance(item, dict))
         # Wiki is optional: every completed loop turn reaches the common finalizer.
         # An unavailable KB call is a technical observation, never a terminal customer outcome.
+        policy_evidence = [] if grounded else self.policy.no_answer_policy_evidence()
+        if policy_evidence:
+            tool_observations.extend(
+                {"kind": "profile_no_answer_option", "summary": item["text"], "source_ref": item["source_ref"]}
+                for item in policy_evidence
+            )
         final_result = self.direct_llm.respond(
             payload.text,
             kb_result,
-            knowledge_mode="kb_grounded" if grounded else "prompt_only",
+            knowledge_mode="kb_grounded" if grounded or policy_evidence else "prompt_only",
             conversation_context=context,
             tool_observations=tool_observations,
             first_reply_in_dialogue=first_reply,

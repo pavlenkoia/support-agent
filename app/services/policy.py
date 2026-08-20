@@ -37,6 +37,14 @@ class PolicyService:
             return {}
         return data if isinstance(data, dict) else {}
 
+    def no_answer_policy_evidence(self) -> list[dict[str, str]]:
+        policy = self.load_profile().get("fallback_policy", {})
+        no_answer = policy.get("no_answer", {}) if isinstance(policy, dict) else {}
+        evidence = no_answer.get("evidence", {}) if isinstance(no_answer, dict) else {}
+        source_ref = str(evidence.get("source_ref") or "").strip() if isinstance(evidence, dict) else ""
+        text = str(evidence.get("text") or "").strip() if isinstance(evidence, dict) else ""
+        return [{"source_ref": source_ref, "text": text}] if source_ref and text else []
+
     def render_cannot_answer(self) -> str:
         prompt_fallback = self.prompt_service.render_cannot_answer()
         if prompt_fallback:

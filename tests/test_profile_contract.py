@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from app.services.knowledge_bundle import validate_compiled_bundle
+from app.services.policy import PolicyService
 from scripts.build_runtime_profile import (
     ProfileSourceError,
     build_runtime_profile,
@@ -23,6 +24,14 @@ def test_canonical_profile_does_not_require_missing_evidence_refusal() -> None:
     prompt = SOURCE.joinpath("SYSTEM_PROMPT.md").read_text(encoding="utf-8")
     assert "не превращай отсутствие evidence в отказную формулу" in prompt
     assert "надёжного ответа нет" not in prompt
+
+
+def test_profile_declares_no_answer_contact_evidence_without_customer_template() -> None:
+    evidence = PolicyService(profile_root=str(SOURCE)).no_answer_policy_evidence()
+    assert evidence == [{
+        "source_ref": "kb/entities/office-chelyabinsk.md",
+        "text": "Для уточнения вопроса можно позвонить в офис в рабочее время.",
+    }]
 
 
 def test_prompts_contain_no_profile_business_literals() -> None:
