@@ -110,7 +110,15 @@ def test_vk_tick_persists_new_longpoll_updates_before_due_retries() -> None:
     )
 
     assert result["processed"] == 1
-    assert gateway.steps == ["inbound", "recovery", "retry"]
+    assert gateway.steps == ["recovery", "retry", "inbound", "recovery", "retry"]
+
+
+def test_vk_longpoll_default_wait_keeps_due_retries_under_fifteen_seconds() -> None:
+    client = StubVKAPIClient()
+
+    poller = VKLongPollClient(api_client=client, group_id="55")
+
+    assert poller.wait_seconds <= 5
 
 
 def test_vk_longpoll_treats_transport_timeout_as_empty_poll() -> None:

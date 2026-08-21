@@ -82,7 +82,7 @@ class Settings(BaseSettings):
     vk_group_id: str | None = None
     vk_access_token: str | None = None
     vk_api_version: str = "5.199"
-    vk_longpoll_wait_seconds: int = 25
+    vk_longpoll_wait_seconds: int = 5
     vk_longpoll_mode: int | None = None
     vk_longpoll_version: int | None = None
     vk_poll_interval_seconds: int = 3

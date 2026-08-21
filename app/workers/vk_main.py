@@ -50,10 +50,15 @@ def process_once(gateway: VKGatewayService, poller: VKLongPollClient, acker: Lon
 
 def process_tick(gateway: VKGatewayService, poller: VKLongPollClient, acker: LongPollAcker, state: VKLongPollState | None) -> dict:
     """Journal current VK updates before replaying historical retries."""
+    recovery_before = gateway.recover_expired_received_events()
+    retry_before = gateway.process_due_retries()
     result = process_once(gateway=gateway, poller=poller, acker=acker, state=state)
-    recovery_result = gateway.recover_expired_received_events()
-    retry_result = gateway.process_due_retries()
-    return result | {"recovered": recovery_result["recovered"], "retried": retry_result["processed"]}
+    recovery_after = gateway.recover_expired_received_events()
+    retry_after = gateway.process_due_retries()
+    return result | {
+        "recovered": recovery_before["recovered"] + recovery_after["recovered"],
+        "retried": retry_before["processed"] + retry_after["processed"],
+    }
 
 
 def main() -> None:
