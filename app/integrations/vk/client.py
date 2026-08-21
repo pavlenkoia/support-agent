@@ -8,7 +8,7 @@ from app.core.config import settings
 
 
 class VKAPIClient:
-    api_base_url = "https://api.vk.com/method/"
+    api_base_url = "https://api.vk.ru/method/"
 
     def __init__(
         self,
