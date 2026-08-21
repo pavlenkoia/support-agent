@@ -41,6 +41,8 @@ class AgentLoopService:
             }
 
         wiki_result = self.wiki_lookup.lookup(text=text, context=context)
+        kb_trace = (wiki_result.get("trace") or {}).get("llm_trace", []) if isinstance(wiki_result, dict) else []
+        llm_trace.extend(item for item in kb_trace if isinstance(item, dict))
         return {
             "kb_result": wiki_result,
             "trace": {"actions": ["wiki_lookup"]},

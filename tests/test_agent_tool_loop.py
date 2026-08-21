@@ -53,6 +53,29 @@ def test_wiki_action_returns_grounding_for_finalizer() -> None:
     assert result["trace"]["actions"] == ["wiki_lookup"]
 
 
+def test_wiki_action_keeps_kb_llm_trace_for_operational_audit() -> None:
+    class RetryingWikiLookup:
+        def lookup(self, *, text: str, context: dict) -> dict:
+            _ = (text, context)
+            return {
+                "grounding_status": "llm_unavailable",
+                "source_refs": [],
+                "trace": {
+                    "llm_trace": [
+                        {"role": "kb_agent", "step": "grounded_extraction", "attempts": 4, "error": "TimeoutError"}
+                    ]
+                },
+            }
+
+    loop = AgentLoopService(agent=ScriptedAgent([{"action": "wiki_lookup"}]), wiki_lookup=RetryingWikiLookup())
+
+    result = loop.run(text="Вопрос", context={})
+
+    assert result["llm_trace"] == [
+        {"role": "kb_agent", "step": "grounded_extraction", "attempts": 4, "error": "TimeoutError"}
+    ]
+
+
 def test_wiki_lookup_tool_preserves_existing_catalog_reader_contract() -> None:
     class Retrieval:
         def retrieve(self, *args: object, **kwargs: object) -> dict:
