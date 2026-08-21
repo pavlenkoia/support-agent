@@ -170,6 +170,7 @@ def test_kb_agent_navigates_reviews_and_extracts_grounded_facts_from_selected_pa
     assert plan_payload["task"] == "Wiki navigation plan before full-page reading."
     review_payload = json.loads(client.calls[1]["user_prompt"])
     assert review_payload["task"] == "Coverage review after selective full-page reading."
+    assert "Проверь покрытие каждой самостоятельной практической части текущего сообщения; если выбранные страницы отвечают только на часть запроса, запроси страницы для остальных частей." in review_payload["rules"]
     extract_payload = json.loads(client.calls[2]["user_prompt"])
     assert extract_payload["task"] == "Extract grounded facts from the selected wiki pages for the support agent."
     assert len(extract_payload["selected_full_pages"]) == 2
