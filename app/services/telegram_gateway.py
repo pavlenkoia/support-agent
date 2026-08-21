@@ -25,9 +25,6 @@ from app.services.persistence import (
 )
 from app.services.routing import RoutingService
 
-TELEGRAM_RETRY_MAX_ATTEMPTS = 3
-TELEGRAM_RETRY_BASE_DELAY_SECONDS = 30
-
 
 class TelegramGatewayService:
     def __init__(
@@ -262,11 +259,6 @@ class TelegramGatewayService:
                 return "noop"
             if self._normalized_dt(event.available_at) > self._normalized_dt(due_at):
                 return "noop"
-            if event.retry_attempts >= TELEGRAM_RETRY_MAX_ATTEMPTS:
-                event.status = "retry_exhausted"
-                event.error_text = event.error_text or "telegram_retry_exhausted"
-                session.commit()
-                return "exhausted"
             payload = event.payload_json or {}
             message = payload.get("message") or payload.get("edited_message") or {}
             inbound = InboundMessage(
@@ -302,8 +294,8 @@ class TelegramGatewayService:
 
     def _retry_available_at(self, received_at: datetime | None, retry_attempts: int) -> datetime:
         base = self._normalized_dt(received_at)
-        delay_seconds = TELEGRAM_RETRY_BASE_DELAY_SECONDS * (2 ** max(0, retry_attempts - 1))
-        return base + timedelta(seconds=delay_seconds)
+        _ = retry_attempts
+        return base + timedelta(seconds=settings.kb_agent_deferred_retry_delay_seconds)
 
     def _conversation_state(self, session, external_chat_id: str):
         conversation = ensure_conversation(session, channel="telegram", external_chat_id=external_chat_id)

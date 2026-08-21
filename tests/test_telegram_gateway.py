@@ -267,10 +267,10 @@ def test_telegram_gateway_provider_failure_persists_retry_pending_raw_event(tmp_
     assert sender.calls == []
 
 
-def test_telegram_gateway_retry_pending_uses_future_backoff_and_exhausts_to_terminal_status(tmp_path: Path) -> None:
-    sender = RetryFailureSender()
-    routing = make_test_routing_service(tmp_path)
-    service = TelegramGatewayService(routing=routing, sender=sender)
+def test_telegram_gateway_keeps_provider_failures_retryable_after_multiple_attempts(tmp_path: Path) -> None:
+    base_routing = make_test_routing_service(tmp_path)
+    routing = RetryRouting(base_routing.session_factory)
+    service = TelegramGatewayService(routing=routing, sender=RecordingSender())
     inbound = InboundMessage(
         channel="telegram",
         external_user_id="777",
@@ -282,21 +282,23 @@ def test_telegram_gateway_retry_pending_uses_future_backoff_and_exhausts_to_term
         received_at=datetime.now(UTC),
         raw_event={"message": {"message_id": 12, "text": "проверка", "chat": {"id": 12345}, "from": {"id": 777}}},
     )
+    scheduled_at = datetime.now(UTC)
     service._mark_retry_pending(inbound, "temporary_failure")
 
     with routing.session_factory() as session:
         event = session.query(TransportEvent).filter(TransportEvent.dedupe_key == "telegram:message:12345:12").one()
-        first_available = event.available_at
-        first_attempts = event.retry_attempts
-
-    assert service._normalized_dt(first_available) > service._normalized_dt(inbound.received_at)
-    assert first_attempts == 1
-
-    service.process_due_retries(now=first_available - timedelta(milliseconds=1))
-    with routing.session_factory() as session:
-        event = session.query(TransportEvent).filter(TransportEvent.dedupe_key == "telegram:message:12345:12").one()
+        due_at = event.available_at
         assert event.status == "retry_pending"
         assert event.retry_attempts == 1
+        assert service._normalized_dt(due_at) <= scheduled_at + timedelta(seconds=6)
+
+    for expected_attempts in (2, 3, 4):
+        assert service.process_due_retries(now=due_at + timedelta(milliseconds=1)) == 1
+        with routing.session_factory() as session:
+            event = session.query(TransportEvent).filter(TransportEvent.dedupe_key == "telegram:message:12345:12").one()
+            assert event.status == "retry_pending"
+            assert event.retry_attempts == expected_attempts
+            due_at = event.available_at
 
 
 def test_telegram_gateway_restart_retries_due_transport_event_without_queue_state(tmp_path: Path) -> None:

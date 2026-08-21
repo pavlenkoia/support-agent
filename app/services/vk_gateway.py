@@ -581,32 +581,6 @@ class VKGatewayService:
                 and existing_send.content_text
                 else None
             )
-            retry_attempts = max(item.retry_attempts for item in events)
-            if retry_attempts >= 1 + settings.kb_agent_deferred_retry_max_attempts:
-                for source_event in events:
-                    mark_transport_event_processed(session, source_event, status="waiting_human")
-                    source_event.error_text = "kb_agent_retry_exhausted"
-                conversation = session.scalar(
-                    select(Conversation).where(Conversation.external_id == event.conversation_external_id)
-                )
-                if conversation is not None:
-                    support_case = session.scalar(
-                        select(SupportCase)
-                        .where(SupportCase.conversation_id == conversation.id)
-                        .order_by(SupportCase.id.desc())
-                    )
-                    if support_case is not None:
-                        support_case.status = "waiting_human"
-                        support_case.route_mode = "kb_agent_retry_exhausted"
-                        persist_workflow_event(
-                            session,
-                            support_case.id,
-                            {"reason": "kb_agent_retry_exhausted", "retry_attempts": retry_attempts},
-                            event_type="kb_retry_exhausted",
-                            actor="system:vk_retry",
-                        )
-                session.commit()
-                return claimed_count
             conversation = session.scalar(
                 select(Conversation).where(Conversation.external_id == event.conversation_external_id)
             )

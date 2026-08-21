@@ -86,7 +86,7 @@ Example class of task:
 ### Telegram
 - worker polls Bot API updates
 - gateway normalizes inbound updates into the shared runtime contract
-- provider `retry_pending` outcomes are persisted on the raw transport event with bounded retry metadata; the worker recovers due retries after restart without duplicating the customer turn or outbound delivery
+- provider `retry_pending` outcomes remain durable raw transport events and are retried every 5 seconds until successful processing, a newer inbound suppresses them, or a human explicitly takes over; restart recovery must not duplicate the customer turn or outbound delivery
 
 ### VK
 - worker polls VK Bots Long Poll API

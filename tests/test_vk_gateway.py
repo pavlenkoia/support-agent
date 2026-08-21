@@ -720,28 +720,36 @@ def test_vk_gateway_retry_reuses_stable_vk_random_id_after_recovery(tmp_path: Pa
     assert 1 <= service._retry_random_id(event_id) <= 2_147_483_647
 
 
-def test_vk_gateway_marks_exhausted_kb_retry_for_human_handling(tmp_path: Path, monkeypatch) -> None:
-    monkeypatch.setattr("app.services.vk_gateway.settings.kb_agent_deferred_retry_max_attempts", 0)
-    service, session_factory = make_service(tmp_path, routing=AlwaysRetryRouting())
+def test_vk_gateway_keeps_provider_failures_retryable_after_multiple_attempts(tmp_path: Path) -> None:
+    sender = RecordingVKSender()
+    service, session_factory = make_service(tmp_path, routing=AlwaysRetryRouting(), sender=sender)
     event = {
         "type": "message_new",
         "group_id": 55,
         "object": {"message": {"id": 99, "peer_id": 1999, "from_id": 2999, "text": "Есть ли ограничения по весу?", "date": 1780000000}},
     }
 
+    scheduled_at = datetime.now(UTC)
     service.handle_event(event)
     with session_factory() as session:
         stored = session.scalar(select(TransportEvent).where(TransportEvent.dedupe_key == "vk:message_new:1999:99"))
         assert stored is not None
+        assert stored.status == "retry_pending"
+        assert stored.retry_attempts == 1
         due_at = stored.available_at
+        assert service._as_utc(due_at) <= scheduled_at + timedelta(seconds=6)
 
-    service.process_due_retries(now=due_at + timedelta(seconds=1))
+    for expected_attempts in (2, 3, 4):
+        service.process_due_retries(now=due_at + timedelta(milliseconds=1))
+        with session_factory() as session:
+            stored = session.scalar(select(TransportEvent).where(TransportEvent.dedupe_key == "vk:message_new:1999:99"))
+            assert stored is not None
+            assert stored.status == "retry_pending"
+            assert stored.retry_attempts == expected_attempts
+            assert stored.error_text != "kb_agent_retry_exhausted"
+            due_at = stored.available_at
 
-    with session_factory() as session:
-        stored = session.scalar(select(TransportEvent).where(TransportEvent.dedupe_key == "vk:message_new:1999:99"))
-        assert stored is not None
-        assert stored.status == "waiting_human"
-        assert stored.error_text == "kb_agent_retry_exhausted"
+    assert sender.calls == []
 
 
 def test_vk_gateway_populates_missing_user_display_name_from_vk_profile(tmp_path: Path) -> None:
