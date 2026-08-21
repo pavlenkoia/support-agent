@@ -102,25 +102,33 @@ class RoutingService:
         loop_result = self.agent_loop.run(text=payload.text, context=context)
         kb_result = loop_result.get("kb_result") if isinstance(loop_result.get("kb_result"), dict) else {}
         tool_observations = list(loop_result.get("tool_observations") or [])
+        technical_kb_failure = kb_result.get("grounding_status") in {"llm_unavailable", "retry_pending"}
         grounded = kb_result.get("grounding_status") == "ready"
         first_reply = not any(item.get("role") == "assistant" for item in context.get("recent_messages", []) if isinstance(item, dict))
-        # Wiki is optional: every completed loop turn reaches the common finalizer.
-        # An unavailable KB call is a technical observation, never a terminal customer outcome.
-        policy_evidence = [] if grounded else self.policy.no_answer_policy_evidence()
-        if policy_evidence:
-            tool_observations.extend(
-                {"kind": "profile_no_answer_option", "summary": item["text"], "source_ref": item["source_ref"]}
-                for item in policy_evidence
+        if technical_kb_failure:
+            final_result = {
+                "route": "retry_pending",
+                "response_text": "",
+                "confidence": 0.0,
+                "reason": "kb_technical_failure",
+                "llm_trace": [],
+            }
+        else:
+            policy_evidence = [] if grounded else self.policy.no_answer_policy_evidence()
+            if policy_evidence:
+                tool_observations.extend(
+                    {"kind": "profile_no_answer_option", "summary": item["text"], "source_ref": item["source_ref"]}
+                    for item in policy_evidence
+                )
+            final_result = self.direct_llm.respond(
+                payload.text,
+                kb_result,
+                knowledge_mode="kb_grounded" if grounded or policy_evidence else "prompt_only",
+                conversation_context=context,
+                tool_observations=tool_observations,
+                first_reply_in_dialogue=first_reply,
+                response_intent="answer" if grounded else "missing_grounding",
             )
-        final_result = self.direct_llm.respond(
-            payload.text,
-            kb_result,
-            knowledge_mode="kb_grounded" if grounded or policy_evidence else "prompt_only",
-            conversation_context=context,
-            tool_observations=tool_observations,
-            first_reply_in_dialogue=first_reply,
-            response_intent="answer" if grounded else "missing_grounding",
-        )
         final_route = str(final_result.get("route") or "cannot_answer")
         route_name = "answer" if final_route == "social_reply" else final_route
         outcome_kind = final_route

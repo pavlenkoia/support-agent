@@ -211,7 +211,7 @@ def test_agent_tool_loop_audits_actual_wiki_lookup_status(tmp_path: Path) -> Non
     assert result["audit"]["kb_status"] == "not_found"
 
 
-def test_agent_tool_loop_wiki_outage_reaches_common_finalizer(tmp_path: Path) -> None:
+def test_agent_tool_loop_wiki_outage_schedules_retry_without_customer_text(tmp_path: Path) -> None:
     session_factory = make_session_factory(f"sqlite+pysqlite:///{tmp_path / 'agent-loop-outage.db'}")
     Base.metadata.create_all(bind=session_factory.kw["bind"])
     loop = RecordingAgentLoop(
@@ -233,10 +233,9 @@ def test_agent_tool_loop_wiki_outage_reaches_common_finalizer(tmp_path: Path) ->
         InboundMessage(channel="telegram", external_user_id="igor", external_chat_id="igor", text="Вопрос")
     )
 
-    assert finalizer.calls[0]["knowledge_mode"] == "prompt_only"
-    assert finalizer.calls[0]["response_intent"] == "missing_grounding"
-    assert result["route"]["route"] == "cannot_answer"
-    assert result["outcome"]["outcome_payload"]["response_text"] == "Здравствуйте! Уточню этот вопрос и вернусь с ответом."
+    assert finalizer.calls == []
+    assert result["route"]["route"] == "retry_pending"
+    assert result["outcome"]["outcome_payload"]["response_text"] == ""
     assert result["audit"]["kb_status"] == "llm_unavailable"
 
 
