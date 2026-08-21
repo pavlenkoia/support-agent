@@ -33,47 +33,6 @@ def make_probe_service(tmp_path: Path, *, routing=None) -> ProbeService:
     return ProbeService(routing=routing, session_factory=routing.session_factory)
 
 
-def test_probe_service_runs_multi_turn_session_and_persists_assistant_replies(tmp_path: Path) -> None:
-    service = make_probe_service(tmp_path)
-
-    started = service.start_session(scenario_name="pricing-followup", requested_by="igor")
-    session_id = started["session_id"]
-
-    first = service.send_message(session_id, "Сколько стоят прыжки?")
-    second = service.send_message(session_id, "А где это?")
-    messages = service.get_messages(session_id)
-    trace = service.get_trace(session_id)
-
-    assert started["is_test"] is True
-    assert started["channel"] == "internal_test"
-    assert first["outcome"]["outcome_type"] == "answer"
-    assert first["final_answer"] == "Здравствуйте! Все цены доступны по ссылке https://vk.cc/cYzS5j."
-    assert second["case_id"] == first["case_id"]
-    assert [item["role"] for item in messages["messages"]] == ["user", "assistant", "user", "assistant"]
-    assert messages["messages"][1]["content"] == "Здравствуйте! Все цены доступны по ссылке https://vk.cc/cYzS5j."
-    assert messages["messages"][3]["content"]
-    event_types = [item["event_type"] for item in trace["events"]]
-    assert "probe_session_started" in event_types
-    assert "turn_classified" in event_types
-    assert "response_strategy_selected" in event_types
-    assert "inbound_processed" in event_types
-
-    with service.session_factory() as session:
-        row = session.execute(text(
-            """
-            select c.external_id, c.is_test, c.source, c.session_type, c.scenario_name, c.requested_by,
-                   sc.is_test, sc.source, sc.session_type, sc.scenario_name, sc.requested_by
-            from conversations c
-            join support_cases sc on sc.conversation_id = c.id
-            order by sc.id desc
-            limit 1
-            """
-        )).one()
-        assert row[0] == f"governor_probe:{session_id}"
-        assert row[1:6] == (1, "support_governor", "governor_probe", "pricing-followup", "igor")
-        assert row[6:11] == (1, "support_governor", "governor_probe", "pricing-followup", "igor")
-        assistant_count = session.execute(text("select count(*) from messages where role = 'assistant'"))
-        assert assistant_count.scalar_one() == 2
 
 
 def test_probe_service_close_session_marks_case_resolved_and_logs_event(tmp_path: Path) -> None:
@@ -221,48 +180,3 @@ class TraceFieldRouting:
     @property
     def session_factory(self):
         return self.routing.session_factory
-
-
-def test_probe_trace_returns_persisted_route_observability_fields(tmp_path: Path) -> None:
-    class TraceEngine:
-        def answer(self, **kwargs: object) -> dict:
-            return {
-                "kind": "grounded_answer",
-                "response_text": "Подтверждённый ответ.",
-                "source_refs": ["compiled/concepts/pricing.md"],
-                "telemetry": {
-                    "answer_engine": "simple_full_corpus",
-                    "logical_llm_call_count": 1,
-                    "provider_attempt_count": 1,
-                },
-            }
-
-    routing = make_test_routing_service(tmp_path)
-    routing.answer_engine_mode = "simple_full_corpus"
-    routing.simple_answer_engine = TraceEngine()  # type: ignore[assignment]
-    service = make_probe_service(tmp_path, routing=routing)
-    session_id = service.start_session(scenario_name="trace-fields", requested_by="igor")["session_id"]
-    service.send_message(session_id, "Сколько стоят прыжки?")
-
-    trace = service.get_trace(session_id)
-    app.dependency_overrides[get_probe_service] = lambda: service
-    try:
-        response = client.get(f"/api/internal/probe/sessions/{session_id}/trace")
-    finally:
-        app.dependency_overrides.clear()
-
-    assert trace["events"]
-    selected = [item for item in trace["events"] if item["event_type"] == "response_strategy_selected"]
-    processed = [item for item in trace["events"] if item["event_type"] == "inbound_processed"]
-    assert selected and processed
-    assert selected[0]["payload"]["response_strategy"]
-    assert selected[0]["payload"]["outcome_kind"] == "grounded_answer"
-    assert selected[0]["payload"]["source_refs"] == ["compiled/concepts/pricing.md"]
-    assert selected[0]["payload"]["logical_llm_call_count"] == 1
-    assert selected[0]["payload"]["provider_attempt_count"] == 1
-    assert processed[0]["payload"]["outcome_kind"] == "grounded_answer"
-    assert processed[0]["payload"]["source_refs"] == ["compiled/concepts/pricing.md"]
-    assert processed[0]["payload"]["logical_llm_call_count"] == 1
-    assert processed[0]["payload"]["provider_attempt_count"] == 1
-    assert response.status_code == 200
-    assert response.json()["events"]

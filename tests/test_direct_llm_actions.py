@@ -24,6 +24,13 @@ class PromptService:
         return "Нет подтверждённых данных."
 
 
+def test_direct_llm_exposes_only_active_agent_loop_entrypoints() -> None:
+    service = DirectLLMService(client=ActionClient('{}'), prompt_service=PromptService())
+
+    for legacy_method in ("answer", "assess_request", "classify_turn", "respond_social"):
+        assert not hasattr(service, legacy_method)
+
+
 def test_next_action_returns_provider_neutral_wiki_tool_call() -> None:
     client = ActionClient('{"action":"wiki_lookup","arguments":{},"reason":"нужны факты"}')
     service = DirectLLMService(client=client, prompt_service=PromptService())

@@ -154,31 +154,6 @@ class MaliciousPromptService:
         return "Свяжитесь с офисом по https://evil.example и оплатите 12 000 ₽"
 
 
-@pytest.mark.parametrize("channel", ["telegram", "vk", "http", "internal_test"])
-def test_simple_mode_routes_once_without_legacy_orchestrator(tmp_path: Path, channel: str) -> None:
-    session_factory = make_session_factory(f"sqlite+pysqlite:///{tmp_path / 'routing.db'}")
-    Base.metadata.create_all(bind=session_factory.kw["bind"])
-    engine = RecordingSimpleEngine()
-    routing = RoutingService(
-        session_factory=session_factory,
-        answer_engine_mode="simple_full_corpus",
-        simple_answer_engine=engine,
-        orchestrator=ForbiddenLegacyOwner(),
-        kb_agent=ForbiddenLegacyDependency(),
-        summary_service=ForbiddenLegacyDependency(),
-        direct_llm=ForbiddenLegacyDependency(),
-    )
-
-    result = routing.handle_inbound(
-        InboundMessage(channel=channel, external_user_id="user", external_chat_id="chat", text="Сколько стоит?")
-    )
-
-    assert result["outcome"]["outcome_type"] == "answer"
-    assert result["route"]["answer_engine"] == "simple_full_corpus"
-    assert len(engine.calls) == 1
-    assert engine.calls[0]["question"] == "Сколько стоит?"
-
-
 def test_agent_tool_loop_routes_social_reply_without_legacy_kb_dependencies(tmp_path: Path) -> None:
     session_factory = make_session_factory(f"sqlite+pysqlite:///{tmp_path / 'agent-loop.db'}")
     Base.metadata.create_all(bind=session_factory.kw["bind"])
@@ -195,7 +170,6 @@ def test_agent_tool_loop_routes_social_reply_without_legacy_kb_dependencies(tmp_
         session_factory=session_factory,
         answer_engine_mode="agent_tool_loop",
         agent_loop=loop,
-        orchestrator=ForbiddenLegacyOwner(),
         kb_agent=ForbiddenLegacyDependency(),
         direct_llm=finalizer,
         retrieval=ForbiddenLegacyDependency(),
@@ -266,324 +240,27 @@ def test_agent_tool_loop_wiki_outage_reaches_common_finalizer(tmp_path: Path) ->
     assert result["audit"]["kb_status"] == "llm_unavailable"
 
 
-def test_simple_llm_wiki_mode_uses_catalog_navigation_selected_pages_and_grounded_finalization(tmp_path: Path) -> None:
-    session_factory = make_session_factory(f"sqlite+pysqlite:///{tmp_path / 'simple-llm-wiki.db'}")
-    Base.metadata.create_all(bind=session_factory.kw["bind"])
-    retrieval = RecordingCatalogRetrieval()
-    wiki_reader = RecordingWikiReader()
-    finalizer = RecordingGroundedFinalizer()
-    routing = RoutingService(
-        session_factory=session_factory,
-        answer_engine_mode="simple_llm_wiki",
-        knowledge_backend="filesystem",
-        knowledge_root="/tmp/okf-wiki",
-        retrieval=retrieval,
-        kb_agent=wiki_reader,
-        direct_llm=finalizer,
-        orchestrator=ForbiddenLegacyOwner(),
-        summary_service=ForbiddenLegacyDependency(),
-    )
-
-    result = routing.handle_inbound(
-        InboundMessage(
-            channel="telegram",
-            external_user_id="igor",
-            external_chat_id="igor",
-            text="Привет, звоню по телефону никто не берет трубку. Хотели бы прыгнуть в тандеме.",
-        )
-    )
-
-    assert result["route"]["route"] == "answer"
-    assert result["route"]["answer_engine"] == "simple_llm_wiki"
-    assert result["outcome"]["outcome_payload"]["response_text"].startswith("Здравствуйте!")
-    assert retrieval.calls[0]["knowledge_root"] == "/tmp/okf-wiki"
-    assert wiki_reader.calls[0]["kb_hits"][0]["retrieval_mode"] == "llm_wiki_catalog"
-    assert wiki_reader.calls[0]["require_coverage_review"] is True
-    assert finalizer.calls[0]["kb_result"]["kb_mode"] == "llm_wiki_selected_pages"
-    assert result["audit"]["kb_architecture"] == "llm_wiki"
-    assert result["audit"]["navigation_mode"] == "llm"
-    assert result["audit"]["coverage_review_mode"] == "llm"
-    assert result["audit"]["selected_source_refs"] == ["compiled/concepts/booking.md"]
 
 
-def test_simple_llm_wiki_first_reply_with_selected_pages_asks_clarification_instead_of_refusal(tmp_path: Path) -> None:
-    session_factory = make_session_factory(f"sqlite+pysqlite:///{tmp_path / 'simple-llm-wiki-no-answer.db'}")
-    Base.metadata.create_all(bind=session_factory.kw["bind"])
-    finalizer = RecordingGroundedFinalizer(
-        route="clarification_requested",
-        response_text="Здравствуйте! Какая услуга вас заинтересовала?",
-    )
-    routing = RoutingService(
-        session_factory=session_factory,
-        answer_engine_mode="simple_llm_wiki",
-        knowledge_backend="filesystem",
-        knowledge_root="/tmp/okf-wiki",
-        retrieval=RecordingCatalogRetrieval(),
-        kb_agent=RecordingWikiReader(
-            grounding_status="not_found",
-            missing_information=["какая именно услуга интересует"],
-            needs_customer_clarification=True,
-        ),
-        direct_llm=finalizer,
-        orchestrator=ForbiddenLegacyOwner(),
-        summary_service=ForbiddenLegacyDependency(),
-        policy=TextOnlyPolicy(),
-    )
-
-    result = routing.handle_inbound(
-        InboundMessage(channel="telegram", external_user_id="igor", external_chat_id="igor", text="Здравствуйте! Меня заинтересовала эта услуга.")
-    )
-
-    assert result["route"]["route"] == "clarification_requested"
-    assert result["outcome"]["outcome_payload"]["response_text"] == "Здравствуйте! Какая услуга вас заинтересовала?"
-    assert len(finalizer.calls) == 1
-    assert finalizer.calls[0]["text"] == "Здравствуйте! Меня заинтересовала эта услуга."
-    assert finalizer.calls[0]["knowledge_mode"] == "prompt_only"
-    assert finalizer.calls[0]["response_intent"] == "clarification"
-    assert finalizer.calls[0]["kb_result"]["grounded_facts"] == []
 
 
-def test_simple_llm_wiki_selected_pages_without_missing_customer_detail_stays_cannot_answer(tmp_path: Path) -> None:
-    session_factory = make_session_factory(f"sqlite+pysqlite:///{tmp_path / 'simple-llm-wiki-selected-but-not-ambiguous.db'}")
-    Base.metadata.create_all(bind=session_factory.kw["bind"])
-    routing = RoutingService(
-        session_factory=session_factory,
-        answer_engine_mode="simple_llm_wiki",
-        knowledge_backend="filesystem",
-        knowledge_root="/tmp/okf-wiki",
-        retrieval=RecordingCatalogRetrieval(),
-        kb_agent=RecordingWikiReader(grounding_status="not_found"),
-        direct_llm=RecordingGroundedFinalizer(
-            route="cannot_answer",
-            response_text="Сейчас не могу дать точный ответ на этот вопрос.",
-        ),
-        orchestrator=ForbiddenLegacyOwner(),
-        summary_service=ForbiddenLegacyDependency(),
-        policy=TextOnlyPolicy(),
-    )
-
-    result = routing.handle_inbound(
-        InboundMessage(channel="telegram", external_user_id="igor", external_chat_id="igor", text="Какая гарантия на неизвестное оборудование?")
-    )
-
-    assert result["route"]["route"] == "cannot_answer"
 
 
-def test_simple_llm_wiki_first_reply_without_grounding_uses_common_finalizer(tmp_path: Path) -> None:
-    session_factory = make_session_factory(f"sqlite+pysqlite:///{tmp_path / 'simple-llm-wiki-first-missing-grounding.db'}")
-    Base.metadata.create_all(bind=session_factory.kw["bind"])
-    finalizer = RecordingGroundedFinalizer(
-        route="clarification_requested",
-        response_text="Здравствуйте! Какая услуга вас заинтересовала?",
-    )
-    routing = RoutingService(
-        session_factory=session_factory,
-        answer_engine_mode="simple_llm_wiki",
-        knowledge_backend="filesystem",
-        knowledge_root="/tmp/okf-wiki",
-        retrieval=RecordingCatalogRetrieval(),
-        kb_agent=RecordingWikiReader(grounding_status="not_found"),
-        direct_llm=finalizer,
-        orchestrator=ForbiddenLegacyOwner(),
-        summary_service=ForbiddenLegacyDependency(),
-        policy=TextOnlyPolicy(),
-    )
-
-    result = routing.handle_inbound(
-        InboundMessage(channel="telegram", external_user_id="igor", external_chat_id="igor", text="Здравствуйте! Меня заинтересовала эта услуга.")
-    )
-
-    assert result["route"]["route"] == "clarification_requested"
-    assert result["outcome"]["outcome_payload"]["response_text"] == "Здравствуйте! Какая услуга вас заинтересовала?"
-    assert len(finalizer.calls) == 1
-    assert finalizer.calls[0]["knowledge_mode"] == "prompt_only"
-    assert finalizer.calls[0]["response_intent"] == "missing_grounding"
 
 
-def test_simple_llm_wiki_follow_up_without_facts_still_uses_finalizer(tmp_path: Path) -> None:
-    session_factory = make_session_factory(f"sqlite+pysqlite:///{tmp_path / 'simple-llm-wiki-follow-up-no-facts.db'}")
-    Base.metadata.create_all(bind=session_factory.kw["bind"])
-    finalizer = RecordingGroundedFinalizer(
-        route="answer",
-        response_text="Пожалуйста! Если появятся вопросы, напишите.",
-    )
-    routing = RoutingService(
-        session_factory=session_factory,
-        answer_engine_mode="simple_llm_wiki",
-        knowledge_backend="filesystem",
-        knowledge_root="/tmp/okf-wiki",
-        retrieval=RecordingCatalogRetrieval(),
-        kb_agent=RecordingWikiReader(grounding_status="not_found"),
-        direct_llm=finalizer,
-        orchestrator=ForbiddenLegacyOwner(),
-        summary_service=ForbiddenLegacyDependency(),
-        policy=TextOnlyPolicy(),
-    )
-    first = InboundMessage(channel="telegram", external_user_id="igor", external_chat_id="igor", text="Спасибо")
-    second = InboundMessage(channel="telegram", external_user_id="igor", external_chat_id="igor", text="Я поняла")
-
-    first_result = routing.handle_inbound(first)
-    routing.record_outbound_message(
-        first_result["case"]["case_id"],
-        first_result["outcome"]["outcome_payload"]["response_text"],
-    )
-    result = routing.handle_inbound(second)
-
-    assert result["route"]["route"] == "answer"
-    assert result["outcome"]["outcome_payload"]["response_text"] == "Пожалуйста! Если появятся вопросы, напишите."
-    assert len(finalizer.calls) == 2
-    assert finalizer.calls[-1]["knowledge_mode"] == "prompt_only"
-    assert finalizer.calls[-1]["response_intent"] == "missing_grounding"
 
 
-def test_simple_llm_wiki_missing_kb_fact_without_explicit_ambiguity_stays_cannot_answer(tmp_path: Path) -> None:
-    session_factory = make_session_factory(f"sqlite+pysqlite:///{tmp_path / 'simple-llm-wiki-missing-fact.db'}")
-    Base.metadata.create_all(bind=session_factory.kw["bind"])
-    routing = RoutingService(
-        session_factory=session_factory,
-        answer_engine_mode="simple_llm_wiki",
-        knowledge_backend="filesystem",
-        knowledge_root="/tmp/okf-wiki",
-        retrieval=RecordingCatalogRetrieval(),
-        kb_agent=RecordingWikiReader(grounding_status="not_found", missing_information=["гарантийный срок"]),
-        direct_llm=RecordingGroundedFinalizer(
-            route="cannot_answer",
-            response_text="Сейчас не могу дать точный ответ на этот вопрос.",
-        ),
-        orchestrator=ForbiddenLegacyOwner(),
-        summary_service=ForbiddenLegacyDependency(),
-        policy=TextOnlyPolicy(),
-    )
-
-    result = routing.handle_inbound(
-        InboundMessage(channel="telegram", external_user_id="igor", external_chat_id="igor", text="Какая гарантия на оборудование?")
-    )
-
-    assert result["route"]["route"] == "cannot_answer"
 
 
-def test_simple_llm_wiki_fails_closed_when_retrieval_does_not_return_okf_catalog(tmp_path: Path) -> None:
-    class LegacyRetrieval:
-        def retrieve(self, *args: object, **kwargs: object) -> dict:
-            return {
-                "kb_status": "found",
-                "kb_mode": "retrieved_snippets",
-                "kb_snippets": [{"text": "legacy snippet"}],
-            }
-
-    session_factory = make_session_factory(f"sqlite+pysqlite:///{tmp_path / 'simple-llm-wiki-invalid-kb.db'}")
-    Base.metadata.create_all(bind=session_factory.kw["bind"])
-    finalizer = RecordingGroundedFinalizer()
-    routing = RoutingService(
-        session_factory=session_factory,
-        answer_engine_mode="simple_llm_wiki",
-        knowledge_backend="filesystem",
-        knowledge_root="/tmp/not-okf",
-        retrieval=LegacyRetrieval(),
-        kb_agent=ForbiddenLegacyDependency(),
-        direct_llm=finalizer,
-        policy=TextOnlyPolicy(),
-    )
-
-    result = routing.handle_inbound(
-        InboundMessage(channel="telegram", external_user_id="igor", external_chat_id="igor", text="Как записаться?")
-    )
-
-    assert result["route"]["route"] == "cannot_answer"
-    assert result["kb_result"]["trace"]["reason"] == "simple_llm_wiki_requires_okf_catalog"
-    assert finalizer.calls == []
 
 
-def test_simple_policy_can_sanitize_text_but_cannot_change_engine_kind(tmp_path: Path) -> None:
-    session_factory = make_session_factory(f"sqlite+pysqlite:///{tmp_path / 'routing-policy.db'}")
-    Base.metadata.create_all(bind=session_factory.kw["bind"])
-    routing = RoutingService(
-        session_factory=session_factory,
-        answer_engine_mode="simple_full_corpus",
-        simple_answer_engine=RecordingSimpleEngine(kind="out_of_scope", response_text="Не мой вопрос."),
-        policy=TextOnlyPolicy(),
-    )
-
-    result = routing.handle_inbound(
-        InboundMessage(channel="test", external_user_id="user", external_chat_id="chat", text="Как сварить суп?")
-    )
-
-    assert result["route"]["outcome_kind"] == "out_of_scope"
-    assert result["outcome"]["outcome_type"] == "out_of_scope"
-    assert result["outcome"]["outcome_payload"]["response_text"] == "К сожалению, по этому вопросу я не смогу подсказать."
 
 
-def test_simple_cannot_answer_never_uses_legacy_contact_fallback(tmp_path: Path) -> None:
-    session_factory = make_session_factory(f"sqlite+pysqlite:///{tmp_path / 'routing-cannot-answer.db'}")
-    Base.metadata.create_all(bind=session_factory.kw["bind"])
-    profile_root = tmp_path / "profile"
-    profile_root.mkdir(parents=True, exist_ok=True)
-    (profile_root / "profile.yaml").write_text(
-        "response_templates:\n  simple_cannot_answer: safe-simple-cannot-answer\n",
-        encoding="utf-8",
-    )
-    routing = RoutingService(
-        session_factory=session_factory,
-        answer_engine_mode="simple_full_corpus",
-        simple_answer_engine=RecordingSimpleEngine(kind="cannot_answer", response_text=""),
-        policy=TextOnlyPolicy(profile_root=profile_root, prompt_service=MaliciousPromptService()),
-    )
-
-    result = routing.handle_inbound(
-        InboundMessage(channel="test", external_user_id="user", external_chat_id="chat", text="Нет данных")
-    )
-
-    assert result["route"]["outcome_kind"] == "cannot_answer"
-    assert result["outcome"]["outcome_payload"]["response_text"] == "safe-simple-cannot-answer"
 
 
 @pytest.mark.parametrize("text", ["", " [internal] ", "{internal}"])
-def test_simple_successful_output_falls_back_to_simple_cannot_answer_for_internal_markers_brackets_or_empty_text(
-    tmp_path: Path,
-    text: str,
-) -> None:
-    session_factory = make_session_factory(f"sqlite+pysqlite:///{tmp_path / 'routing-simple-sanitize.db'}")
-    Base.metadata.create_all(bind=session_factory.kw["bind"])
-    engine = RecordingSimpleEngine(kind="grounded_answer", response_text=text)
-    profile_root = tmp_path / "profile"
-    profile_root.mkdir(parents=True, exist_ok=True)
-    (profile_root / "profile.yaml").write_text(
-        "response_templates:\n  simple_cannot_answer: safe-simple-cannot-answer\n",
-        encoding="utf-8",
-    )
-    policy = TextOnlyPolicy(profile_root=profile_root, prompt_service=MaliciousPromptService())
-    routing = RoutingService(
-        session_factory=session_factory,
-        answer_engine_mode="simple_full_corpus",
-        simple_answer_engine=engine,
-        policy=policy,
-    )
-
-    result = routing.handle_inbound(
-        InboundMessage(channel="test", external_user_id="user", external_chat_id="chat", text="Сколько стоит?")
-    )
-
-    assert result["route"]["outcome_kind"] == "grounded_answer"
-    assert result["outcome"]["outcome_payload"]["response_text"] == "safe-simple-cannot-answer"
 
 
-def test_simple_policy_sanitizer_does_not_change_kind_or_outcome(tmp_path: Path) -> None:
-    session_factory = make_session_factory(f"sqlite+pysqlite:///{tmp_path / 'routing-kind.db'}")
-    Base.metadata.create_all(bind=session_factory.kw["bind"])
-    routing = RoutingService(
-        session_factory=session_factory,
-        answer_engine_mode="simple_full_corpus",
-        simple_answer_engine=RecordingSimpleEngine(kind="social_reply", response_text="hello"),
-        policy=TextOnlyPolicy(),
-    )
-
-    result = routing.handle_inbound(
-        InboundMessage(channel="test", external_user_id="user", external_chat_id="chat", text="Привет")
-    )
-
-    assert result["route"]["outcome_kind"] == "social_reply"
-    assert result["outcome"]["outcome_type"] == "answer"
-    assert result["outcome"]["outcome_payload"]["response_text"] == "Здравствуйте! hello"
 
 
 class TraceRecordingEngine(RecordingSimpleEngine):
@@ -600,25 +277,6 @@ class TraceRecordingEngine(RecordingSimpleEngine):
         return result
 
 
-def test_simple_trace_persists_route_observability_fields(tmp_path: Path) -> None:
-    session_factory = make_session_factory(f"sqlite+pysqlite:///{tmp_path / 'routing-trace.db'}")
-    Base.metadata.create_all(bind=session_factory.kw["bind"])
-    routing = RoutingService(
-        session_factory=session_factory,
-        answer_engine_mode="simple_full_corpus",
-        simple_answer_engine=TraceRecordingEngine(),
-    )
-
-    result = routing.handle_inbound(
-        InboundMessage(channel="test", external_user_id="user", external_chat_id="chat", text="Сколько стоит?")
-    )
-
-    assert result["route"]["outcome_kind"] == "grounded_answer"
-    assert result["route"]["source_refs"] == ["compiled/concepts/pricing.md"]
-    assert result["audit"]["outcome_kind"] == "grounded_answer"
-    assert result["audit"]["source_refs"] == ["compiled/concepts/pricing.md"]
-    assert result["audit"]["logical_llm_call_count"] == 2
-    assert result["audit"]["provider_attempt_count"] == 3
 
 
 def test_worker_process_once_invokes_due_retry_without_consuming_fake_gateway_state() -> None:

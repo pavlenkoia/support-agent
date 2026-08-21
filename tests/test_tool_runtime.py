@@ -8,7 +8,6 @@ from app.integrations.llm.base import BaseLLMClient
 from app.services import direct_llm as direct_llm_module
 from app.services import tool_runtime as tool_runtime_module
 from app.services.direct_llm import DirectLLMService
-from app.services.orchestrator import OrchestratorService
 from app.services.policy import PolicyService
 from app.services.tool_runtime import ToolRuntimeService
 
@@ -19,119 +18,10 @@ class FrozenDateTime(datetime):
         return cls(2026, 7, 13, 7, 9, 21, tzinfo=tz or UTC)
 
 
-def test_planner_receives_closed_runtime_capability_set() -> None:
-    class CapturingClient(BaseLLMClient):
-        def __init__(self) -> None:
-            self.payload: dict | None = None
-
-        def generate(self, **kwargs):
-            self.payload = json.loads(kwargs["user_prompt"])
-            return json.dumps(
-                {
-                    "action": "read_kb",
-                    "scope_status": "in_scope",
-                    "confidence": 1.0,
-                    "reason": "test",
-                    "clarification_question": "",
-                }
-            )
-
-    client = CapturingClient()
-    result = DirectLLMService(client=client).assess_request(
-        "Не могу дозвониться",
-        retrieval={"kb_status": "not_started", "kb_snippets": []},
-        runtime_capabilities=ToolRuntimeService().planner_capabilities(),
-    )
-
-    assert result["action"] == "read_kb"
-    assert client.payload is not None
-    assert client.payload["runtime_capabilities"] == [
-        {
-            "name": "calendar",
-            "supports": "weekday and calendar-period calculations for dates explicitly present in the customer turn",
-        }
-    ]
-    assert any("no other tool" in rule for rule in client.payload["rules"])
 
 
-def test_planner_accepts_answer_from_prompt_when_system_prompt_is_sufficient() -> None:
-    class PromptSufficientClient(BaseLLMClient):
-        def generate(self, **kwargs):
-            payload = json.loads(kwargs["user_prompt"])
-            assert "answer_from_prompt" in payload["required_json_schema"]["action"]
-            assert any("system prompt" in rule.lower() for rule in payload["rules"])
-            return json.dumps(
-                {
-                    "action": "answer_from_prompt",
-                    "scope_status": "in_scope",
-                    "confidence": 1.0,
-                    "reason": "system_prompt_is_sufficient",
-                    "clarification_question": "",
-                }
-            )
-
-    result = DirectLLMService(client=PromptSufficientClient()).assess_request(
-        "Можно использовать сертификат в другом городе?",
-        retrieval={"kb_status": "not_started", "kb_snippets": []},
-        runtime_capabilities=[],
-    )
-
-    assert result["action"] == "answer_from_prompt"
 
 
-def test_orchestrator_answer_from_prompt_skips_retrieval_and_kb_agent() -> None:
-    class NoRetrieval:
-        def retrieve(self, *args, **kwargs):
-            raise AssertionError("KB retrieval must not run for answer_from_prompt")
-
-    class NoKBAgent:
-        def read(self, *args, **kwargs):
-            raise AssertionError("KB agent must not run for answer_from_prompt")
-
-    class PromptDirect:
-        def assess_request(self, *args, **kwargs):
-            return {
-                "action": "answer_from_prompt",
-                "scope_status": "in_scope",
-                "confidence": 1.0,
-                "reason": "prompt_sufficient",
-            }
-
-        def respond(self, text, kb_result, **kwargs):
-            assert text == "Можно использовать сертификат в другом городе?"
-            assert kb_result["kb_status"] == "not_started"
-            assert kb_result["grounding_status"] == "not_required"
-            return {
-                "route": "answer",
-                "response_text": "Сертификат можно использовать только в Челябинске.",
-                "confidence": 1.0,
-                "reason": "prompt_finalized",
-                "llm_trace": [],
-            }
-
-    class NoTools:
-        def matches_calendar_query(self, text):
-            return False
-
-        def planner_capabilities(self):
-            return []
-
-    result = OrchestratorService(
-        retrieval=cast(Any, NoRetrieval()),
-        kb_agent=cast(Any, NoKBAgent()),
-        direct_llm=cast(Any, PromptDirect()),
-        policy=PolicyService(),
-        tool_runtime=cast(Any, NoTools()),
-    ).run(
-        text="Можно использовать сертификат в другом городе?",
-        context={"recent_messages": []},
-        knowledge_backend="filesystem",
-        knowledge_root="/tmp/unused",
-        knowledge_query="Можно использовать сертификат в другом городе?",
-    )
-
-    assert result["route"]["route"] == "answer"
-    assert result["response_strategy"]["steps"] == ["answer"]
 
 
 def test_prompt_only_finalizer_uses_system_prompt_without_grounding_evidence(monkeypatch) -> None:
@@ -207,29 +97,6 @@ def test_tool_runtime_does_not_treat_office_hours_as_weekend_jump_check(monkeypa
     assert [item["kind"] for item in result["tool_results"]] == ["calendar_weekday"]
 
 
-def test_legacy_grounded_fallback_is_disabled_for_all_business_questions() -> None:
-    service = DirectLLMService(client=None)
-
-    result = service._fallback_answer_from_grounding(
-        text="Можно сегодня заехать в офис к 15 часам для приобретения подарочного сертификата?",
-        answer_context=[
-            {"text": "Подарочный сертификат можно купить онлайн на сайте или в офисе по будням с 09:00 до 17:00."},
-            {"text": "Прыжки обычно проходят по выходным."},
-        ],
-        kb_hits=[],
-        conversation_context={
-            "tool_observations": [
-                {
-                    "kind": "calendar_weekday",
-                    "summary": "Дата 2026-07-13 приходится на понедельник.",
-                    "structured": {"weekday_ru": "понедельник", "is_weekend": False},
-                }
-            ]
-        },
-        reason="test_fallback",
-    )
-
-    assert result is None
 
 
 def test_tool_runtime_projects_public_period_metadata_without_weekend_dates_or_exact_date_list(monkeypatch) -> None:
@@ -401,32 +268,6 @@ def test_direct_llm_runtime_error_fails_closed_without_customer_reply(monkeypatc
     assert result["llm_trace"][0]["step"] == "final_response_failed_closed"
 
 
-def test_direct_llm_ready_grounding_is_not_rendered_by_application_fallback(monkeypatch) -> None:
-    class BrokenClient:
-        def generate(self, **kwargs):
-            raise RuntimeError("IncompleteRead")
-
-    monkeypatch.setattr(direct_llm_module.settings, "direct_llm_provider", "mistral")
-    service = DirectLLMService(client=BrokenClient())
-    monkeypatch.setattr(service, "_fallback_answer_from_grounding", lambda *args, **kwargs: None)
-
-    result = service.respond(
-        "Можно ли в тандеме при весе 120 кг?",
-        {
-            "kb_status": "found",
-            "grounding_status": "ready",
-            "grounded_facts": [
-                "Максимальный вес для тандем-прыжка — до 85 кг.",
-                "При превышении веса необходимо уточнить возможность участия в офисе.",
-            ],
-            "answer_basis": "При весе 120 кг тандем-прыжок невозможен.",
-        },
-    )
-
-    assert result["route"] == "retry_pending"
-    assert result["response_text"] == ""
-    assert result["reason"] == "final_response_error:RuntimeError"
-    assert result["llm_trace"][0]["step"] == "final_response_failed_closed"
 
 
 def test_direct_llm_runtime_error_does_not_emit_kb_answer_basis_verbatim(monkeypatch) -> None:
@@ -507,49 +348,8 @@ def test_tool_runtime_normalizes_month_list_without_trailing_request_clause(monk
     assert period["structured"]["original_period"] == "в августе и сентябре"
 
 
-def test_legacy_period_fallback_is_disabled() -> None:
-    service = DirectLLMService(client=None)
-
-    result = service._fallback_answer_from_grounding(
-        text="А с мая по сентябрь?",
-        answer_context=[{"text": "Прыжки обычно проходят по выходным."}],
-        kb_hits=[],
-        conversation_context={
-            "recent_messages": [
-                {"role": "user", "content": "Когда обычно проходят прыжки?"},
-                {"role": "assistant", "content": "Обычно по выходным."},
-            ],
-            "tool_observations": [
-                {
-                    "kind": "calendar_period_weekends",
-                    "structured": {
-                        "original_period": "с мая по сентябрь",
-                        "weekend_dates": ["2026-05-02", "2026-05-03"],
-                    },
-                }
-            ]
-        },
-        reason="planner_requested_but_no_tool_match",
-    )
-
-    assert result is None
 
 
-def test_legacy_period_fallback_never_writes_customer_text() -> None:
-    service = DirectLLMService(client=None)
-    result = service._fallback_answer_from_grounding(
-        text="Будут прыжки в тандеме в августе и сентябре?",
-        answer_context=[{"text": "Прыжки обычно проходят по выходным."}],
-        kb_hits=[],
-        conversation_context={
-            "tool_observations": [
-                {"kind": "calendar_period_weekends", "structured": {"original_period": "в августе и сентябре"}},
-            ]
-        },
-        reason="calendar_period_tool_guard",
-    )
-
-    assert result is None
 
 
 def test_direct_llm_period_failure_does_not_emit_application_written_reply(monkeypatch) -> None:

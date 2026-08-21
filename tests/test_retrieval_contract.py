@@ -4,7 +4,6 @@ import inspect
 from pathlib import Path
 
 from app.services.kb_agent import KBAgentService
-from app.services.orchestrator import OrchestratorService
 from app.services.policy import PolicyService
 from app.services.retrieval import RetrievalService
 from app.services.tool_runtime import ToolRuntimeService
@@ -209,41 +208,3 @@ class _ReplayDirectLLM:
         if kb_result.get("grounding_status") != "ready":
             return {"route": "cannot_answer", "response_text": "", "confidence": 0.0, "reason": "missing_grounding"}
         return {"route": "answer", "response_text": "Самостоятельный прыжок — 45–90 кг, тандем — до 85 кг.", "confidence": 1.0, "reason": "grounded"}
-
-
-def test_exact_case_439_followup_retries_narrow_linked_retrieval_before_cannot_answer() -> None:
-    retrieval = _ReplayRetrieval()
-    kb_agent = _ReplayKBAgent()
-    orchestrator = OrchestratorService(
-        retrieval=retrieval,
-        kb_agent=kb_agent,
-        direct_llm=_ReplayDirectLLM(),
-        policy=PolicyService(),
-        tool_runtime=ToolRuntimeService(),
-    )
-    context = {
-        "recent_messages": [
-            {"role": "user", "content": "Здравствуйте!\n\nМеня заинтересовала эта услуга.\nПодскажите для лиц с ВБД есть какие-то скидки?"},
-            {"role": "assistant", "content": "Скидки предусмотрены только для школьников и студентов. Для лиц с ВБД скидок нет."},
-            {"role": "user", "content": CURRENT_WEIGHT_QUESTION},
-        ],
-        "user_message": CURRENT_WEIGHT_QUESTION,
-        "session_summary": "Пользователь ранее спрашивал о скидках.",
-    }
-
-    result = orchestrator.run(
-        text=CURRENT_WEIGHT_QUESTION,
-        context=context,
-        knowledge_backend="filesystem",
-        knowledge_root="/kb",
-        knowledge_query=f"Current user message: {CURRENT_WEIGHT_QUESTION}\n{PREVIOUS_DISCOUNT_CONTEXT}",
-    )
-
-    assert result["route"]["route"] == "answer"
-    assert result["kb_result"]["grounding_status"] == "ready"
-    assert result["kb_result"]["source_refs"][-1].endswith("restrictions-and-safety.md")
-    assert len(kb_agent.calls) == 2
-    assert retrieval.expansion_calls == [
-        {"current_query": CURRENT_WEIGHT_QUESTION, "knowledge_backend": "filesystem", "knowledge_root": "/kb"}
-    ]
-    assert "kb_agent_grounding_retry" in [item["action"] for item in result["loop_trace"]]

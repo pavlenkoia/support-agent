@@ -5,7 +5,6 @@ import pytest
 
 from app.core.db import Base, make_session_factory
 from app.schemas.message import InboundMessage
-from app.services.orchestrator import OrchestratorService
 from app.services.outcome import OutcomeService
 from app.services.routing import RoutingService
 
@@ -137,74 +136,8 @@ def make_test_routing_service(tmp_path: Path) -> RoutingService:
     )
 
 
-def test_routing_service_delegates_outcome_execution_for_answer_route(tmp_path: Path) -> None:
-    routing = make_test_routing_service(tmp_path)
-    payload = InboundMessage(
-        channel="telegram",
-        external_user_id="u3",
-        external_chat_id="c3",
-        text="What are your business hours?",
-    )
-
-    routing.direct_llm.answer = lambda text, kb_hits, *, allow_general_without_kb=False, conversation_context=None: {
-        "direct_status": "ready",
-        "response_text": "We are open from 9 to 18.",
-        "used_kb_sources": [hit["source_ref"] for hit in kb_hits],
-        "confidence": 0.95,
-        "decision": "answer",
-        "reason": "sufficient_kb",
-    }
-    recorder = RecordingOutcomeService()
-    routing.outcome = recorder
-
-    result = routing.handle_inbound(payload)
-
-    assert recorder.calls
-    route, case, context, retrieval, user_message = recorder.calls[0]
-    assert route["route"] == "answer"
-    assert isinstance(case["case_id"], int)
-    assert context["user_message"] == "What are your business hours?"
-    assert context["session_summary"] == "What are your business hours?"
-    assert retrieval["kb_status"] == "found"
-    assert user_message == "What are your business hours?"
-    assert result["outcome"]["outcome_payload"]["response_text"] == "delegated"
 
 
-def test_orchestrator_rejects_legacy_finalizer_without_respond() -> None:
-    class LegacyOnlyDirect:
-        def answer(self, *args, **kwargs):
-            return {
-                "decision": "answer",
-                "response_text": "unsafe legacy answer",
-                "confidence": 1.0,
-                "reason": "legacy",
-            }
-
-    dummy: Any = object()
-    legacy_direct: Any = LegacyOnlyDirect()
-    orchestrator = OrchestratorService(
-        retrieval=dummy,
-        kb_agent=dummy,
-        direct_llm=legacy_direct,
-        policy=dummy,
-        tool_runtime=dummy,
-    )
-
-    with pytest.raises(RuntimeError, match=r"direct_llm\.respond is required"):
-        orchestrator._finalize_reply(
-            text="question",
-            context={
-                "recent_messages": [{"role": "user", "content": "question"}],
-                "planner_reason": "MUST_NOT_REACH_A_LEGACY_FINALIZER",
-            },
-            retrieval={"kb_snippets": []},
-            kb_result={
-                "grounding_status": "ready",
-                "answer_basis": "grounded answer",
-                "grounded_facts": ["grounded fact"],
-            },
-            tool_observations=[],
-        )
 
 
 def test_outcome_service_builds_cannot_answer_outcome() -> None:
@@ -239,27 +172,3 @@ def test_outcome_service_builds_cannot_answer_outcome() -> None:
     assert outcome["outcome_payload"]["response_text"] == "Сейчас не могу дать точный ответ на этот вопрос."
     assert case["case_status"] == "resolved"
     assert context["case_state"]["case_status"] == "resolved"
-
-
-def test_routing_service_performs_mandatory_kb_read_before_answer(tmp_path: Path) -> None:
-    routing = make_test_routing_service(tmp_path)
-    routing.direct_llm.answer = lambda text, kb_hits, *, allow_general_without_kb=False, conversation_context=None: {
-        "direct_status": "ready",
-        "response_text": "Подготовка обязательна.",
-        "used_kb_sources": [hit["source_ref"] for hit in kb_hits],
-        "confidence": 0.91,
-        "decision": "answer",
-        "reason": "grounded_after_mandatory_kb_read",
-    }
-
-    result = routing.handle_inbound(InboundMessage(
-        channel="telegram",
-        external_user_id="u-late-read",
-        external_chat_id="c-late-read",
-        text="Нужна ли подготовка?",
-    ))
-
-    assert result["retrieval"]["kb_status"] == "found"
-    assert result["audit"]["response_strategy"]["steps"][0] == "read_kb"
-    assert result["route"]["route"] == "answer"
-    assert result["outcome"]["outcome_payload"]["response_text"] == "Здравствуйте! Подготовка обязательна."

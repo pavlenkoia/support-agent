@@ -152,41 +152,6 @@ def test_telegram_gateway_handles_new_command() -> None:
     ]
 
 
-def test_telegram_gateway_persists_one_combined_user_and_assistant_message(tmp_path: Path) -> None:
-    sender = RecordingSender()
-    routing = make_test_routing_service(tmp_path)
-    routing.answer_engine_mode = "simple_full_corpus"
-    routing.simple_answer_engine = type(
-        "Engine",
-        (),
-        {"answer": lambda self, **kwargs: {"kind": "grounded_answer", "response_text": "Подготовка обязательна даже для первого прыжка.", "source_refs": ["compiled/concepts/pricing.md"], "telemetry": {"answer_engine": "simple_full_corpus", "logical_llm_call_count": 1, "provider_attempt_count": 1}}},
-    )()
-    service = TelegramGatewayService(routing=routing, sender=sender)
-
-    for update_id, message_id, text_value in [
-        (21, 5, "А без подготовки можно?"),
-        (22, 6, "Я офицер вдв"),
-    ]:
-        result = service.handle_update({
-            "update_id": update_id,
-            "message": {"message_id": message_id, "text": text_value, "chat": {"id": 12345}, "from": {"id": 777}},
-        })
-        assert result["queued"] is True
-
-    service.queue.flush_due(now=datetime.now(UTC) + timedelta(seconds=6), background=False)
-
-    assert sender.calls == [
-        ("action", "12345", "typing"),
-        ("message", "12345", "Здравствуйте! Подготовка обязательна даже для первого прыжка."),
-    ]
-    with routing.session_factory() as session:
-        roles = session.execute(text("select role from messages order by id")).scalars().all()
-        assert roles == ["user", "assistant"]
-        contents = session.execute(text("select content from messages order by id")).scalars().all()
-        assert contents == [
-            "А без подготовки можно?\nЯ офицер вдв",
-            "Здравствуйте! Подготовка обязательна даже для первого прыжка.",
-        ]
 
 
 def test_telegram_gateway_polling_handler_returns_without_typing_or_delivery(tmp_path: Path) -> None:
