@@ -2,7 +2,7 @@
 
 ## Current target behavior
 
-> Production mode is `ANSWER_ENGINE_MODE=agent_tool_loop`: the model may select optional `wiki_lookup`, then the common finalizer always receives bounded dialogue and available evidence/observations. `simple_llm_wiki` and `simple_full_corpus` are not production paths. A Wiki technical failure is an observation for finalization, never a customer-facing assertion that the Wiki lacks information or a reason to suppress the turn.
+> Production mode is `ANSWER_ENGINE_MODE=agent_tool_loop`: the model may select the optional `wiki_lookup`, then the common finalizer receives bounded dialogue and customer-safe evidence/observations. The former `simple_llm_wiki`, `simple_full_corpus`, and orchestrator answer engines were removed from the runtime. A technical Wiki failure is not proof that a business fact is absent and must not be described to the customer as such.
 
 The support agent is a **bounded, policy-driven conversational agent**.
 
