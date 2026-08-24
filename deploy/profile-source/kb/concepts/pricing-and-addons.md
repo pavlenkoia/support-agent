@@ -1,7 +1,7 @@
 ---
 title: Pricing and Add-ons
 created: 2026-06-29
-updated: 2026-08-17
+updated: 2026-08-23
 type: concept
 tags: [pricing, add-ons, certificates, flights, tandem]
 sources: [raw/documents/general-info-source.md, raw/documents/faq-main-source.md, raw/documents/faq-short-source.md, raw/documents/legacy-approved-policy-source.md]
@@ -19,7 +19,6 @@ contradictions: []
 - Точная текущая стоимость в Wiki не фиксируется, потому что цены могут меняться.
 - Единственный подтверждённый источник действующих цен: `https://vk.cc/cYzS5j`.
 - На странице источника публикуется актуальный прайс на прыжки, полёты и дополнительные услуги.
-- Подготовка к прыжку входит в стоимость прыжка.
 
 ## Дополнительные услуги
 - Фото- и видеосъёмка не оформляется онлайн вместе с услугой; её оформляют в офисе или кассе аэродрома.
