@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from app.services import direct_llm as direct_llm_module
 from app.services.agent_tool_loop import DirectLLMActionAgent
 from app.services.direct_llm import DirectLLMService
 
@@ -30,6 +31,21 @@ def test_direct_llm_exposes_only_active_agent_loop_entrypoints() -> None:
 
     for legacy_method in ("answer", "assess_request", "classify_turn", "respond_social"):
         assert not hasattr(service, legacy_method)
+
+
+def test_stub_provider_returns_retry_pending_without_customer_template(monkeypatch) -> None:
+    monkeypatch.setattr(direct_llm_module.settings, "direct_llm_provider", "stub")
+    service = DirectLLMService(prompt_service=PromptService())
+
+    result = service.respond(
+        "Вопрос",
+        {"grounding_status": "not_found", "grounded_facts": []},
+        knowledge_mode="prompt_only",
+        response_intent="missing_grounding",
+    )
+
+    assert result["route"] == "retry_pending"
+    assert result["response_text"] == ""
 
 
 def test_next_action_returns_provider_neutral_wiki_tool_call() -> None:

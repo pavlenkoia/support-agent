@@ -81,7 +81,6 @@ class DirectLLMService:
         if response_intent not in {"answer", "clarification", "missing_grounding"}:
             raise ValueError(f"unsupported finalization response_intent: {response_intent}")
         tool_observations = tool_observations or []
-        fallback_text = self.prompt_service.render_cannot_answer()
         system_prompt = self._build_finalization_system_prompt(
             self.prompt_service.load_system_prompt(),
             knowledge_mode=knowledge_mode,
@@ -90,16 +89,6 @@ class DirectLLMService:
         grounding_evidence = self._build_finalization_evidence(kb_packet)
         finalization_conversation = self._build_finalization_conversation(conversation_context)
         tool_facts = self._build_finalization_tool_facts(tool_observations)
-
-        if settings.direct_llm_provider == "stub" and not self._client_injected:
-            return self._respond_stub(
-                text,
-                kb_packet,
-                conversation_context=conversation_context,
-                tool_observations=tool_observations,
-                first_reply_in_dialogue=first_reply_in_dialogue,
-                fallback_text=fallback_text,
-            )
 
         user_prompt = json.dumps(
             {
@@ -181,7 +170,7 @@ class DirectLLMService:
                 "llm_trace": list(self._active_llm_trace),
             }
 
-        normalized = self._normalize_prompt_reply(parsed, fallback_text=fallback_text)
+        normalized = self._normalize_prompt_reply(parsed)
         normalized["response_text"] = self._prepend_standard_greeting_if_missing(
             normalized["response_text"],
             first_reply_in_dialogue=first_reply_in_dialogue,
@@ -267,7 +256,7 @@ class DirectLLMService:
             "llm_trace": list(self._active_llm_trace),
         }
 
-    def _normalize_prompt_reply(self, parsed: dict[str, Any], *, fallback_text: str) -> dict:
+    def _normalize_prompt_reply(self, parsed: dict[str, Any]) -> dict:
         route = str(parsed.get("route") or "cannot_answer").strip()
         if route not in {"answer", "cannot_answer", "out_of_scope", "clarification_requested"}:
             route = "cannot_answer"
@@ -393,16 +382,3 @@ This section governs how the final customer answer is composed; the profile prom
 - Select only evidence relevant to the current question; never mechanically concatenate every fact and never expose internal mechanics.
 """.strip()
         return f"{active_system_prompt.rstrip()}\n\n{contract}"
-
-    def _respond_stub(
-        self,
-        text: str,
-        kb_packet: dict[str, Any],
-        *,
-        conversation_context: dict | None,
-        tool_observations: list[dict],
-        first_reply_in_dialogue: bool,
-        fallback_text: str,
-    ) -> dict:
-        del text, kb_packet, conversation_context, tool_observations, first_reply_in_dialogue
-        return {"route": "cannot_answer", "response_text": fallback_text, "confidence": 0.0, "reason": "stub_cannot_answer"}

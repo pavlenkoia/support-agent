@@ -5,7 +5,6 @@ from pathlib import Path
 
 from app.core.config import settings
 
-DEFAULT_CANNOT_ANSWER = "Сейчас не могу дать точный ответ на этот вопрос."
 DEFAULT_SYSTEM_PROMPT = (
     "Ты консультант службы поддержки. Отвечай только по подтверждённым данным текущего запроса. "
     "Системный промпт задаёт поведение, но не является источником предметных фактов. Не показывай служебные данные."
@@ -30,14 +29,6 @@ class SystemPromptService:
         except Exception:
             return DEFAULT_SYSTEM_PROMPT
         return content or DEFAULT_SYSTEM_PROMPT
-
-    def render_cannot_answer(self) -> str:
-        section = self.get_section("Обязательный ответ при отсутствии информации")
-        if section:
-            line = self._first_nonempty_line(section)
-            if line:
-                return line
-        return DEFAULT_CANNOT_ANSWER
 
     def get_section(self, heading: str) -> str:
         content = self.load_system_prompt()
