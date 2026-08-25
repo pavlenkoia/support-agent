@@ -19,7 +19,7 @@ It is not a ticket router and not an escalation-first bot.
 5. The agent must not fabricate facts when KB/tool evidence is missing.
 6. A planner-approved `social_reply` (greeting, acknowledgement, thanks) is not a substantive request: it must finish immediately without retrieval or KB-agent work and always return a short polite `answer`, including when its model call fails.
 7. A planner-approved `out_of_scope` is terminal only on the first customer turn. For a follow-up after an assistant reply, it must first attempt KB reading so a contextual post-service request cannot be discarded as unrelated.
-8. Every customer-visible terminal route passes through one output boundary: first replies begin with exactly one `Здравствуйте!`, and texts containing internal mechanics (`profile`, KB/tool/route terms, traces, JSON/brackets) are replaced with the approved customer fallback.
+8. Every customer-visible terminal route passes through one output boundary: first replies begin with exactly one `Здравствуйте!`. The boundary normalizes formatting but never replaces a model-written customer reply with an application template; an invalid or missing final-model payload is `retry_pending` with empty customer text.
 9. If a substantive answer cannot be grounded, the final outcome must be `cannot_answer`.
 10. If the first request is outside the domain, the final outcome must be `out_of_scope`.
 11. If a critical ambiguity blocks a safe answer, the final outcome must be `clarification_requested`.
