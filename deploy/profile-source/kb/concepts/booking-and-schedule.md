@@ -1,10 +1,10 @@
 ---
 title: Booking and Schedule
 created: 2026-06-29
-updated: 2026-08-19
+updated: 2026-08-25
 type: concept
 tags: [booking, schedule, tandem, solo-jump, flights]
-sources: [raw/documents/faq-main-source.md, raw/documents/faq-short-source.md, raw/documents/general-info-source.md, raw/documents/legacy-approved-policy-source.md, raw/documents/operator-case-vk-1104184290.md]
+sources: [raw/documents/faq-main-source.md, raw/documents/faq-short-source.md, raw/documents/general-info-source.md, raw/documents/legacy-approved-policy-source.md, raw/documents/operator-case-vk-1104184290.md, raw/documents/operator-case-vk-718942316.md]
 confidence: high
 contested: false
 contradictions: []
@@ -32,6 +32,7 @@ contradictions: []
 
 ## Расписание
 - В будние дни обычные прыжки не проводятся.
+- Обычный запрос на прыжок в конкретную буднюю дату означает отсутствие стандартной записи на такой день; стандартные прыжки проводятся по выходным.
 - Для группы около 20 человек возможна отдельная договорённость о другом дне.
 - Сам по себе день недели не подтверждает и не исключает проведение прыжков в конкретную дату: обычный выходной день подтверждается анонсом и записью, а будний день возможен только по отдельной групповой договорённости.
 - Проведение и перенос зависят от погодных условий.
