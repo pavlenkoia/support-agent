@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from app.services.agent_tool_loop import DirectLLMActionAgent
 from app.services.direct_llm import DirectLLMService
 
 
@@ -49,6 +50,24 @@ def test_next_action_returns_provider_neutral_wiki_tool_call() -> None:
     assert action["llm_trace"][0]["step"] == "agent_next_action"
     assert client.calls[0]["response_format"] == {"type": "json_object"}
     assert "wiki_lookup" in str(client.calls[0]["user_prompt"])
+
+
+def test_next_action_does_not_allow_nested_arguments_to_replace_action_envelope() -> None:
+    client = ActionClient('{"action":"wiki_lookup","arguments":{"action":"finish","reason":"nested"},"reason":"authoritative"}')
+    service = DirectLLMService(client=client, prompt_service=PromptService())
+    agent = DirectLLMActionAgent(service)
+
+    action = agent.next_action(
+        text="Как записаться?",
+        context={"recent_messages": []},
+        tool_observations=[],
+        allowed_actions=["wiki_lookup", "finish"],
+        iteration=1,
+    )
+
+    assert action["action"] == "wiki_lookup"
+    assert action["reason"] == "authoritative"
+    assert action["arguments"] == {"action": "finish", "reason": "nested"}
 
 
 def test_finalizer_prompt_requires_natural_grammatical_russian() -> None:

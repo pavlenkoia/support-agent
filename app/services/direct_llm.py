@@ -273,13 +273,13 @@ class DirectLLMService:
             route = "cannot_answer"
 
         response_text = self._sanitize_customer_text(str(parsed.get("response_text") or ""))
-        if not response_text:
-            route = "cannot_answer"
-            response_text = fallback_text
-
-        if self._contains_forbidden_output(response_text):
-            route = "cannot_answer"
-            response_text = fallback_text
+        if not response_text or self._contains_internal_envelope(response_text):
+            return {
+                "route": "retry_pending",
+                "response_text": "",
+                "confidence": 0.0,
+                "reason": "invalid_finalizer_output",
+            }
 
         return {
             "route": route,
@@ -316,20 +316,9 @@ class DirectLLMService:
             for item in recent_messages
         )
 
-    def _contains_forbidden_output(self, text: str) -> bool:
-        lowered = text.lower()
-        forbidden_tokens = (
-            "knowledgebase",
-            "datetime",
-            "tool",
-            "result",
-            "input",
-            "output",
-            "json",
-            "kb_snippets",
-            "tool_results",
-        )
-        return any(token in lowered for token in forbidden_tokens) or any(ch in text for ch in "[]{}")
+    def _contains_internal_envelope(self, text: str) -> bool:
+        lowered = text.casefold()
+        return "knowledgebase result:" in lowered or "kb_snippets" in lowered or "tool_results" in lowered
 
     def _coerce_kb_result(self, kb_result: dict[str, Any]) -> dict[str, Any]:
         packet = dict(kb_result)

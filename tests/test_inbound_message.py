@@ -440,7 +440,7 @@ def test_direct_llm_keeps_model_answer_without_forced_greeting_in_any_dialogue_t
 
 
 
-def test_prompt_runtime_falls_back_when_model_leaks_service_markers(tmp_path: Path) -> None:
+def test_prompt_runtime_suppresses_internal_envelope_without_canned_fallback(tmp_path: Path) -> None:
     class LeakClient:
         def generate(self, **kwargs):
             return json.dumps(
@@ -458,5 +458,5 @@ def test_prompt_runtime_falls_back_when_model_leaks_service_markers(tmp_path: Pa
     service = DirectLLMService(client=LeakClient(), prompt_service=SystemPromptService(str(prompt_path)))
     result = service.respond("Сколько стоят прыжки?", [{"text": "Все цены доступны по ссылке https://vk.cc/cYzS5j.", "source_ref": "kb/pricing.md"}])
 
-    assert result["route"] == "cannot_answer"
-    assert result["response_text"] == "Я не могу точно ответить по этому вопросу. Пожалуйста, позвоните в офис в будние дни по телефону +7 (351) 214-30-30."
+    assert result["route"] == "retry_pending"
+    assert result["response_text"] == ""

@@ -100,5 +100,6 @@ class DirectLLMActionAgent:
                 "llm_trace": [],
             }
         result = next_action(**kwargs)
-        arguments = result.get("arguments") if isinstance(result, dict) else {}
-        return ({**result, **arguments} if isinstance(arguments, dict) else result)
+        if isinstance(result, dict):
+            return result
+        return {"action": "invalid", "arguments": {}, "reason": "planner_action_not_object", "llm_trace": []}
