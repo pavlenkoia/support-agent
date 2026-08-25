@@ -19,3 +19,4 @@ Operator answer:
 
 Confirmed fact captured from real operator handling:
 - For questions about booking on a specific date, the conditions for that date are published in the pinned post or announcement for those dates.
+- A date stated only as a day number should be checked against the pinned post or announcement for those dates.
