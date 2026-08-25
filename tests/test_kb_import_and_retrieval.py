@@ -23,12 +23,12 @@ def test_compiled_kb_exposes_complete_semantic_catalog(tmp_path: Path) -> None:
 
     assert retrieval["kb_status"] == "found"
     assert retrieval["kb_mode"] == "llm_wiki_catalog"
-    assert retrieval["kb_total_pages"] == 10
+    assert retrieval["kb_total_pages"] == 12
     cards = retrieval["kb_snippets"]
-    assert len(cards) == 11
+    assert len(cards) == 13
     assert cards[0]["source_type"] == "wiki_index"
     page_cards = cards[1:]
-    assert len(page_cards) == 10
+    assert len(page_cards) == 12
     assert {card["source_type"] for card in page_cards} == {"wiki_page_card"}
     refs = {card["source_ref"] for card in page_cards}
     assert "compiled/concepts/booking-and-schedule.md" in refs
