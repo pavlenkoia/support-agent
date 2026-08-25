@@ -211,6 +211,34 @@ def test_agent_tool_loop_audits_actual_wiki_lookup_status(tmp_path: Path) -> Non
     assert result["audit"]["kb_status"] == "not_found"
 
 
+def test_agent_tool_loop_passes_extracted_facts_to_finalizer_despite_nonready_status(tmp_path: Path) -> None:
+    session_factory = make_session_factory(f"sqlite+pysqlite:///{tmp_path / 'agent-loop-extracted-facts.db'}")
+    Base.metadata.create_all(bind=session_factory.kw["bind"])
+    facts = ["Условия записи на дату указаны в закреплённом посте или анонсе на эту дату."]
+    loop = RecordingAgentLoop(
+        {
+            "kb_result": {
+                "grounding_status": "not_found",
+                "answer_basis": facts[0],
+                "grounded_facts": facts,
+                "source_refs": ["compiled/concepts/booking.md"],
+            },
+            "trace": {"actions": ["wiki_lookup"]},
+            "tool_observations": [{"tool": "wiki_lookup", "status": "not_found", "grounded_facts": facts}],
+        }
+    )
+    finalizer = RecordingGroundedFinalizer(response_text="Условия записи указаны в закреплённом посте на эту дату.")
+    routing = RoutingService(session_factory=session_factory, answer_engine_mode="agent_tool_loop", agent_loop=loop, direct_llm=finalizer)
+
+    routing.handle_inbound(
+        InboundMessage(channel="internal_test", external_user_id="igor", external_chat_id="igor", text="Записаться можно на 29?")
+    )
+
+    assert finalizer.calls[0]["knowledge_mode"] == "kb_grounded"
+    assert finalizer.calls[0]["response_intent"] == "answer"
+    assert finalizer.calls[0]["kb_result"]["grounded_facts"] == facts
+
+
 def test_agent_tool_loop_wiki_outage_schedules_retry_without_customer_text(tmp_path: Path) -> None:
     session_factory = make_session_factory(f"sqlite+pysqlite:///{tmp_path / 'agent-loop-outage.db'}")
     Base.metadata.create_all(bind=session_factory.kw["bind"])

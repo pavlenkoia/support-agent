@@ -21,7 +21,7 @@ There are two finalization modes:
 1. `prompt_only`: no business fact is required, for example for a social response or a genuinely necessary clarification. The common final model may use the role/style contract and dialogue, but may not state a business fact.
 2. `kb_grounded`: a business fact is required. The KB agent runs and only a compact grounded packet reaches the common final model.
 
-For a first substantive turn with a valid KB pass but non-ready grounding, the same `prompt_only` finalizer owns the customer wording. The application may state only the generic response intent: a known critical ambiguity requires clarification; otherwise missing grounding lets the finalizer choose a useful clarification or an honest `cannot_answer`. This is not a new classifier, domain keyword branch, or KB answer source.
+For a first substantive turn with a valid KB pass, extracted `answer_basis` or `grounded_facts` are passed to the common finalizer as `kb_grounded` evidence even when the KB agent’s status is non-ready. The status alone must not discard factual evidence or force a clarification. Only a genuinely empty evidence packet uses `prompt_only`; the finalizer then owns a useful clarification or an honest `cannot_answer`. This is not a classifier, domain keyword branch, or KB answer source.
 
 The mode and response intent are application-owned control values. They are not derived by exposing planner output to the final model.
 

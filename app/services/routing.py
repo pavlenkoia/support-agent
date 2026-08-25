@@ -104,6 +104,11 @@ class RoutingService:
         tool_observations = list(loop_result.get("tool_observations") or [])
         technical_kb_failure = kb_result.get("grounding_status") in {"llm_unavailable", "retry_pending"}
         grounded = kb_result.get("grounding_status") == "ready"
+        has_extracted_evidence = bool(
+            str(kb_result.get("answer_basis") or "").strip()
+            or any(str(fact).strip() for fact in kb_result.get("grounded_facts", []) if isinstance(fact, str))
+        )
+        finalization_has_evidence = grounded or has_extracted_evidence
         first_reply = not any(item.get("role") == "assistant" for item in context.get("recent_messages", []) if isinstance(item, dict))
         if technical_kb_failure:
             final_result = {
@@ -114,7 +119,7 @@ class RoutingService:
                 "llm_trace": [],
             }
         else:
-            policy_evidence = [] if grounded else self.policy.no_answer_policy_evidence()
+            policy_evidence = [] if finalization_has_evidence else self.policy.no_answer_policy_evidence()
             if policy_evidence:
                 tool_observations.extend(
                     {"kind": "profile_no_answer_option", "summary": item["text"], "source_ref": item["source_ref"]}
@@ -123,11 +128,11 @@ class RoutingService:
             final_result = self.direct_llm.respond(
                 payload.text,
                 kb_result,
-                knowledge_mode="kb_grounded" if grounded or policy_evidence else "prompt_only",
+                knowledge_mode="kb_grounded" if finalization_has_evidence or policy_evidence else "prompt_only",
                 conversation_context=context,
                 tool_observations=tool_observations,
                 first_reply_in_dialogue=first_reply,
-                response_intent="answer" if grounded else "missing_grounding",
+                response_intent="answer" if finalization_has_evidence else "missing_grounding",
             )
         final_route = str(final_result.get("route") or "cannot_answer")
         route_name = "answer" if final_route == "social_reply" else final_route
