@@ -17,7 +17,3 @@ contradictions: []
 
 ## Confirmed fact
 - Условия записи на конкретную дату публикуются в закреплённом посте или анонсе на эту дату.
-
-## Related
-- [[booking-channels]]
-- [[ordinary-jump-schedule]]
