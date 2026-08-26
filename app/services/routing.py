@@ -1,13 +1,18 @@
 from __future__ import annotations
 
+from typing import Any
+
 from sqlalchemy import select
 
 from app.core.config import settings
 from app.core.db import SessionLocal
 from app.models.case import SupportCase
-from app.models.message import Message
 from app.schemas.message import InboundMessage
-from app.services.agent_tool_loop import AgentLoopService, DirectLLMActionAgent, WikiLookupTool
+from app.services.agent_tool_loop import (
+    AgentLoopService,
+    DirectLLMActionAgent,
+    WikiLookupTool,
+)
 from app.services.audit import build_audit_event
 from app.services.case_resolution import reset_conversation_session, resolve_case
 from app.services.context_builder import build_context
@@ -100,15 +105,16 @@ class RoutingService:
             raise RuntimeError("agent tool loop is not configured")
         context = build_context(session, payload, case, summary_service=self.summary_service)
         loop_result = self.agent_loop.run(text=payload.text, context=context)
-        kb_result = loop_result.get("kb_result") if isinstance(loop_result.get("kb_result"), dict) else {}
+        raw_kb_result = loop_result.get("kb_result")
+        kb_result: dict[str, Any] = raw_kb_result if isinstance(raw_kb_result, dict) else {}
         tool_observations = list(loop_result.get("tool_observations") or [])
         technical_kb_failure = kb_result.get("grounding_status") in {"llm_unavailable", "retry_pending"}
         grounded = kb_result.get("grounding_status") == "ready"
-        has_extracted_evidence = bool(
-            str(kb_result.get("answer_basis") or "").strip()
-            or any(str(fact).strip() for fact in kb_result.get("grounded_facts", []) if isinstance(fact, str))
-        )
-        finalization_has_evidence = grounded or has_extracted_evidence
+        # `grounded_facts` is an internal extraction product.  It may explain
+        # why a direct answer was not established, so its presence is never
+        # evidence for a customer answer.  Only `ready` crosses the finalizer
+        # boundary with factual content.
+        finalization_has_evidence = grounded
         first_reply = not any(item.get("role") == "assistant" for item in context.get("recent_messages", []) if isinstance(item, dict))
         if technical_kb_failure:
             final_result = {
@@ -125,9 +131,14 @@ class RoutingService:
                     {"kind": "profile_no_answer_option", "summary": item["text"], "source_ref": item["source_ref"]}
                     for item in policy_evidence
                 )
+            finalization_kb_result = kb_result if grounded else {
+                "grounding_status": str(kb_result.get("grounding_status") or "not_found"),
+                "answer_basis": "",
+                "grounded_facts": [],
+            }
             final_result = self.direct_llm.respond(
                 payload.text,
-                kb_result,
+                finalization_kb_result,
                 knowledge_mode="kb_grounded" if finalization_has_evidence or policy_evidence else "prompt_only",
                 conversation_context=context,
                 tool_observations=tool_observations,

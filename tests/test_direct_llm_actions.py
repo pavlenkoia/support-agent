@@ -98,7 +98,7 @@ def test_finalizer_prompt_requires_natural_grammatical_russian() -> None:
     )
 
     prompt = str(client.calls[0]["user_prompt"])
-    assert "В режиме kb_grounded при непустом answer_basis или facts подготовь готовый прямой ответ на текущий вопрос только из evidence. Верни route=answer; не заменяй такой ответ уточняющим вопросом, cannot_answer или рассуждением о дальнейшей проверке." in prompt
+    assert "При response_intent=answer и knowledge_mode=kb_grounded подготовь готовый прямой ответ на текущий вопрос только из evidence." in prompt
     assert "Если текущая реплика прямо отвечает на предыдущий вопрос ассистента, прими её как состояние диалога и продолжи ответ; не повторяй тот же вопрос." in prompt
     assert "answer_basis — служебное краткое описание evidence, а не самостоятельный источник фактов и не требование закрыть вопрос клиента." in prompt
     assert "Если evidence не содержит прямого ответа на фактическую часть текущей реплики, не возвращай route=answer." in prompt

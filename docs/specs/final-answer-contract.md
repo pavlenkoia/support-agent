@@ -21,7 +21,7 @@ There are two finalization modes:
 1. `prompt_only`: no business fact is required, for example for a social response or a genuinely necessary clarification. The common final model may use the role/style contract and dialogue, but may not state a business fact.
 2. `kb_grounded`: a business fact is required. The KB agent runs and only a compact grounded packet reaches the common final model.
 
-For a first substantive turn with a valid KB pass, extracted `answer_basis` or `grounded_facts` are passed to the common finalizer as `kb_grounded` evidence even when the KB agent’s status is non-ready. The status alone must not discard factual evidence or force a clarification. Only a genuinely empty evidence packet uses `prompt_only`; the finalizer then owns a useful clarification or an honest `cannot_answer`. This is not a classifier, domain keyword branch, or KB answer source.
+Only `grounding_status=ready` may cross into the finalizer as `kb_grounded` evidence. A non-ready extraction can contain internal coverage, source, or availability observations; it is not customer evidence and its `answer_basis` and `grounded_facts` are replaced with an empty packet before finalization. The finalizer then owns a useful clarification or an honest `cannot_answer` using only separately allowlisted customer-safe policy evidence, if present. This is not a classifier, domain keyword branch, or KB answer source.
 
 The mode and response intent are application-owned control values. They are not derived by exposing planner output to the final model.
 
@@ -56,6 +56,7 @@ There is no legacy `answer(...)` bypass for KB-ready customer finalization. A co
 - `SYSTEM_PROMPT.md` is authoritative only for role, scope, safety, dialogue behavior, and style. It is not a source of business facts.
 - In `prompt_only`, empty KB evidence is expected and the final model may produce only non-factual social text or a necessary clarification.
 - In `kb_grounded`, `grounding_status=ready` means the supplied KB evidence has already passed the KB boundary. The final model must not re-decide whether that evidence exists.
+- `grounding_status=not_found` is a semantic no-direct-answer result. Its extraction text, source-selection outcome, and any explanation of unavailable or dynamic facts remain operational telemetry and never enter the finalizer packet.
 - `answer_basis` is the compact intended answer from the KB agent. `grounded_facts` define the supported factual scope and modality. The final model may rephrase them naturally but may not add, strengthen, contradict, or silently discard facts needed to answer the current question.
 
 - If `answer_basis` and `grounded_facts` conflict, the final model must stay within the exact grounded facts and avoid the unsupported part of the basis.
@@ -96,7 +97,8 @@ Internal planner, KB, route, LLM, and tool traces remain available in `response_
 2. `planner_reason` and `planner_action` cannot appear anywhere in the serialized final-model user prompt.
 3. `prompt_only` performs zero retrieval and zero KB-agent calls and cannot emit a business fact.
 4. `kb_grounded` uses ready evidence and the common final model, without mechanical fact joining.
-5. Exact replay of case 594 answers the payment-method question from ready KB evidence instead of applying the “information not confirmed” fallback.
-6. A non-factual social or clarification regression can use `SYSTEM_PROMPT.md` without reading KB; a substantive factual request cannot.
-7. Targeted tests, the full suite, production image/hash checks, and literal internal production probes all pass before the change is reported complete.
-8. Exact isolated replay of a historical multi-message failure preserves the unanswered follow-ups in chronological order, sends the combined newline-delimited turn through the common finalizer, keeps the customer's latest explicit constraint active, and produces exactly one practical answer before listing relevant conditions.
+5. A non-ready extraction with non-empty internal strings reaches the finalizer only as an empty evidence packet and cannot make the route `answer`.
+6. Exact replay of case 594 answers the payment-method question from ready KB evidence instead of applying the “information not confirmed” fallback.
+7. A non-factual social or clarification regression can use `SYSTEM_PROMPT.md` without reading KB; a substantive factual request cannot.
+8. Targeted tests, the full suite, production image/hash checks, and literal internal production probes all pass before the change is reported complete.
+9. Exact isolated replay of a historical multi-message failure preserves the unanswered follow-ups in chronological order, sends the combined newline-delimited turn through the common finalizer, keeps the customer's latest explicit constraint active, and produces exactly one practical answer before listing relevant conditions.

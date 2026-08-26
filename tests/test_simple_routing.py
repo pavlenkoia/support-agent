@@ -211,7 +211,7 @@ def test_agent_tool_loop_audits_actual_wiki_lookup_status(tmp_path: Path) -> Non
     assert result["audit"]["kb_status"] == "not_found"
 
 
-def test_agent_tool_loop_passes_extracted_facts_to_finalizer_despite_nonready_status(tmp_path: Path) -> None:
+def test_agent_tool_loop_never_passes_nonready_extraction_to_finalizer(tmp_path: Path) -> None:
     session_factory = make_session_factory(f"sqlite+pysqlite:///{tmp_path / 'agent-loop-extracted-facts.db'}")
     Base.metadata.create_all(bind=session_factory.kw["bind"])
     facts = ["Условия записи на дату указаны в закреплённом посте или анонсе на эту дату."]
@@ -234,9 +234,13 @@ def test_agent_tool_loop_passes_extracted_facts_to_finalizer_despite_nonready_st
         InboundMessage(channel="internal_test", external_user_id="igor", external_chat_id="igor", text="Записаться можно на 29?")
     )
 
-    assert finalizer.calls[0]["knowledge_mode"] == "kb_grounded"
-    assert finalizer.calls[0]["response_intent"] == "answer"
-    assert finalizer.calls[0]["kb_result"]["grounded_facts"] == facts
+    assert finalizer.calls[0]["knowledge_mode"] == "prompt_only"
+    assert finalizer.calls[0]["response_intent"] == "missing_grounding"
+    assert finalizer.calls[0]["kb_result"] == {
+        "grounding_status": "not_found",
+        "answer_basis": "",
+        "grounded_facts": [],
+    }
 
 
 def test_agent_tool_loop_wiki_outage_schedules_retry_without_customer_text(tmp_path: Path) -> None:

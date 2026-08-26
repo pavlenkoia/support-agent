@@ -4,7 +4,6 @@ import json
 import re
 from typing import Any
 
-
 from app.core.config import settings
 from app.integrations.llm.base import BaseLLMClient
 from app.integrations.llm.factory import get_llm_client
@@ -92,7 +91,7 @@ class DirectLLMService:
 
         user_prompt = json.dumps(
             {
-                "task": "В режиме kb_grounded при непустом answer_basis или facts подготовь готовый прямой ответ на текущий вопрос только из evidence. Верни route=answer; не заменяй такой ответ уточняющим вопросом, cannot_answer или рассуждением о дальнейшей проверке. Если текущая реплика прямо отвечает на предыдущий вопрос ассистента, прими её как состояние диалога и продолжи ответ; не повторяй тот же вопрос.",
+                "task": "При response_intent=answer и knowledge_mode=kb_grounded подготовь готовый прямой ответ на текущий вопрос только из evidence. Не заменяй такой ответ уточняющим вопросом, cannot_answer или рассуждением о дальнейшей проверке. Если текущая реплика прямо отвечает на предыдущий вопрос ассистента, прими её как состояние диалога и продолжи ответ; не повторяй тот же вопрос.",
                 "knowledge_mode": knowledge_mode,
                 "response_intent": response_intent,
                 "required_json_schema": {
@@ -321,6 +320,8 @@ class DirectLLMService:
     @staticmethod
     def _build_finalization_evidence(kb_packet: dict[str, Any]) -> dict[str, Any]:
         """Pass only the compact, client-relevant grounded evidence to the final LLM."""
+        if str(kb_packet.get("grounding_status") or "") != "ready":
+            return {"answer_basis": "", "facts": []}
         return {
             "answer_basis": str(kb_packet.get("answer_basis") or "").strip(),
             "facts": [

@@ -182,6 +182,46 @@ def test_finalizer_payload_is_allowlisted_and_excludes_internal_reasoning(monkey
         assert forbidden not in serialized
 
 
+def test_nonready_extraction_is_not_finalizer_evidence(monkeypatch) -> None:
+    class CapturingClient(BaseLLMClient):
+        def __init__(self) -> None:
+            self.payload: dict | None = None
+
+        def generate(self, **kwargs):
+            self.payload = json.loads(kwargs["user_prompt"])
+            return json.dumps(
+                {
+                    "route": "cannot_answer",
+                    "response_text": "Пожалуйста, уточните информацию по ссылке.",
+                    "confidence": 0.9,
+                    "reason": "no_direct_answer",
+                },
+                ensure_ascii=False,
+            )
+
+    client = CapturingClient()
+    monkeypatch.setattr(direct_llm_module.settings, "direct_llm_provider", "mistral")
+    DirectLLMService(client=client).respond(
+        "Сколько стоит место?",
+        {
+            "grounding_status": "not_found",
+            "answer_basis": "Цена не хранится во внутреннем источнике.",
+            "grounded_facts": [
+                "Цена не хранится во внутреннем источнике.",
+                "Точный прайс находится по ссылке https://example.test/prices.",
+            ],
+        },
+        knowledge_mode="prompt_only",
+        response_intent="missing_grounding",
+    )
+
+    assert client.payload is not None
+    assert client.payload["grounding_evidence"] == {"answer_basis": "", "facts": []}
+    serialized = json.dumps(client.payload, ensure_ascii=False)
+    assert "внутреннем источнике" not in serialized
+    assert "https://example.test/prices" not in serialized
+
+
 def test_case_594_finalization_contract_treats_ready_payment_evidence_as_confirmed(monkeypatch) -> None:
     class Case594Client(BaseLLMClient):
         def __init__(self) -> None:
