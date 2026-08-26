@@ -86,6 +86,21 @@ def test_next_action_does_not_allow_nested_arguments_to_replace_action_envelope(
     assert action["arguments"] == {"action": "finish", "reason": "nested"}
 
 
+def test_social_finalization_keeps_model_text_but_uses_social_route() -> None:
+    client = ActionClient('{"route":"cannot_answer","response_text":"Пожалуйста!","confidence":1,"reason":"model_misclassified_social"}')
+    service = DirectLLMService(client=client, prompt_service=PromptService())
+
+    result = service.respond(
+        "Спасибо",
+        {"grounding_status": "not_found"},
+        knowledge_mode="prompt_only",
+        response_intent="social_reply",
+    )
+
+    assert result["route"] == "social_reply"
+    assert result["response_text"] == "Пожалуйста!"
+
+
 def test_finalizer_prompt_requires_natural_grammatical_russian() -> None:
     client = ActionClient('{"route":"answer","response_text":"Готовый ответ.","confidence":1,"reason":"ready"}')
     service = DirectLLMService(client=client, prompt_service=PromptService())

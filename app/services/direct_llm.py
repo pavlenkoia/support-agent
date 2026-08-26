@@ -171,6 +171,8 @@ class DirectLLMService:
             }
 
         normalized = self._normalize_prompt_reply(parsed)
+        if response_intent == "social_reply" and normalized["route"] != "retry_pending":
+            normalized["route"] = "social_reply"
         normalized["response_text"] = self._prepend_standard_greeting_if_missing(
             normalized["response_text"],
             first_reply_in_dialogue=first_reply_in_dialogue,
