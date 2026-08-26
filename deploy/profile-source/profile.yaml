@@ -17,19 +17,8 @@ response_style:
   tone: "спокойный, вежливый, деловой"
   length: "коротко по умолчанию"
 
-response_templates:
-  simple_cannot_answer: "Сейчас не могу дать точный ответ на этот вопрос."
-  out_of_scope: "По этому вопросу я не смогу подсказать."
-
 fallback_policy:
   no_answer:
     evidence:
       source_ref: "kb/entities/office-chelyabinsk.md"
       text: "Для уточнения вопроса можно позвонить в офис в рабочее время."
-  unclear_request: "Задать короткий уточняющий вопрос."
-
-escalation_rules:
-  handoff_when:
-    - "нет подтвержденной информации в базе знаний"
-    - "запрос рискованный или спорный"
-    - "правила профиля требуют ответа человека"

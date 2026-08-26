@@ -160,9 +160,10 @@ def test_agent_tool_loop_routes_social_reply_without_legacy_kb_dependencies(tmp_
     loop = RecordingAgentLoop(
         {
             "kb_result": {},
-            "trace": {"actions": ["tool_not_used:unsupported_action"]},
+            "terminal_intent": "social_reply",
+            "trace": {"actions": ["social_reply"]},
             "llm_trace": [{"usage": {"total_tokens": 17}, "attempts": 2}],
-            "tool_observations": [{"tool": "agent_action", "status": "not_used"}],
+            "tool_observations": [],
         }
     )
     finalizer = RecordingGroundedFinalizer(route="social_reply", response_text="Пожалуйста!")
@@ -183,11 +184,11 @@ def test_agent_tool_loop_routes_social_reply_without_legacy_kb_dependencies(tmp_
     assert result["route"]["route"] == "answer"
     assert result["outcome"]["outcome_payload"]["response_text"] == "Здравствуйте! Пожалуйста!"
     assert loop.calls[0]["text"] == "Спасибо"
-    assert result["audit"]["agent_actions"] == ["tool_not_used:unsupported_action"]
+    assert result["audit"]["agent_actions"] == ["social_reply"]
     assert result["audit"]["logical_llm_call_count"] == 2
     assert result["audit"]["provider_attempt_count"] == 3
     assert finalizer.calls[0]["knowledge_mode"] == "prompt_only"
-    assert finalizer.calls[0]["response_intent"] == "missing_grounding"
+    assert finalizer.calls[0]["response_intent"] == "social_reply"
 
 
 def test_agent_tool_loop_audits_actual_wiki_lookup_status(tmp_path: Path) -> None:

@@ -23,11 +23,19 @@ class AgentLoopService:
             text=text,
             context=context,
             tool_observations=[],
-            allowed_actions=["wiki_lookup"],
+            allowed_actions=["wiki_lookup", "social_reply"],
             iteration=1,
         )
         llm_trace = [item for item in action.get("llm_trace", []) if isinstance(item, dict)]
         name = str(action.get("action") or "").strip()
+        if name == "social_reply":
+            return {
+                "kb_result": {},
+                "terminal_intent": "social_reply",
+                "trace": {"actions": ["social_reply"]},
+                "tool_observations": [],
+                "llm_trace": llm_trace,
+            }
         if name != "wiki_lookup":
             return {
                 "kb_result": {},

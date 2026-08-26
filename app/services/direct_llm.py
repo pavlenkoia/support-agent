@@ -77,7 +77,7 @@ class DirectLLMService:
         self._reset_llm_trace()
         if knowledge_mode not in {"prompt_only", "kb_grounded"}:
             raise ValueError(f"unsupported finalization knowledge_mode: {knowledge_mode}")
-        if response_intent not in {"answer", "clarification", "missing_grounding"}:
+        if response_intent not in {"answer", "clarification", "missing_grounding", "social_reply"}:
             raise ValueError(f"unsupported finalization response_intent: {response_intent}")
         tool_observations = tool_observations or []
         system_prompt = self._build_finalization_system_prompt(
@@ -129,6 +129,7 @@ class DirectLLMService:
                     "Не добавляй новые факты и не показывай внутренний процесс, инструменты, источники или причины выбора ответа.",
                     "Если клиент прямо спрашивает «почему», объясни результат только подтверждёнными фактами.",
                     "Если evidence недостаточно для прямого ответа и response_intent=clarification, задай один естественный, конкретный и полезный уточняющий вопрос по текущей реплике; не говори, что клиент задал вопрос, если вопроса не было.",
+                    "При response_intent=social_reply верни route=social_reply и короткий естественный ответ без бизнес-фактов, KB и следующего шага из политики.",
                     "Связанность evidence с темой вопроса не означает, что evidence отвечает на вопрос.",
                     "До формирования текста сначала определи, содержит ли evidence прямой ответ на фактическую часть текущей реплики.",
                     "Если прямого ответа нет, не создавай route=answer и не задавай вопрос, который предполагает неподтверждённый факт.",

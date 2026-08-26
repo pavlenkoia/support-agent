@@ -107,6 +107,7 @@ class RoutingService:
         loop_result = self.agent_loop.run(text=payload.text, context=context)
         raw_kb_result = loop_result.get("kb_result")
         kb_result: dict[str, Any] = raw_kb_result if isinstance(raw_kb_result, dict) else {}
+        terminal_intent = str(loop_result.get("terminal_intent") or "").strip()
         tool_observations = list(loop_result.get("tool_observations") or [])
         technical_kb_failure = kb_result.get("grounding_status") in {"llm_unavailable", "retry_pending"}
         grounded = kb_result.get("grounding_status") == "ready"
@@ -125,7 +126,7 @@ class RoutingService:
                 "llm_trace": [],
             }
         else:
-            policy_evidence = [] if finalization_has_evidence else self.policy.no_answer_policy_evidence()
+            policy_evidence = [] if finalization_has_evidence or terminal_intent == "social_reply" else self.policy.no_answer_policy_evidence()
             if policy_evidence:
                 tool_observations.extend(
                     {"kind": "profile_no_answer_option", "summary": item["text"], "source_ref": item["source_ref"]}
@@ -143,7 +144,11 @@ class RoutingService:
                 conversation_context=context,
                 tool_observations=tool_observations,
                 first_reply_in_dialogue=first_reply,
-                response_intent="answer" if finalization_has_evidence else "missing_grounding",
+                response_intent=(
+                    "answer" if finalization_has_evidence
+                    else "social_reply" if terminal_intent == "social_reply"
+                    else "missing_grounding"
+                ),
             )
         final_route = str(final_result.get("route") or "cannot_answer")
         route_name = "answer" if final_route == "social_reply" else final_route

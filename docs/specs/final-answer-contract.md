@@ -81,7 +81,7 @@ No domain-specific question handler, keyword branch, canned FAQ shortcut, or mec
 
 ## Terminal paths outside normal finalization
 
-- `social_reply` may remain a short dedicated social response path without KB work.
+- `social_reply` skips KB work but still reaches the common finalizer with a `social_reply` intent. The finalizer writes the short non-factual text; an invalid or failed finalization is `retry_pending` with empty customer text.
 - first-turn `out_of_scope` may render only generic non-business policy text.
 - genuine missing grounding may render `cannot_answer`.
 - provider recovery exhaustion remains `retry_pending` with no customer text.

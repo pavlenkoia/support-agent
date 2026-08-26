@@ -17,7 +17,7 @@ It is not a ticket router and not an escalation-first bot.
 3. Substantive KB reasoning must pass through a dedicated KB agent that reads the compiled wiki selectively rather than treating lexical snippets as the final reasoning surface.
 4. The customer-facing support agent and the KB agent must use separate external prompt files.
 5. The agent must not fabricate facts when KB/tool evidence is missing.
-6. A planner-approved `social_reply` (greeting, acknowledgement, thanks) is not a substantive request: it must finish immediately without retrieval or KB-agent work and always return a short polite `answer`, including when its model call fails.
+6. A model-selected `social_reply` (greeting, acknowledgement, thanks) is not a substantive request: it skips Wiki lookup and reaches the common finalizer with the explicit `social_reply` intent. The finalizer alone writes its short polite text; a final-model failure remains textless `retry_pending`.
 7. A planner-approved `out_of_scope` is terminal only on the first customer turn. For a follow-up after an assistant reply, it must first attempt KB reading so a contextual post-service request cannot be discarded as unrelated.
 8. Every customer-visible terminal route passes through one output boundary: first replies begin with exactly one `Здравствуйте!`. The boundary normalizes formatting but never replaces a model-written customer reply with an application template; an invalid or missing final-model payload is `retry_pending` with empty customer text.
 9. If a substantive answer cannot be grounded, the final outcome must be `cannot_answer`.
@@ -26,7 +26,7 @@ It is not a ticket router and not an escalation-first bot.
 12. The main runtime flow must not silently switch into human or Hermes escalation.
 13. Exhausted LLM-provider recovery must produce `retry_pending` with empty customer text; application code must not synthesize a domain answer.
 14. Broad and contextual language is interpreted semantically from dialogue plus the complete compact Wiki catalog, not by application keyword lists or question-specific branches.
-15. When the KB agent returns a non-empty compact `answer_basis` or grounded facts, they are evidence for the customer-facing final model regardless of a non-ready KB status. That model must answer the main customer question first, use only necessary confirmed facts, and must not invent requirements, prohibitions, or stronger conditions. A status alone must not discard extracted evidence or force a clarification. Direct mechanical joining of all facts is not a normal answer path.
+15. Only `grounding_status=ready` may pass `answer_basis` or grounded facts to the customer-facing final model. A non-ready extraction is operational telemetry, not customer evidence: its text, source rationale, and availability observations are replaced with an empty packet before finalization. The final model must answer a ready grounded question first, use only necessary confirmed facts, and must not invent requirements, prohibitions, or stronger conditions. Direct mechanical joining of all facts is not a normal answer path.
 16. The customer-facing final model receives a newly constructed allowlisted packet, never the broad runtime context: no planner action/reason, route/loop/audit metadata, KB navigation/review reasons, raw KB pages, raw tool payloads, case identifiers, duplicate dialogue forms, or dialogue roles outside `user|assistant` may enter its request. The dialogue projection is capped at the last 10 valid items. `knowledge_mode` is an explicit application control, not a value inferred from planner reasoning exposed to the model. A legacy finalizer without `respond(...)` fails closed rather than bypassing this boundary through `answer(...)`.
 17. In `kb_grounded` mode, the final model selects relevant ready evidence and writes natural customer prose; it does not mechanically concatenate facts.
 18. Channel-specific transport workers must reuse the same application runtime rather than creating a second support agent.
@@ -41,8 +41,8 @@ It is not a ticket router and not an escalation-first bot.
 ## Decision loop
 
 Per inbound turn:
-1. classify social vs substantive turn
-2. finalize a planner-approved `social_reply` without KB lookup or final answer-model generation; only a first-turn `out_of_scope` may finalize directly
+1. select either the optional `wiki_lookup` or the terminal `social_reply` intent
+2. finalize a selected `social_reply` through the common finalizer without KB lookup; the finalizer owns customer text and its failure remains fail-closed
 3. force a KB read before accepting `out_of_scope` on a contextual follow-up
 4. for substantive in-domain turns, assess the next action
 5. gather runtime tool observations when needed and run semantic Wiki navigation for substantive domain facts

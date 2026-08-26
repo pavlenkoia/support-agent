@@ -27,7 +27,7 @@ class RecordingWikiLookup:
         }
 
 
-def test_unrecognized_agent_action_finishes_tool_phase_without_retries() -> None:
+def test_social_action_finishes_without_wiki_lookup() -> None:
     agent = ScriptedAgent([{"action": "social_reply", "reason": "model returned natural action"}])
     wiki = RecordingWikiLookup()
     loop = AgentLoopService(agent=agent, wiki_lookup=wiki)
@@ -37,7 +37,8 @@ def test_unrecognized_agent_action_finishes_tool_phase_without_retries() -> None
     assert len(agent.calls) == 1
     assert wiki.calls == []
     assert result["kb_result"] == {}
-    assert result["trace"]["actions"] == ["tool_not_used:unsupported_action"]
+    assert result["terminal_intent"] == "social_reply"
+    assert result["trace"]["actions"] == ["social_reply"]
 
 
 def test_wiki_action_returns_grounding_for_finalizer() -> None:
