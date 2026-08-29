@@ -197,10 +197,15 @@ class InboundQueue:
     @staticmethod
     def _combined_inbound(batch: Batch) -> InboundMessage:
         first = batch.messages[0]
+        latest = batch.messages[-1]
         return first.model_copy(update={
             "text": "\n".join(message.text for message in batch.messages),
-            "received_at": batch.messages[-1].received_at,
-            "external_message_id": None,
+            "received_at": latest.received_at,
+            # The delivery boundary compares this value with the durable
+            # per-conversation latest-inbound marker.  Keep the newest source
+            # ID so a combined generation can be suppressed if a later inbound
+            # reached persistence while this generation was running.
+            "external_message_id": latest.external_message_id,
             "external_event_id": None,
             "raw_event": None,
             "metadata": {"batch_id": batch.batch_id, "source_event_count": len(batch.messages)},

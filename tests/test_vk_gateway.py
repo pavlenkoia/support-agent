@@ -18,6 +18,7 @@ from app.services.persistence import (
     activate_human_override,
     get_or_create_conversation_transport_state,
     persist_transport_event,
+    set_last_inbound_message,
 )
 from app.services.vk_gateway import VKGatewayService
 
@@ -373,6 +374,38 @@ def test_vk_gateway_coalesces_two_messages_into_one_runtime_turn(tmp_path: Path)
         assert routing.recorded_outbound == [(1, "Ответ на полный запрос")]
         events = session.scalars(select(TransportEvent).order_by(TransportEvent.id)).all()
         assert [(event.external_message_id, event.status) for event in events] == [("201", "processed"), ("202", "processed")]
+
+
+def test_vk_gateway_suppresses_old_generation_when_newer_inbound_is_already_durable(tmp_path: Path) -> None:
+    sender = RecordingVKSender()
+    routing = StubRouting(response_text="Устаревший ответ")
+    service, session_factory = make_service(tmp_path, routing=routing, sender=sender)
+    service.queue = InboundQueue(service._process_generation, quiet_seconds=5, max_wait_seconds=15)
+    now = datetime.now(UTC)
+
+    queued = service.handle_event({
+        "type": "message_new",
+        "group_id": 55,
+        "object": {"message": {"id": 301, "peer_id": 2301, "from_id": 3301, "text": "Первый фрагмент", "date": int(now.timestamp())}},
+    })
+    assert queued["queued"] is True
+
+    # This models the production race: ingress of message 302 has committed its
+    # durable newest-inbound marker, but its queue submit is waiting behind the
+    # first generation's final boundary.
+    with session_factory() as session:
+        conversation = session.scalar(select(Conversation).where(Conversation.external_id == "vk:2301"))
+        assert conversation is not None
+        state = get_or_create_conversation_transport_state(session, conversation_id=conversation.id, platform="vk")
+        set_last_inbound_message(session, state, external_message_id="302")
+        session.commit()
+
+    assert service.queue.flush_due(now=now + timedelta(seconds=6), background=False) == 1
+    assert sender.calls == []
+    with session_factory() as session:
+        event = session.scalar(select(TransportEvent).where(TransportEvent.external_message_id == "301"))
+        assert event is not None
+        assert event.status == "suppressed"
 
 
 def test_vk_gateway_retries_pending_kb_transport_failure_without_intermediate_customer_reply(tmp_path: Path) -> None:

@@ -78,6 +78,7 @@ def test_flushes_at_max_wait_despite_new_messages() -> None:
     assert queue.flush_due(now=now + timedelta(seconds=14), background=False) == 0
     assert queue.flush_due(now=now + timedelta(seconds=15), background=False) == 1
     assert processor.calls[0][0].text == "Первая\nВторая"
+    assert processor.calls[0][0].external_message_id == "2"
 
 
 def test_new_message_during_generation_supersedes_old_result_and_replays_full_batch() -> None:

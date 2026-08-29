@@ -157,7 +157,13 @@ class VKGatewayService:
                 state = get_or_create_conversation_transport_state(
                     session, conversation_id=current_conversation_id, platform="vk"
                 )
-                if is_override_active(state, now=datetime.now(UTC)):
+                # The queue lock prevents an in-process submit from changing
+                # the generation revision while this final boundary runs, but
+                # ingress persists the newest inbound first.  Consult that
+                # durable marker immediately before journaling/sending so an
+                # already-received newer customer message suppresses an older
+                # generated reply rather than producing two bot replies.
+                if self._is_stale_or_overridden(state, inbound, now=datetime.now(UTC)):
                     self._mark_generation_sources(session, generation, status="suppressed")
                     session.commit()
                     return "superseded"

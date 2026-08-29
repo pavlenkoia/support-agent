@@ -66,6 +66,7 @@ def test_next_action_returns_provider_neutral_wiki_tool_call() -> None:
     assert action["llm_trace"][0]["step"] == "agent_next_action"
     assert client.calls[0]["response_format"] == {"type": "json_object"}
     assert "wiki_lookup" in str(client.calls[0]["user_prompt"])
+    assert "Выбирай social_reply только для реплики, которая сама по себе не содержит запроса на действие, изменение, условие, факт, решение или продолжение ранее описанной ситуации." in str(client.calls[0]["user_prompt"])
 
 
 def test_next_action_does_not_allow_nested_arguments_to_replace_action_envelope() -> None:
