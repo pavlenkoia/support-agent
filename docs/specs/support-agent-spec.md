@@ -17,7 +17,7 @@ It is not a ticket router and not an escalation-first bot.
 3. Substantive KB reasoning must pass through a dedicated KB agent that reads the compiled wiki selectively rather than treating lexical snippets as the final reasoning surface.
 4. The customer-facing support agent and the KB agent must use separate external prompt files.
 5. The agent must not fabricate facts when KB/tool evidence is missing.
-6. A model-selected `social_reply` (greeting, acknowledgement, thanks) is not a substantive request: it skips Wiki lookup and reaches the common finalizer with the explicit `social_reply` intent. The finalizer alone writes its short polite text; a final-model failure remains textless `retry_pending`.
+6. A model-selected `social_reply` is reserved for a greeting, acknowledgement, thanks, or another turn that contains no request for an action, change, condition, fact, decision, or continuation of an earlier situation. A substantive request must select `wiki_lookup`, including when it is conversationally phrased or incomplete. `social_reply` skips Wiki lookup and reaches the common finalizer with the explicit intent; the finalizer alone writes its short polite text, and a final-model failure remains textless `retry_pending`.
 7. A planner-approved `out_of_scope` is terminal only on the first customer turn. For a follow-up after an assistant reply, it must first attempt KB reading so a contextual post-service request cannot be discarded as unrelated.
 8. Every customer-visible terminal route passes through one output boundary: first replies begin with exactly one `Здравствуйте!`. The boundary normalizes formatting but never replaces a model-written customer reply with an application template; an invalid or missing final-model payload is `retry_pending` with empty customer text.
 9. If a substantive answer cannot be grounded, the final outcome must be `cannot_answer`.
@@ -31,7 +31,7 @@ It is not a ticket router and not an escalation-first bot.
 17. In `kb_grounded` mode, the final model selects relevant ready evidence and writes natural customer prose; it does not mechanically concatenate facts.
 18. Channel-specific transport workers must reuse the same application runtime rather than creating a second support agent.
 19. VK transport-level manual-admin intervention must silence auto-replies for 1 hour from the last unmatched `message_reply`.
-20. Transport-level override must be re-checked immediately before a VK reply is sent.
+20. Immediately before a VK reply is journaled and sent, the worker must re-check both transport-level override and whether the combined generation's newest external message ID still equals the durable latest-inbound marker for that conversation. A newer persisted inbound suppresses the obsolete generation.
 21. Planner actions are capability-bound: `use_tool` is valid only for an explicitly advertised runtime capability. A request outside that set is rejected before tool execution as internal `planner_action_rejected`, never customer-facing `cannot_answer` by itself.
 22. A defensive runtime capability mismatch (`tool_unavailable`) must immediately advance to KB/finalization; neither it nor a rejected planner action may repeat `use_tool` or consume another bounded-loop iteration.
 23. The production simple runtime must never load the whole compiled corpus into the answering prompt. It must start from the compact OKF catalog and pass only selected full pages to the KB agent.
@@ -42,7 +42,7 @@ It is not a ticket router and not an escalation-first bot.
 
 Per inbound turn:
 1. select either the optional `wiki_lookup` or the terminal `social_reply` intent
-2. finalize a selected `social_reply` through the common finalizer without KB lookup; the finalizer owns customer text and its failure remains fail-closed
+2. finalize a selected `social_reply` through the common finalizer without KB lookup only when the turn has no substantive request; the finalizer owns customer text and its failure remains fail-closed
 3. force a KB read before accepting `out_of_scope` on a contextual follow-up
 4. for substantive in-domain turns, assess the next action
 5. gather runtime tool observations when needed and run semantic Wiki navigation for substantive domain facts
