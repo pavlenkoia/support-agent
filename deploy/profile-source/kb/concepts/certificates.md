@@ -1,10 +1,10 @@
 ---
 title: Certificates
 created: 2026-06-29
-updated: 2026-08-17
+updated: 2026-08-30
 type: concept
 tags: [services, certificates, booking, office]
-sources: [raw/documents/certificates-source.md, raw/documents/faq-main-source.md, raw/documents/faq-short-source.md, raw/documents/legacy-approved-policy-source.md]
+sources: [raw/documents/certificates-source.md, raw/documents/faq-main-source.md, raw/documents/faq-short-source.md, raw/documents/legacy-approved-policy-source.md, raw/documents/operator-case-vk-841-certificate-printing.md]
 confidence: high
 contested: false
 contradictions: []
@@ -25,6 +25,8 @@ contradictions: []
 
 ## Использование
 - На аэродроме сертификат предъявляют в распечатанном виде.
+- Подарочный сертификат можно распечатать в любом размере.
+- Ламинировать подарочный сертификат не следует.
 - Для использования необходима предварительная запись по каналу соответствующей услуги.
 - Сертификат можно активировать круглогодично; фактическая дата прыжка или полёта зависит от расписания и погоды.
 - Вопросы продления и возврата решает офис в будние дни по телефону `+7 (351) 214-30-30`.
