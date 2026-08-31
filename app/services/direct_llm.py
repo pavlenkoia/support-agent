@@ -70,10 +70,12 @@ class DirectLLMService:
         first_reply = not any(item.get("role") == "assistant" for item in conversation if isinstance(item, dict))
         user_prompt = json.dumps(
             {
-                "task": "Перед любым ответом клиенту обязательно вызови инструмент wiki_lookup. Не отвечай клиенту вне JSON-конверта.",
+                "task": "Обработай текущий ход клиента. Если для ответа или естественного решения нужен факт о предметной области, действии, условии, проблеме, результате, контакте или ситуации клиента — вызови wiki_lookup. Сам не создавай клиентский ответ с фактами. Нефактический ответ допустим только для очевидной чисто социальной реплики без запроса и без продолжения ситуации. Не отвечай клиенту вне JSON-конверта.",
                 "required_json_schema": {
-                    "tool_call": "wiki_lookup only",
-                    "response_text": "must be absent",
+                    "tool_call": "wiki_lookup or null",
+                    "route": "social_reply|cannot_answer|out_of_scope|clarification_requested when tool_call is null",
+                    "response_text": "string when tool_call is null; must be absent when tool_call=wiki_lookup",
+                    "confidence": "number 0..1 when tool_call is null",
                     "reason": "short string",
                 },
                 "user_message": text,
@@ -81,9 +83,10 @@ class DirectLLMService:
                 "conversation": conversation,
                 "rules": [
                     "wiki_lookup — единственный источник бизнес-фактов из Wiki.",
-                    "Вызови wiki_lookup для каждого клиентского сообщения, включая приветствие, благодарность, уточнение и признание сообщения.",
-                    "Не возвращай клиентский текст, route, clarification_requested, cannot_answer или out_of_scope до wiki_lookup.",
-                    "Не используй ключевые слова, скрытые сценарии, историю диалога, память модели или приложение как источник бизнес-ответа; выбирай по подтверждённым знаниям после вызова Wiki.",
+                    "Вызови wiki_lookup, когда текущая реплика содержит или продолжает вопрос, просьбу, проблему, невыполненный ожидаемый результат, ожидание результата, затруднение, условие, дату, контакт, действие или ситуацию клиента — даже без вопросительного знака или явной просьбы.",
+                    "До wiki_lookup нельзя возвращать клиентский текст, содержащий бизнес-факт, процедуру, обещание, контакт, объяснение результата, уточнение по предметной области, cannot_answer или out_of_scope.",
+                    "social_reply разрешён только для очевидной чисто социальной реплики, которая не содержит и не продолжает запрос, проблему или ситуацию клиента; в нём не должно быть бизнес-фактов, процедуры, обещаний или следующего шага.",
+                    "Не используй ключевые слова, скрытые сценарии, историю диалога, память модели или приложение как источник бизнес-ответа; выбирай действие по смыслу диалога и вызывай Wiki при малейшей потребности в фактах.",
                     "Верни только JSON-объект по указанной схеме.",
                 ],
             },
@@ -105,7 +108,7 @@ class DirectLLMService:
                         },
                     }
                 ],
-                tool_choice={"type": "function", "function": {"name": "wiki_lookup"}},
+                tool_choice="auto",
             )
             self._record_llm_call("customer_turn")
             parsed = json.loads(raw)
@@ -131,7 +134,14 @@ class DirectLLMService:
             return {"kind": "wiki_lookup", "llm_trace": list(self._active_llm_trace)}
         if parsed.get("tool_call") == "wiki_lookup":
             return {"kind": "wiki_lookup", "llm_trace": list(self._active_llm_trace)}
-        return self._invalid_begin_turn("customer_turn_requires_wiki")
+        normalized = self._normalize_prompt_reply(parsed)
+        if normalized["route"] not in {"social_reply", "cannot_answer", "out_of_scope", "clarification_requested"}:
+            return self._invalid_begin_turn("customer_turn_requires_wiki")
+        normalized["response_text"] = self._prepend_standard_greeting_if_missing(
+            normalized["response_text"],
+            first_reply_in_dialogue=first_reply,
+        )
+        return {"kind": "final", "result": normalized, "llm_trace": list(self._active_llm_trace)}
 
     def _invalid_begin_turn(self, reason: str) -> dict[str, Any]:
         return {

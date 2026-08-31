@@ -17,19 +17,34 @@ class RecordingWikiLookup:
         }
 
 
-def test_unified_turn_always_runs_wiki_before_customer_finalization() -> None:
+def test_unified_turn_returns_social_customer_text_without_wiki_lookup() -> None:
     class TurnModel:
-        def begin_turn(self, *, text: str, context: dict) -> dict:
-            raise AssertionError("UnifiedTurnService must not classify or finalize before Wiki")
+        def __init__(self) -> None:
+            self.calls: list[dict] = []
 
+        def begin_turn(self, *, text: str, context: dict) -> dict:
+            self.calls.append({"text": text, "context": context})
+            return {
+                "kind": "final",
+                "result": {
+                    "route": "social_reply",
+                    "response_text": "Пожалуйста!",
+                    "confidence": 1.0,
+                    "reason": "social_reply",
+                },
+                "llm_trace": [{"role": "direct_llm", "step": "customer_turn"}],
+            }
+
+    model = TurnModel()
     wiki = RecordingWikiLookup()
-    turn = UnifiedTurnService(model=TurnModel(), wiki_lookup=wiki)
+    turn = UnifiedTurnService(model=model, wiki_lookup=wiki)
 
     result = turn.run(text="Спасибо", context={"recent_messages": []})
 
-    assert wiki.calls == [{"text": "Спасибо", "context": {"recent_messages": []}}]
-    assert result["kb_result"]["grounding_status"] == "ready"
-    assert result["trace"]["actions"] == ["wiki_lookup"]
+    assert model.calls == [{"text": "Спасибо", "context": {"recent_messages": []}}]
+    assert wiki.calls == []
+    assert result["final_result"]["response_text"] == "Пожалуйста!"
+    assert result["trace"]["actions"] == ["final_response"]
 
 
 def test_unified_turn_runs_wiki_after_model_requests_its_tool() -> None:
@@ -51,7 +66,8 @@ def test_unified_turn_runs_wiki_after_model_requests_its_tool() -> None:
 def test_unified_turn_keeps_wiki_llm_trace_for_operational_audit() -> None:
     class TurnModel:
         def begin_turn(self, *, text: str, context: dict) -> dict:
-            raise AssertionError("Wiki must run before the customer-facing model")
+            _ = (text, context)
+            return {"kind": "wiki_lookup", "llm_trace": [{"role": "direct_llm", "step": "customer_turn"}]}
 
     class RetryingWikiLookup:
         def lookup(self, *, text: str, context: dict) -> dict:
@@ -71,6 +87,7 @@ def test_unified_turn_keeps_wiki_llm_trace_for_operational_audit() -> None:
     result = turn.run(text="Вопрос", context={})
 
     assert result["llm_trace"] == [
+        {"role": "direct_llm", "step": "customer_turn"},
         {"role": "kb_agent", "step": "grounded_extraction", "attempts": 4, "error": "TimeoutError"},
     ]
 

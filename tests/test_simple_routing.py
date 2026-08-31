@@ -190,10 +190,9 @@ def test_agent_tool_loop_routes_social_reply_without_legacy_kb_dependencies(tmp_
     assert result["outcome"]["outcome_payload"]["response_text"] == "Здравствуйте! Пожалуйста!"
     assert loop.calls[0]["text"] == "Спасибо"
     assert result["audit"]["agent_actions"] == ["final_response"]
-    assert result["audit"]["logical_llm_call_count"] == 2
-    assert result["audit"]["provider_attempt_count"] == 3
-    assert finalizer.calls[0]["knowledge_mode"] == "prompt_only"
-    assert finalizer.calls[0]["response_intent"] == "missing_grounding"
+    assert result["audit"]["logical_llm_call_count"] == 1
+    assert result["audit"]["provider_attempt_count"] == 2
+    assert finalizer.calls == []
 
 
 def test_agent_tool_loop_audits_actual_wiki_lookup_status(tmp_path: Path) -> None:

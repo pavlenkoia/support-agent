@@ -61,25 +61,22 @@ def test_begin_turn_requests_wiki_as_the_only_factual_source() -> None:
     assert "response_text" not in result
     prompt = str(client.calls[0]["user_prompt"])
     assert "wiki_lookup — единственный источник бизнес-фактов из Wiki." in prompt
-    assert "Вызови wiki_lookup для каждого клиентского сообщения" in prompt
-    assert "Не возвращай клиентский текст, route, clarification_requested, cannot_answer или out_of_scope до wiki_lookup." in prompt
-    assert client.calls[0]["tool_choice"] == {"type": "function", "function": {"name": "wiki_lookup"}}
+    assert "Вызови wiki_lookup, когда текущая реплика содержит или продолжает вопрос" in prompt
+    assert "social_reply разрешён только для очевидной чисто социальной реплики" in prompt
+    assert client.calls[0]["tool_choice"] == "auto"
     assert client.calls[0]["tools"][0]["function"]["name"] == "wiki_lookup"
 
 
-def test_begin_turn_rejects_customer_text_without_required_wiki_call() -> None:
+def test_begin_turn_returns_ready_social_text_without_a_second_finalizer_call() -> None:
     client = ActionClient('{"tool_call":null,"route":"social_reply","response_text":"Пожалуйста!","confidence":1,"reason":"social"}')
     service = DirectLLMService(client=client, prompt_service=PromptService())
 
     result = service.begin_turn(text="Спасибо", context={"recent_messages": []})
 
     assert result["kind"] == "final"
-    assert result["result"] == {
-        "route": "retry_pending",
-        "response_text": "",
-        "confidence": 0.0,
-        "reason": "customer_turn_requires_wiki",
-    }
+    assert result["result"]["route"] == "social_reply"
+    assert result["result"]["response_text"] == "Здравствуйте! Пожалуйста!"
+    assert result["llm_trace"][0]["step"] == "customer_turn"
 
 
 def test_finalizer_prompt_requires_natural_grammatical_russian() -> None:
