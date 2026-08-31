@@ -53,7 +53,7 @@ def test_next_action_returns_provider_neutral_wiki_tool_call() -> None:
     service = DirectLLMService(client=client, prompt_service=PromptService())
 
     action = service.next_action(
-        text="Как записаться на тандем?",
+        text="Здравствуйте, так и не добавили в чат",
         context={"recent_messages": []},
         tool_observations=[],
         allowed_actions=["wiki_lookup", "finish"],
@@ -66,7 +66,7 @@ def test_next_action_returns_provider_neutral_wiki_tool_call() -> None:
     assert action["llm_trace"][0]["step"] == "agent_next_action"
     assert client.calls[0]["response_format"] == {"type": "json_object"}
     assert "wiki_lookup" in str(client.calls[0]["user_prompt"])
-    assert "Выбирай social_reply только для реплики, которая сама по себе не содержит запроса на действие, изменение, условие, факт, решение или продолжение ранее описанной ситуации." in str(client.calls[0]["user_prompt"])
+    assert "Сообщение о проблеме, невыполненном ожидаемом результате, ожидании результата или сохранении затруднения — это продолжение ситуации и требует wiki_lookup, даже без вопросительного знака или явной просьбы." in str(client.calls[0]["user_prompt"])
 
 
 def test_next_action_does_not_allow_nested_arguments_to_replace_action_envelope() -> None:
