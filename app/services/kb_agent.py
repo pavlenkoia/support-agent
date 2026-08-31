@@ -509,8 +509,7 @@ class KBAgentService:
             "grounding_status": "ready|not_found",
             "needs_customer_clarification": "boolean: true only when the customer can clarify the request; false when the needed fact is absent from the selected pages",
             "answer_basis": "short factual synthesis for the support agent, not a customer reply",
-            "grounded_facts": ["all extracted facts for audit only"],
-            "scoped_grounded_facts": [{"fact": "verified fact", "within_tool_scope": "boolean"}],
+            "grounded_facts": ["bullet-sized verified facts"],
             "cited_source_refs": ["source_ref strings used"],
             "reason": "short string",
         }
@@ -519,8 +518,7 @@ class KBAgentService:
         rules = [
             "Tool request is a binding scope contract selected by the customer-turn model, not advisory context.",
             "Extract facts only for tool_request.needed_fact within tool_request.context_scope. A fact about another variant or a parent category is out of scope unless the customer explicitly asks to compare or change the selected scope.",
-            "Every item in scoped_grounded_facts must be a source-verbatim or minimally edited fact and must set within_tool_scope=true only when it directly answers tool_request.needed_fact within tool_request.context_scope. Facts for excluded alternatives must either be absent or set within_tool_scope=false; they will never be shown to the customer.",
-            "Only facts with within_tool_scope=true are eligible for the support answer; answer_basis must summarize those facts only.",
+            "When the selected wiki page also contains excluded alternatives, omit those facts entirely from grounded_facts and answer_basis.",
             "Не дополняй выводы догадками и не отвечай в клиентском стиле.",
             "Явное общее правило из страницы можно считать подтверждённым для частного случая только когда его формулировка прямо охватывает все или остальные категории; процитируй это правило как факт и укажи страницу.",
             "answer_basis должен быть короткой служебной опорой для финального support-agent ответа.",
@@ -604,13 +602,6 @@ class KBAgentService:
             parsed["grounded_facts"] = [str(item).strip() for item in grounded_facts if str(item).strip()][:MAX_GROUNDED_FACTS]
         else:
             parsed["grounded_facts"] = []
-        scoped_facts = parsed.get("scoped_grounded_facts")
-        if isinstance(scoped_facts, list):
-            parsed["grounded_facts"] = [
-                str(item.get("fact") or "").strip()
-                for item in scoped_facts
-                if isinstance(item, dict) and item.get("within_tool_scope") is True and str(item.get("fact") or "").strip()
-            ][:MAX_GROUNDED_FACTS]
         # A model may mistakenly label its own cited extraction as not_found.
         # Preserve the fail-closed boundary unless it supplied nonempty facts
         # anchored to selected pages; that combination is a coherent ready
