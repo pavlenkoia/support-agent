@@ -38,6 +38,29 @@ class BrokenExtractionClient(BaseLLMClient):
         raise RuntimeError("IncompleteRead")
 
 
+def test_kb_agent_exposes_only_model_scoped_facts() -> None:
+    client = SequentialClient([
+        {
+            "grounding_status": "ready",
+            "needs_customer_clarification": False,
+            "answer_basis": "Самостоятельный вариант: телефон.",
+            "grounded_facts": ["Самостоятельный: телефон 1.", "Тандем: форма 2."],
+            "scoped_grounded_facts": [
+                {"fact": "Самостоятельный: телефон 1.", "within_tool_scope": True},
+                {"fact": "Тандем: форма 2.", "within_tool_scope": False},
+            ],
+            "cited_source_refs": ["booking.md"],
+            "reason": "scoped_evidence",
+        }
+    ])
+    result = KBAgentService(client=client).read(
+        "Как записаться?",
+        [{"source_ref": "booking.md", "text": "Самостоятельный: телефон 1. Тандем: форма 2."}],
+        conversation_context={"tool_request": {"query": "запись", "context_scope": "самостоятельный", "needed_fact": "канал"}},
+    )
+    assert result["grounded_facts"] == ["Самостоятельный: телефон 1."]
+
+
 def test_kb_agent_marks_transport_failure_retry_pending_without_reusing_unrelated_context() -> None:
     service = KBAgentService(client=BrokenExtractionClient())
 
