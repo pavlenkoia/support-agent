@@ -24,6 +24,7 @@ def test_canonical_profile_requires_factual_tools_for_substantive_customer_repli
     prompt = SOURCE.joinpath("SYSTEM_PROMPT.md").read_text(encoding="utf-8")
     assert "Перед ответом, который содержит или требует факт" in prompt
     assert "По умолчанию сначала проверь Wiki" in prompt
+    assert "Контекстное ограничение обязательно" in prompt
 
 
 def test_profile_declares_no_answer_contact_evidence_without_customer_template() -> None:
