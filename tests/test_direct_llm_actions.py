@@ -106,6 +106,19 @@ def test_begin_turn_accepts_provider_tool_name_with_serialized_content_suffix_in
     assert result["kind"] == "wiki_lookup"
 
 
+
+def test_begin_turn_accepts_any_structural_native_call_in_the_single_tool_turn() -> None:
+    client = ActionClient('{"_native_tool_calls":[{"function":{"name":"provider-garbage","arguments":"not-json-and-not-an-envelope"}}]}')
+    service = DirectLLMService(client=client, prompt_service=PromptService())
+
+    result = service.begin_turn(
+        text="Сколько это стоит?",
+        context={"recent_messages": [{"role": "user", "content": "У вас есть услуга?"}, {"role": "assistant", "content": "Да."}]},
+    )
+
+    assert result["kind"] == "wiki_lookup"
+
+
 def test_begin_turn_parses_valid_tool_envelope_before_provider_trailing_junk() -> None:
     client = ActionClient('{"tool_call":"wiki_lookup","reason":"need_confirmed_facts"}```json\\n{"tool_call":"wiki_lookup"}\\n```')
     service = DirectLLMService(client=client, prompt_service=PromptService())

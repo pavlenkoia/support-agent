@@ -129,7 +129,7 @@ class DirectLLMService:
         if not isinstance(parsed, dict):
             return self._invalid_begin_turn("customer_turn_not_object")
         native_calls = parsed.get("_native_tool_calls")
-        if isinstance(native_calls, list) and any(self._native_call_requests_wiki_lookup(call) for call in native_calls):
+        if isinstance(native_calls, list) and any(self._native_call_is_single_registered_tool(call) for call in native_calls):
             return {"kind": "wiki_lookup", "llm_trace": list(self._active_llm_trace)}
         if parsed.get("tool_call") == "wiki_lookup":
             return {"kind": "wiki_lookup", "llm_trace": list(self._active_llm_trace)}
@@ -148,25 +148,16 @@ class DirectLLMService:
         return value
 
     @staticmethod
-    def _native_call_requests_wiki_lookup(call: object) -> bool:
-        if not isinstance(call, dict):
-            return False
-        function = call.get("function")
-        if not isinstance(function, dict):
-            return False
-        function_name = function.get("name")
-        if function_name == "wiki_lookup" or (isinstance(function_name, str) and function_name.startswith("wiki_lookup:")):
-            return True
-        # Some OpenAI-compatible providers corrupt the function name while
-        # preserving the JSON arguments.  The only registered tool in this
-        # turn is wiki_lookup, and the declared argument is an explicit
-        # tool-call envelope, so accept that malformed native representation.
-        raw_arguments = function.get("arguments")
-        try:
-            arguments = json.loads(raw_arguments) if isinstance(raw_arguments, str) else raw_arguments
-        except json.JSONDecodeError:
-            return False
-        return isinstance(arguments, dict) and arguments.get("tool_call") == "wiki_lookup"
+    def _native_call_is_single_registered_tool(call: object) -> bool:
+        """Accept a provider-native tool-call object for this one-tool turn.
+
+        `begin_turn` exposes exactly one native capability: `wiki_lookup`.
+        Therefore a structurally recognizable native function call is evidence
+        that the model chose the tool, even when an OpenAI-compatible provider
+        corrupts its function name, arguments, or serializes answer text into
+        those fields. Do not apply this rule to a multi-tool turn.
+        """
+        return isinstance(call, dict) and isinstance(call.get("function"), dict)
 
     def _invalid_begin_turn(self, reason: str) -> dict[str, Any]:
         return {
