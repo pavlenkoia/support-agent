@@ -63,7 +63,7 @@ def test_begin_turn_requests_wiki_as_the_only_factual_source() -> None:
     assert "wiki_lookup — единственный источник бизнес-фактов из Wiki." in prompt
     assert "Вызови wiki_lookup для каждого клиентского сообщения" in prompt
     assert "Не возвращай клиентский текст, route, clarification_requested, cannot_answer или out_of_scope до wiki_lookup." in prompt
-    assert client.calls[0]["tool_choice"] == "required"
+    assert client.calls[0]["tool_choice"] == {"type": "function", "function": {"name": "wiki_lookup"}}
     assert client.calls[0]["tools"][0]["function"]["name"] == "wiki_lookup"
 
 

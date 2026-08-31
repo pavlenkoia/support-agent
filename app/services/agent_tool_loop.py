@@ -19,45 +19,21 @@ class UnifiedTurnService:
         self.wiki_lookup = wiki_lookup
 
     def run(self, *, text: str, context: dict) -> dict[str, Any]:
-        turn = self.model.begin_turn(text=text, context=context)
-        llm_trace = [item for item in turn.get("llm_trace", []) if isinstance(item, dict)] if isinstance(turn, dict) else []
-        kind = str(turn.get("kind") or "") if isinstance(turn, dict) else ""
-        if kind == "final":
-            result = turn.get("result")
-            if isinstance(result, dict):
-                return {
-                    "kb_result": {},
-                    "final_result": result,
-                    "trace": {"actions": ["final_response"]},
-                    "tool_observations": [],
-                    "llm_trace": llm_trace,
-                }
-        if kind == "wiki_lookup":
-            wiki_result = self.wiki_lookup.lookup(text=text, context=context)
-            kb_trace = (wiki_result.get("trace") or {}).get("llm_trace", []) if isinstance(wiki_result, dict) else []
-            llm_trace.extend(item for item in kb_trace if isinstance(item, dict))
-            return {
-                "kb_result": wiki_result,
-                "trace": {"actions": ["wiki_lookup"]},
-                "tool_observations": [{
-                    "tool": "wiki_lookup",
-                    "status": str(wiki_result.get("grounding_status") or "not_found"),
-                    "source_refs": self._source_refs(wiki_result),
-                    "grounded_facts": list(wiki_result.get("grounded_facts") or []),
-                }],
-                "llm_trace": llm_trace,
-            }
+        # Wiki is mandatory for every customer turn.  There is no semantic
+        # application router: the runtime always executes the same bounded
+        # factual tool before the sole customer-facing finalization call.
+        wiki_result = self.wiki_lookup.lookup(text=text, context=context)
+        kb_trace = (wiki_result.get("trace") or {}).get("llm_trace", []) if isinstance(wiki_result, dict) else []
         return {
-            "kb_result": {},
-            "final_result": {
-                "route": "retry_pending",
-                "response_text": "",
-                "confidence": 0.0,
-                "reason": "unified_turn_invalid",
-            },
-            "trace": {"actions": ["invalid_turn"]},
-            "tool_observations": [],
-            "llm_trace": llm_trace,
+            "kb_result": wiki_result,
+            "trace": {"actions": ["wiki_lookup"]},
+            "tool_observations": [{
+                "tool": "wiki_lookup",
+                "status": str(wiki_result.get("grounding_status") or "not_found"),
+                "source_refs": self._source_refs(wiki_result),
+                "grounded_facts": list(wiki_result.get("grounded_facts") or []),
+            }],
+            "llm_trace": [item for item in kb_trace if isinstance(item, dict)],
         }
 
     @staticmethod

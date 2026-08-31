@@ -105,7 +105,7 @@ class DirectLLMService:
                         },
                     }
                 ],
-                tool_choice="required",
+                tool_choice={"type": "function", "function": {"name": "wiki_lookup"}},
             )
             self._record_llm_call("customer_turn")
             parsed = json.loads(raw)
