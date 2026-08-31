@@ -103,7 +103,7 @@ class FakeDirectLLMService:
 
     def begin_turn(self, *, text: str, context: dict) -> dict:
         self.calls.append({"method": "begin_turn", "text": text, "context": context})
-        return {"kind": "wiki_lookup", "llm_trace": []}
+        return {"kind": "wiki_lookup", "tool_request": {"query": text, "context_scope": "current customer subject", "needed_fact": "confirmed answer"}, "llm_trace": []}
 
     def respond(
         self,

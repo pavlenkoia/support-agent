@@ -4,7 +4,7 @@ from typing import Any, Protocol
 
 
 class WikiLookup(Protocol):
-    def lookup(self, *, text: str, context: dict) -> dict[str, Any]: ...
+    def lookup(self, *, text: str, context: dict, tool_request: dict[str, str]) -> dict[str, Any]: ...
 
 
 class UnifiedTurnModel(Protocol):
@@ -33,7 +33,10 @@ class UnifiedTurnService:
                     "llm_trace": llm_trace,
                 }
         if kind == "wiki_lookup":
-            wiki_result = self.wiki_lookup.lookup(text=text, context=context)
+            tool_request = turn.get("tool_request")
+            if not isinstance(tool_request, dict):
+                return self._invalid_tool_request(llm_trace)
+            wiki_result = self.wiki_lookup.lookup(text=text, context=context, tool_request=tool_request)
             kb_trace = (wiki_result.get("trace") or {}).get("llm_trace", []) if isinstance(wiki_result, dict) else []
             llm_trace.extend(item for item in kb_trace if isinstance(item, dict))
             return {
@@ -61,6 +64,16 @@ class UnifiedTurnService:
         }
 
     @staticmethod
+    def _invalid_tool_request(llm_trace: list[dict]) -> dict[str, Any]:
+        return {
+            "kb_result": {},
+            "final_result": {"route": "retry_pending", "response_text": "", "confidence": 0.0, "reason": "tool_request_invalid"},
+            "trace": {"actions": ["invalid_tool_request"]},
+            "tool_observations": [],
+            "llm_trace": llm_trace,
+        }
+
+    @staticmethod
     def _source_refs(value: dict[str, Any]) -> list[str]:
         refs = value.get("source_refs") if isinstance(value, dict) else []
         return [str(ref) for ref in refs if str(ref).strip()] if isinstance(refs, list) else []
@@ -75,18 +88,21 @@ class WikiLookupTool:
         self.knowledge_backend = knowledge_backend
         self.knowledge_root = knowledge_root
 
-    def lookup(self, *, text: str, context: dict) -> dict[str, Any]:
+    def lookup(self, *, text: str, context: dict, tool_request: dict[str, str]) -> dict[str, Any]:
+        query = tool_request["query"]
+        scoped_context = dict(context)
+        scoped_context["tool_request"] = dict(tool_request)
         retrieval = self.retrieval.retrieve(
-            text,
+            query,
             self.knowledge_backend,
             self.knowledge_root,
-            current_query=text,
+            current_query=query,
         )
         if retrieval.get("kb_architecture") != "llm_wiki" or retrieval.get("kb_mode") != "llm_wiki_catalog":
             return {"grounding_status": "not_found", "source_refs": [], "reason": "invalid_llm_wiki_catalog"}
         return self.kb_agent.read(
-            text,
+            query,
             retrieval.get("kb_snippets", []),
-            conversation_context=context,
+            conversation_context=scoped_context,
             require_coverage_review=True,
         )

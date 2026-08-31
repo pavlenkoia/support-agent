@@ -49,7 +49,7 @@ def test_stub_provider_returns_retry_pending_without_customer_template(monkeypat
 
 
 def test_begin_turn_requests_wiki_as_the_only_factual_source() -> None:
-    client = ActionClient('{"tool_call":"wiki_lookup"}')
+    client = ActionClient('{"tool_call":"wiki_lookup","arguments":{"query":"вопрос о чате","context_scope":"текущий вопрос","needed_fact":"способ решения"}}')
     service = DirectLLMService(client=client, prompt_service=PromptService())
 
     result = service.begin_turn(
@@ -73,7 +73,7 @@ def test_begin_turn_requests_wiki_as_the_only_factual_source() -> None:
 
 def test_begin_turn_accepts_provider_native_tool_call_with_valid_arguments() -> None:
     client = ActionClient(
-        '{"_native_tool_calls":[{"function":{"name":"provider-corrupted-name","arguments":"{\\\"tool_call\\\":\\\"wiki_lookup\\\"}"}}]}'
+        '{"_native_tool_calls":[{"function":{"name":"wiki_lookup","arguments":"{\\\"query\\\":\\\"вопрос\\\",\\\"context_scope\\\":\\\"контекст\\\",\\\"needed_fact\\\":\\\"факт\\\"}"}}]}'
     )
     service = DirectLLMService(client=client, prompt_service=PromptService())
 
@@ -86,7 +86,7 @@ def test_begin_turn_accepts_provider_native_tool_call_with_valid_arguments() -> 
 
 def test_begin_turn_accepts_provider_tool_name_with_serialized_content_suffix_in_followup() -> None:
     client = ActionClient(
-        '{"_native_tool_calls":[{"function":{"name":"wiki_lookup:{\\\"type\\\":\\\"text\\\",\\\"text\\\":\\\"provider-content\\\"}","arguments":"{\\\"tool_call\\\":null,\\\"route\\\":\\\"social_reply\\\"}"}}]}'
+        '{"_native_tool_calls":[{"function":{"name":"wiki_lookup","arguments":"{\\\"query\\\":\\\"стоимость\\\",\\\"context_scope\\\":\\\"самостоятельный вариант\\\",\\\"needed_fact\\\":\\\"цена\\\"}"}}]}'
     )
     service = DirectLLMService(client=client, prompt_service=PromptService())
 
@@ -99,7 +99,7 @@ def test_begin_turn_accepts_provider_tool_name_with_serialized_content_suffix_in
 
 
     client = ActionClient(
-        '{"_native_tool_calls":[{"function":{"name":"wiki_lookup:{\\\"type\\\":\\\"text\\\",\\\"text\\\":\\\"provider-content\\\"}","arguments":"{\\\"tool_call\\\":null,\\\"route\\\":\\\"social_reply\\\"}"}}]}'
+        '{"_native_tool_calls":[{"function":{"name":"wiki_lookup","arguments":"{\\\"query\\\":\\\"стоимость\\\",\\\"context_scope\\\":\\\"самостоятельный вариант\\\",\\\"needed_fact\\\":\\\"цена\\\"}"}}]}'
     )
     service = DirectLLMService(client=client, prompt_service=PromptService())
 
@@ -123,7 +123,7 @@ def test_begin_turn_does_not_guess_an_unknown_malformed_native_tool() -> None:
 
 
 def test_begin_turn_parses_valid_tool_envelope_before_provider_trailing_junk() -> None:
-    client = ActionClient('{"tool_call":"wiki_lookup","reason":"need_confirmed_facts"}```json\\n{"tool_call":"wiki_lookup"}\\n```')
+    client = ActionClient('{"tool_call":"wiki_lookup","arguments":{"query":"вопрос","context_scope":"контекст","needed_fact":"факт"},"reason":"need_confirmed_facts"}```json\\n{"tool_call":"wiki_lookup"}\\n```')
     service = DirectLLMService(client=client, prompt_service=PromptService())
 
     result = service.begin_turn(text="Содержательный вопрос", context={"recent_messages": []})

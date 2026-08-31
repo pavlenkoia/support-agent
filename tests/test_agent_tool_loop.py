@@ -7,8 +7,8 @@ class RecordingWikiLookup:
     def __init__(self) -> None:
         self.calls: list[dict] = []
 
-    def lookup(self, *, text: str, context: dict) -> dict:
-        self.calls.append({"text": text, "context": context})
+    def lookup(self, *, text: str, context: dict, tool_request: dict[str, str]) -> dict:
+        self.calls.append({"text": text, "context": context, "tool_request": tool_request})
         return {
             "grounding_status": "ready",
             "grounded_facts": ["Запись на тандем доступна через форму."],
@@ -51,7 +51,7 @@ def test_unified_turn_runs_wiki_after_model_requests_its_tool() -> None:
     class TurnModel:
         def begin_turn(self, *, text: str, context: dict) -> dict:
             _ = (text, context)
-            return {"kind": "wiki_lookup", "llm_trace": [{"role": "direct_llm", "step": "customer_turn"}]}
+            return {"kind": "wiki_lookup", "tool_request": {"query": "запись", "context_scope": "тандем", "needed_fact": "канал"}, "llm_trace": [{"role": "direct_llm", "step": "customer_turn"}]}
 
     wiki = RecordingWikiLookup()
     turn = UnifiedTurnService(model=TurnModel(), wiki_lookup=wiki)
@@ -67,11 +67,11 @@ def test_unified_turn_keeps_wiki_llm_trace_for_operational_audit() -> None:
     class TurnModel:
         def begin_turn(self, *, text: str, context: dict) -> dict:
             _ = (text, context)
-            return {"kind": "wiki_lookup", "llm_trace": [{"role": "direct_llm", "step": "customer_turn"}]}
+            return {"kind": "wiki_lookup", "tool_request": {"query": "запись", "context_scope": "тандем", "needed_fact": "канал"}, "llm_trace": [{"role": "direct_llm", "step": "customer_turn"}]}
 
     class RetryingWikiLookup:
-        def lookup(self, *, text: str, context: dict) -> dict:
-            _ = (text, context)
+        def lookup(self, *, text: str, context: dict, tool_request: dict[str, str]) -> dict:
+            _ = (text, context, tool_request)
             return {
                 "grounding_status": "llm_unavailable",
                 "source_refs": [],
@@ -117,12 +117,16 @@ def test_wiki_lookup_tool_preserves_existing_catalog_reader_contract() -> None:
         knowledge_root="/tmp/wiki",
     )
 
-    result = tool.lookup(text="Как записаться?", context={"recent_messages": []})
+    result = tool.lookup(
+        text="Как записаться?",
+        context={"recent_messages": []},
+        tool_request={"query": "запись на самостоятельный прыжок", "context_scope": "самостоятельный прыжок", "needed_fact": "канал записи"},
+    )
 
     assert result["source_refs"] == ["compiled/concepts/booking.md"]
     assert reader.calls == [{
-        "text": "Как записаться?",
+        "text": "запись на самостоятельный прыжок",
         "hits": [{"source_ref": "index/catalog.json"}],
-        "conversation_context": {"recent_messages": []},
+        "conversation_context": {"recent_messages": [], "tool_request": {"query": "запись на самостоятельный прыжок", "context_scope": "самостоятельный прыжок", "needed_fact": "канал записи"}},
         "require_coverage_review": True,
     }]

@@ -70,9 +70,10 @@ class DirectLLMService:
         first_reply = not any(item.get("role") == "assistant" for item in conversation if isinstance(item, dict))
         user_prompt = json.dumps(
             {
-                "task": "Обработай текущий ход клиента. По умолчанию сначала вызывай wiki_lookup. Прямой нефактический ответ разрешён только для чистого `Спасибо`, `Ок`, приветствия или иной короткой социальной реплики, в которой нет запроса, вопроса, факта, предложения, проблемы, условия и продолжения ситуации. Любая реплика, где нужен факт об организации, её предложении, стоимости, сроке, порядке, контакте, действии, дате, результате или затруднении, требует wiki_lookup — включая фразу с приветствием. Сам не создавай клиентский ответ с фактами. Не отвечай клиенту вне JSON-конверта.",
+                "task": "Обработай текущий ход клиента. Чистую короткую социальную реплику без запроса можно завершить JSON-ответом. Для любой содержательной реплики сначала вызови native-инструмент wiki_lookup и передай в его arguments семантический query, контекстный scope выбранного клиентом предмета и нужный факт. Не создавай клиентский ответ с фактами до результата инструмента.",
                 "required_json_schema": {
-                    "tool_call": "wiki_lookup or null",
+                    "tool_call": "wiki_lookup or null; use only as compatibility fallback when native tool_calls are unavailable",
+                    "arguments": {"query": "string", "context_scope": "string", "needed_fact": "string"},
                     "route": "social_reply|cannot_answer|out_of_scope|clarification_requested when tool_call is null",
                     "response_text": "string when tool_call is null; must be absent when tool_call=wiki_lookup",
                     "confidence": "number 0..1 when tool_call is null",
@@ -105,7 +106,16 @@ class DirectLLMService:
                         "function": {
                             "name": "wiki_lookup",
                             "description": "Read the Wiki before any factual or situation-specific customer answer.",
-                            "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
+                            "parameters": {
+                                "type": "object",
+                                "required": ["query", "context_scope", "needed_fact"],
+                                "properties": {
+                                    "query": {"type": "string", "description": "Focused semantic query for the Wiki."},
+                                    "context_scope": {"type": "string", "description": "Selected subject or constraint inherited from the dialogue."},
+                                    "needed_fact": {"type": "string", "description": "Specific fact needed for this customer turn."},
+                                },
+                                "additionalProperties": False,
+                            },
                         },
                     }
                 ],
@@ -130,11 +140,14 @@ class DirectLLMService:
             return self._invalid_begin_turn("customer_turn_not_object")
         native_calls = parsed.get("_native_tool_calls")
         if isinstance(native_calls, list):
-            requested_tool = self._native_registered_tool_name(native_calls, registered_tools={"wiki_lookup"})
-            if requested_tool == "wiki_lookup":
-                return {"kind": "wiki_lookup", "llm_trace": list(self._active_llm_trace)}
+            tool_call = self._native_registered_tool_call(native_calls, registered_tools={"wiki_lookup"})
+            if tool_call is not None:
+                return {"kind": "wiki_lookup", "tool_request": tool_call["arguments"], "llm_trace": list(self._active_llm_trace)}
         if parsed.get("tool_call") == "wiki_lookup":
-            return {"kind": "wiki_lookup", "llm_trace": list(self._active_llm_trace)}
+            tool_request = self._validated_wiki_request(parsed.get("arguments"))
+            if tool_request is not None:
+                return {"kind": "wiki_lookup", "tool_request": tool_request, "llm_trace": list(self._active_llm_trace)}
+            return self._invalid_begin_turn("wiki_lookup_arguments_invalid")
         normalized = self._normalize_prompt_reply(parsed)
         if normalized["route"] not in {"social_reply", "cannot_answer", "out_of_scope", "clarification_requested"}:
             return self._invalid_begin_turn("customer_turn_requires_wiki")
@@ -150,14 +163,8 @@ class DirectLLMService:
         return value
 
     @staticmethod
-    def _native_registered_tool_name(calls: list[object], *, registered_tools: set[str]) -> str | None:
-        """Normalize a native call only when it identifies one registered tool.
-
-        A provider may append serialized content to a function name or retain
-        the requested name solely in JSON arguments.  With more than one tool,
-        arbitrary malformed native calls are intentionally *not* dispatched:
-        guessing a capability would change the model's action.
-        """
+    def _native_registered_tool_call(calls: list[object], *, registered_tools: set[str]) -> dict[str, Any] | None:
+        """Bind a native call to a registered tool and validate its arguments."""
         for call in calls:
             if not isinstance(call, dict):
                 continue
@@ -165,18 +172,25 @@ class DirectLLMService:
             if not isinstance(function, dict):
                 continue
             name = function.get("name")
-            if isinstance(name, str):
-                for tool_name in registered_tools:
-                    if name == tool_name or name.startswith(f"{tool_name}:"):
-                        return tool_name
+            if not isinstance(name, str) or name not in registered_tools:
+                continue
             raw_arguments = function.get("arguments")
             try:
                 arguments = json.loads(raw_arguments) if isinstance(raw_arguments, str) else raw_arguments
             except json.JSONDecodeError:
                 continue
-            if isinstance(arguments, dict) and arguments.get("tool_call") in registered_tools:
-                return str(arguments["tool_call"])
+            if name == "wiki_lookup":
+                request = DirectLLMService._validated_wiki_request(arguments)
+                if request is not None:
+                    return {"name": name, "arguments": request, "id": str(call.get("id") or "")}
         return None
+
+    @staticmethod
+    def _validated_wiki_request(arguments: object) -> dict[str, str] | None:
+        if not isinstance(arguments, dict) or set(arguments) != {"query", "context_scope", "needed_fact"}:
+            return None
+        request = {key: str(arguments.get(key) or "").strip() for key in ("query", "context_scope", "needed_fact")}
+        return request if all(request.values()) else None
 
     def _invalid_begin_turn(self, reason: str) -> dict[str, Any]:
         return {
