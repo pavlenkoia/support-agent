@@ -522,9 +522,9 @@ class KBAgentService:
             "Не дополняй выводы догадками и не отвечай в клиентском стиле.",
             "Явное общее правило из страницы можно считать подтверждённым для частного случая только когда его формулировка прямо охватывает все или остальные категории; процитируй это правило как факт и укажи страницу.",
             "answer_basis должен быть короткой служебной опорой для финального support-agent ответа.",
-            "Resolve short or elliptical follow-ups using only the explicit conversation_context; keep the current user message as the question and recover its subject from the recent dialogue instead of treating it as a standalone topic.",
-            "When the current user asks about other or remaining conditions, extract all relevant requirements present in the selected pages; do not return not_found merely because the subject appears only in conversation_context.",
-            "Keep the most recent explicit customer constraint or preference in conversation_context active for the current follow-up. Do not extract an excluded earlier alternative unless the current user asks to compare or changes that constraint.",
+            "Resolve short or elliptical follow-ups using only the explicit conversation_context and tool_request; recover the subject from the recent dialogue, but preserve tool_request.context_scope as the sole subject of this extraction.",
+            "For a scoped follow-up, extract every relevant requirement only for tool_request.context_scope. Do not add facts for neighboring, alternative, earlier, broader, or later subjects.",
+            "The most recent explicit customer constraint or preference is encoded in tool_request.context_scope. It is mandatory: excluded alternatives must not appear in grounded_facts or answer_basis unless the current user explicitly asks to compare or changes that constraint.",
             "If a selected page explicitly provides an authoritative source for a requested changing value, that source is direct sufficient evidence: return grounding_status=ready, include the exact source in answer_basis and grounded_facts, and do not classify it as not_found.",
             "A nonempty grounded_facts list with cited selected pages is evidence, not a reason to return not_found.",
         ]
