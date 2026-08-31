@@ -345,6 +345,15 @@ class KBAgentService:
             },
         }
 
+    @staticmethod
+    def _tool_request(conversation_context: dict | None) -> dict[str, str]:
+        if not isinstance(conversation_context, dict):
+            return {}
+        request = conversation_context.get("tool_request")
+        if not isinstance(request, dict):
+            return {}
+        return {key: str(request.get(key) or "").strip() for key in ("query", "context_scope", "needed_fact")}
+
     def _plan_navigation(
         self,
         text: str,
@@ -371,9 +380,12 @@ class KBAgentService:
                     "reason": "short string",
                 },
                 "user_message": text,
+                "tool_request": self._tool_request(conversation_context),
                 "conversation_context": conversation_context or {},
                 "rules": [
-                    "Сначала прочитай wiki index и page cards, а не полные страницы.",
+                    "Tool request is a binding scope contract selected by the customer-turn model, not advisory context.",
+                    "Choose pages only for tool_request.query and tool_request.needed_fact within tool_request.context_scope.",
+                    "Do not widen context_scope to a parent category and do not select pages solely for alternatives excluded by that scope.",
                     "Выбери минимально достаточный стартовый набор страниц для полного чтения.",
                     "Не выбирай больше 3 страниц на первом шаге.",
                     "Не отвечай на вопрос пользователя на этом шаге.",
@@ -437,12 +449,14 @@ class KBAgentService:
                     "reason": "short string",
                 },
                 "user_message": text,
+                "tool_request": self._tool_request(conversation_context),
                 "conversation_context": conversation_context or {},
                 "navigation_plan": navigation,
                 "selected_full_pages": loaded_pages,
                 "wiki_catalog": kb_context,
                 "rules": [
-                    "Запрашивай дополнительные страницы только если действительно не хватает критичного факта.",
+                    "Tool request is a binding scope contract selected by the customer-turn model, not advisory context.",
+                    "Assess coverage only for tool_request.needed_fact within tool_request.context_scope; do not request or retain material for excluded alternatives.",
                     "Проверь покрытие каждой самостоятельной практической части текущего сообщения; если выбранные страницы отвечают только на часть запроса, запроси страницы для остальных частей.",
                     "Не запрашивай больше 2 дополнительных страниц.",
                     "Если текущих страниц достаточно, верни coverage_status=enough.",
@@ -502,8 +516,9 @@ class KBAgentService:
         if not minimal_schema:
             required_json_schema["missing_information"] = ["facts that remain unknown"]
         rules = [
-            "Работай как KB agent, а не как клиентский консультант.",
-            "Извлекай только подтвержденные факты из предоставленных страниц wiki.",
+            "Tool request is a binding scope contract selected by the customer-turn model, not advisory context.",
+            "Extract facts only for tool_request.needed_fact within tool_request.context_scope. A fact about another variant or a parent category is out of scope unless the customer explicitly asks to compare or change the selected scope.",
+            "When the selected wiki page also contains excluded alternatives, omit those facts entirely from grounded_facts and answer_basis.",
             "Не дополняй выводы догадками и не отвечай в клиентском стиле.",
             "Явное общее правило из страницы можно считать подтверждённым для частного случая только когда его формулировка прямо охватывает все или остальные категории; процитируй это правило как факт и укажи страницу.",
             "answer_basis должен быть короткой служебной опорой для финального support-agent ответа.",
@@ -529,6 +544,7 @@ class KBAgentService:
                 "task": "Extract grounded facts from the selected wiki pages for the support agent.",
                 "required_json_schema": required_json_schema,
                 "user_message": text,
+                "tool_request": self._tool_request(conversation_context),
                 "conversation_context": conversation_context or {},
                 "kb_mode": answer_mode,
                 "rules": rules,
