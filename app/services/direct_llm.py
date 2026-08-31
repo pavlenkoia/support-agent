@@ -129,10 +129,7 @@ class DirectLLMService:
         if not isinstance(parsed, dict):
             return self._invalid_begin_turn("customer_turn_not_object")
         native_calls = parsed.get("_native_tool_calls")
-        if isinstance(native_calls, list) and any(
-            isinstance(call, dict) and isinstance(call.get("function"), dict) and call["function"].get("name") == "wiki_lookup"
-            for call in native_calls
-        ):
+        if isinstance(native_calls, list) and any(self._native_call_requests_wiki_lookup(call) for call in native_calls):
             return {"kind": "wiki_lookup", "llm_trace": list(self._active_llm_trace)}
         if parsed.get("tool_call") == "wiki_lookup":
             return {"kind": "wiki_lookup", "llm_trace": list(self._active_llm_trace)}
@@ -140,6 +137,26 @@ class DirectLLMService:
         if normalized["route"] not in {"social_reply", "cannot_answer", "out_of_scope", "clarification_requested"}:
             return self._invalid_begin_turn("customer_turn_requires_wiki")
         return {"kind": "final", "result": normalized, "llm_trace": list(self._active_llm_trace)}
+
+    @staticmethod
+    def _native_call_requests_wiki_lookup(call: object) -> bool:
+        if not isinstance(call, dict):
+            return False
+        function = call.get("function")
+        if not isinstance(function, dict):
+            return False
+        if function.get("name") == "wiki_lookup":
+            return True
+        # Some OpenAI-compatible providers corrupt the function name while
+        # preserving the JSON arguments.  The only registered tool in this
+        # turn is wiki_lookup, and the declared argument is an explicit
+        # tool-call envelope, so accept that malformed native representation.
+        raw_arguments = function.get("arguments")
+        try:
+            arguments = json.loads(raw_arguments) if isinstance(raw_arguments, str) else raw_arguments
+        except json.JSONDecodeError:
+            return False
+        return isinstance(arguments, dict) and arguments.get("tool_call") == "wiki_lookup"
 
     def _invalid_begin_turn(self, reason: str) -> dict[str, Any]:
         return {

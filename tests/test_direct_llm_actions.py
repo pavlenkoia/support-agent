@@ -68,6 +68,18 @@ def test_begin_turn_requests_wiki_as_the_only_factual_source() -> None:
     assert client.calls[0]["tools"][0]["function"]["name"] == "wiki_lookup"
 
 
+
+def test_begin_turn_accepts_provider_native_tool_call_with_valid_arguments() -> None:
+    client = ActionClient(
+        '{"_native_tool_calls":[{"function":{"name":"provider-corrupted-name","arguments":"{\\\"tool_call\\\":\\\"wiki_lookup\\\"}"}}]}'
+    )
+    service = DirectLLMService(client=client, prompt_service=PromptService())
+
+    result = service.begin_turn(text="Содержательный вопрос", context={"recent_messages": []})
+
+    assert result["kind"] == "wiki_lookup"
+
+
 def test_begin_turn_returns_ready_social_text_without_a_second_finalizer_call() -> None:
     client = ActionClient('{"tool_call":null,"route":"social_reply","response_text":"Пожалуйста!","confidence":1,"reason":"social"}')
     service = DirectLLMService(client=client, prompt_service=PromptService())
