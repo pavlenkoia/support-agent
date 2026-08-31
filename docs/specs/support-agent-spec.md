@@ -17,7 +17,7 @@ It is not a ticket router and not an escalation-first bot.
 3. Substantive KB reasoning must pass through a dedicated KB agent that reads the compiled wiki selectively rather than treating lexical snippets as the final reasoning surface.
 4. The customer-facing support agent and the KB agent must use separate external prompt files.
 5. The agent must not fabricate facts when KB/tool evidence is missing.
-6. A model-selected `social_reply` is reserved for a greeting, acknowledgement, thanks, or another turn that contains no request for an action, change, condition, fact, decision, or continuation of an earlier situation. A message that reports a problem, an unfulfilled expected result, waiting for a result, or a continuing difficulty is a substantive continuation and must select `wiki_lookup`, even without a question mark or explicit request. `social_reply` skips Wiki lookup and reaches the common finalizer with the explicit intent; the finalizer alone writes its short polite text, and a final-model failure remains textless `retry_pending`.
+6. One customer-facing model turn receives the native optional `wiki_lookup` tool. It may return a ready non-factual reply without calling the tool, or call Wiki before a factual/situation-specific answer; the application does not run a separate LLM classifier or semantic router. Wiki is the only business-fact source. Native `tool_choice=auto` intentionally leaves the model the option not to call Wiki, so that decision remains visible in the trace and is evaluated by literal no-send replays.
 7. A planner-approved `out_of_scope` is terminal only on the first customer turn. For a follow-up after an assistant reply, it must first attempt KB reading so a contextual post-service request cannot be discarded as unrelated.
 8. Every customer-visible terminal route passes through one output boundary: first replies begin with exactly one `Здравствуйте!`. The boundary normalizes formatting but never replaces a model-written customer reply with an application template; an invalid or missing final-model payload is `retry_pending` with empty customer text.
 9. If a substantive answer cannot be grounded, the final outcome must be `cannot_answer`.
@@ -41,15 +41,12 @@ It is not a ticket router and not an escalation-first bot.
 ## Decision loop
 
 Per inbound turn:
-1. select either the optional `wiki_lookup` or the terminal `social_reply` intent
-2. finalize a selected `social_reply` through the common finalizer without KB lookup only when the turn has no substantive request; the finalizer owns customer text and its failure remains fail-closed
-3. force a KB read before accepting `out_of_scope` on a contextual follow-up
-4. for substantive in-domain turns, assess the next action
-5. gather runtime tool observations when needed and run semantic Wiki navigation for substantive domain facts
-6. never answer a substantive business question from the system prompt
-7. run the dedicated KB agent over the compiled wiki material already gathered when KB is needed
-8. finalize through the customer-output boundary with only the relevant evidence
-9. emit one of the allowed outcomes
+1. run one customer-facing model turn with the native optional `wiki_lookup` tool
+2. if the model returns a final non-factual reply, deliver that model text through the common output boundary; no second finalizer/model call is made
+3. if the model calls Wiki, read the selected material through the KB agent and pass only ready evidence to the common finalizer
+4. force a KB read before accepting `out_of_scope` on a contextual follow-up
+5. never answer a substantive business question from the system prompt
+6. emit one of the allowed outcomes
 
 ## Tool-aware reasoning
 

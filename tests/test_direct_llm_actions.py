@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from app.services import direct_llm as direct_llm_module
-from app.services.agent_tool_loop import DirectLLMActionAgent
 from app.services.direct_llm import DirectLLMService
 
 
@@ -48,58 +47,36 @@ def test_stub_provider_returns_retry_pending_without_customer_template(monkeypat
     assert result["response_text"] == ""
 
 
-def test_next_action_returns_provider_neutral_wiki_tool_call() -> None:
-    client = ActionClient('{"action":"wiki_lookup","arguments":{},"reason":"нужны факты"}')
+
+def test_begin_turn_requests_wiki_as_the_only_factual_source() -> None:
+    client = ActionClient('{"tool_call":"wiki_lookup"}')
     service = DirectLLMService(client=client, prompt_service=PromptService())
 
-    action = service.next_action(
+    result = service.begin_turn(
         text="Здравствуйте, так и не добавили в чат",
         context={"recent_messages": []},
-        tool_observations=[],
-        allowed_actions=["wiki_lookup", "finish"],
-        iteration=1,
     )
 
-    assert action["action"] == "wiki_lookup"
-    assert action["arguments"] == {}
-    assert action["reason"] == "нужны факты"
-    assert action["llm_trace"][0]["step"] == "agent_next_action"
-    assert client.calls[0]["response_format"] == {"type": "json_object"}
-    assert "wiki_lookup" in str(client.calls[0]["user_prompt"])
-    assert "Сообщение о проблеме, невыполненном ожидаемом результате, ожидании результата или сохранении затруднения — это продолжение ситуации и требует wiki_lookup, даже без вопросительного знака или явной просьбы." in str(client.calls[0]["user_prompt"])
+    assert result["kind"] == "wiki_lookup"
+    assert "response_text" not in result
+    prompt = str(client.calls[0]["user_prompt"])
+    assert "wiki_lookup — единственный источник бизнес-фактов из Wiki." in prompt
+    assert "Не возвращай клиентский текст вместе с tool_call=wiki_lookup." in prompt
+    assert "Не возвращай clarification_requested, cannot_answer или out_of_scope до wiki_lookup для содержательной реплики." in prompt
+    assert client.calls[0]["tool_choice"] == "auto"
+    assert client.calls[0]["tools"][0]["function"]["name"] == "wiki_lookup"
 
 
-def test_next_action_does_not_allow_nested_arguments_to_replace_action_envelope() -> None:
-    client = ActionClient('{"action":"wiki_lookup","arguments":{"action":"finish","reason":"nested"},"reason":"authoritative"}')
-    service = DirectLLMService(client=client, prompt_service=PromptService())
-    agent = DirectLLMActionAgent(service)
-
-    action = agent.next_action(
-        text="Как записаться?",
-        context={"recent_messages": []},
-        tool_observations=[],
-        allowed_actions=["wiki_lookup", "finish"],
-        iteration=1,
-    )
-
-    assert action["action"] == "wiki_lookup"
-    assert action["reason"] == "authoritative"
-    assert action["arguments"] == {"action": "finish", "reason": "nested"}
-
-
-def test_social_finalization_keeps_model_text_but_uses_social_route() -> None:
-    client = ActionClient('{"route":"cannot_answer","response_text":"Пожалуйста!","confidence":1,"reason":"model_misclassified_social"}')
+def test_begin_turn_returns_ready_social_text_without_a_second_finalizer_call() -> None:
+    client = ActionClient('{"tool_call":null,"route":"social_reply","response_text":"Пожалуйста!","confidence":1,"reason":"social"}')
     service = DirectLLMService(client=client, prompt_service=PromptService())
 
-    result = service.respond(
-        "Спасибо",
-        {"grounding_status": "not_found"},
-        knowledge_mode="prompt_only",
-        response_intent="social_reply",
-    )
+    result = service.begin_turn(text="Спасибо", context={"recent_messages": []})
 
-    assert result["route"] == "social_reply"
-    assert result["response_text"] == "Пожалуйста!"
+    assert result["kind"] == "final"
+    assert result["result"]["route"] == "social_reply"
+    assert result["result"]["response_text"] == "Здравствуйте! Пожалуйста!"
+    assert result["llm_trace"][0]["step"] == "customer_turn"
 
 
 def test_finalizer_prompt_requires_natural_grammatical_russian() -> None:

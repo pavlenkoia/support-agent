@@ -8,11 +8,7 @@ from app.core.config import settings
 from app.core.db import SessionLocal
 from app.models.case import SupportCase
 from app.schemas.message import InboundMessage
-from app.services.agent_tool_loop import (
-    AgentLoopService,
-    DirectLLMActionAgent,
-    WikiLookupTool,
-)
+from app.services.agent_tool_loop import UnifiedTurnService, WikiLookupTool
 from app.services.audit import build_audit_event
 from app.services.case_resolution import reset_conversation_session, resolve_case
 from app.services.context_builder import build_context
@@ -43,7 +39,7 @@ class RoutingService:
         summary_service: SummaryService | None = None,
         policy: PolicyService | None = None,
         tool_runtime: ToolRuntimeService | None = None,
-        agent_loop: AgentLoopService | None = None,
+        turn_service: UnifiedTurnService | None = None,
         answer_engine_mode: str | None = None,
     ) -> None:
         self.session_factory = session_factory
@@ -59,8 +55,8 @@ class RoutingService:
         self.answer_engine_mode = answer_engine_mode or settings.answer_engine_mode
         if self.answer_engine_mode != "agent_tool_loop":
             raise ValueError(f"unsupported answer engine: {self.answer_engine_mode}")
-        self.agent_loop = agent_loop or AgentLoopService(
-            agent=DirectLLMActionAgent(self.direct_llm),
+        self.turn_service = turn_service or UnifiedTurnService(
+            model=self.direct_llm,
             wiki_lookup=WikiLookupTool(
                 retrieval=self.retrieval,
                 kb_agent=self.kb_agent,
@@ -101,13 +97,12 @@ class RoutingService:
 
 
     def _handle_agent_tool_loop_inbound(self, session, case: dict, payload: InboundMessage) -> dict:
-        if self.agent_loop is None:
-            raise RuntimeError("agent tool loop is not configured")
         context = build_context(session, payload, case, summary_service=self.summary_service)
-        loop_result = self.agent_loop.run(text=payload.text, context=context)
+        loop_result = self.turn_service.run(text=payload.text, context=context)
         raw_kb_result = loop_result.get("kb_result")
         kb_result: dict[str, Any] = raw_kb_result if isinstance(raw_kb_result, dict) else {}
-        terminal_intent = str(loop_result.get("terminal_intent") or "").strip()
+        raw_final_result = loop_result.get("final_result")
+        precomputed_final = raw_final_result if isinstance(raw_final_result, dict) else None
         tool_observations = list(loop_result.get("tool_observations") or [])
         technical_kb_failure = kb_result.get("grounding_status") in {"llm_unavailable", "retry_pending"}
         grounded = kb_result.get("grounding_status") == "ready"
@@ -117,7 +112,9 @@ class RoutingService:
         # boundary with factual content.
         finalization_has_evidence = grounded
         first_reply = not any(item.get("role") == "assistant" for item in context.get("recent_messages", []) if isinstance(item, dict))
-        if technical_kb_failure:
+        if precomputed_final is not None:
+            final_result = precomputed_final
+        elif technical_kb_failure:
             final_result = {
                 "route": "retry_pending",
                 "response_text": "",
@@ -126,7 +123,7 @@ class RoutingService:
                 "llm_trace": [],
             }
         else:
-            policy_evidence = [] if finalization_has_evidence or terminal_intent == "social_reply" else self.policy.no_answer_policy_evidence()
+            policy_evidence = [] if finalization_has_evidence else self.policy.no_answer_policy_evidence()
             if policy_evidence:
                 tool_observations.extend(
                     {"kind": "profile_no_answer_option", "summary": item["text"], "source_ref": item["source_ref"]}
@@ -144,11 +141,7 @@ class RoutingService:
                 conversation_context=context,
                 tool_observations=tool_observations,
                 first_reply_in_dialogue=first_reply,
-                response_intent=(
-                    "answer" if finalization_has_evidence
-                    else "social_reply" if terminal_intent == "social_reply"
-                    else "missing_grounding"
-                ),
+                response_intent="answer" if finalization_has_evidence else "missing_grounding",
             )
         final_route = str(final_result.get("route") or "cannot_answer")
         route_name = "answer" if final_route == "social_reply" else final_route

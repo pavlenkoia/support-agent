@@ -196,6 +196,8 @@ class OpenAICompatibleClient(BaseLLMClient):
         user_prompt: str,
         temperature: float = 0.0,
         response_format: dict[str, Any] | None = None,
+        tools: list[dict[str, Any]] | None = None,
+        tool_choice: str | dict[str, Any] | None = None,
     ) -> str:
         started = time.perf_counter()
         deadline = started + self.retry_deadline_seconds if self.retry_deadline_seconds is not None else None
@@ -211,6 +213,10 @@ class OpenAICompatibleClient(BaseLLMClient):
         }
         if response_format is not None:
             payload["response_format"] = response_format
+        if tools:
+            payload["tools"] = tools
+        if tool_choice is not None:
+            payload["tool_choice"] = tool_choice
 
         total_attempts = 0
         key_indexes = self._available_key_indexes()
@@ -379,7 +385,10 @@ class OpenAICompatibleClient(BaseLLMClient):
             raise last_error or RuntimeError("LLM request failed")
 
         try:
-            return data["choices"][0]["message"]["content"]
+            message = data["choices"][0]["message"]
+            if isinstance(message, dict) and isinstance(message.get("tool_calls"), list):
+                return json.dumps({"_native_tool_calls": message["tool_calls"]}, ensure_ascii=False)
+            return message["content"]
         except (KeyError, IndexError, TypeError) as exc:  # pragma: no cover - malformed response path
             raise RuntimeError(f"Malformed LLM response: {data}") from exc
 
@@ -396,8 +405,10 @@ class StubLLMClient(BaseLLMClient):
         user_prompt: str,
         temperature: float = 0.0,
         response_format: dict[str, Any] | None = None,
+        tools: list[dict[str, Any]] | None = None,
+        tool_choice: str | dict[str, Any] | None = None,
     ) -> str:
-        _ = (system_prompt, temperature, response_format)
+        _ = (system_prompt, temperature, response_format, tools, tool_choice)
         self._set_last_call_info(
             {
                 "provider": self.provider,

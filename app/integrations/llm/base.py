@@ -16,5 +16,7 @@ class BaseLLMClient:
         user_prompt: str,
         temperature: float = 0.0,
         response_format: dict[str, Any] | None = None,
+        tools: list[dict[str, Any]] | None = None,
+        tool_choice: str | dict[str, Any] | None = None,
     ) -> str:  # pragma: no cover - interface stub
         raise NotImplementedError

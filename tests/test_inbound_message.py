@@ -101,9 +101,9 @@ class FakeDirectLLMService:
     def __init__(self) -> None:
         self.calls: list[dict] = []
 
-    def next_action(self, **kwargs) -> dict:
-        self.calls.append({"method": "next_action", **kwargs})
-        return {"action": "wiki_lookup", "arguments": {}, "reason": "test_lookup", "llm_trace": []}
+    def begin_turn(self, *, text: str, context: dict) -> dict:
+        self.calls.append({"method": "begin_turn", "text": text, "context": context})
+        return {"kind": "wiki_lookup", "llm_trace": []}
 
     def respond(
         self,

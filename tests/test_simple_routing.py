@@ -160,8 +160,13 @@ def test_agent_tool_loop_routes_social_reply_without_legacy_kb_dependencies(tmp_
     loop = RecordingAgentLoop(
         {
             "kb_result": {},
-            "terminal_intent": "social_reply",
-            "trace": {"actions": ["social_reply"]},
+            "final_result": {
+                "route": "social_reply",
+                "response_text": "Пожалуйста!",
+                "confidence": 1.0,
+                "reason": "social_reply",
+            },
+            "trace": {"actions": ["final_response"]},
             "llm_trace": [{"usage": {"total_tokens": 17}, "attempts": 2}],
             "tool_observations": [],
         }
@@ -170,7 +175,7 @@ def test_agent_tool_loop_routes_social_reply_without_legacy_kb_dependencies(tmp_
     routing = RoutingService(
         session_factory=session_factory,
         answer_engine_mode="agent_tool_loop",
-        agent_loop=loop,
+        turn_service=loop,
         kb_agent=ForbiddenLegacyDependency(),
         direct_llm=finalizer,
         retrieval=ForbiddenLegacyDependency(),
@@ -184,11 +189,10 @@ def test_agent_tool_loop_routes_social_reply_without_legacy_kb_dependencies(tmp_
     assert result["route"]["route"] == "answer"
     assert result["outcome"]["outcome_payload"]["response_text"] == "Здравствуйте! Пожалуйста!"
     assert loop.calls[0]["text"] == "Спасибо"
-    assert result["audit"]["agent_actions"] == ["social_reply"]
-    assert result["audit"]["logical_llm_call_count"] == 2
-    assert result["audit"]["provider_attempt_count"] == 3
-    assert finalizer.calls[0]["knowledge_mode"] == "prompt_only"
-    assert finalizer.calls[0]["response_intent"] == "social_reply"
+    assert result["audit"]["agent_actions"] == ["final_response"]
+    assert result["audit"]["logical_llm_call_count"] == 1
+    assert result["audit"]["provider_attempt_count"] == 2
+    assert finalizer.calls == []
 
 
 def test_agent_tool_loop_audits_actual_wiki_lookup_status(tmp_path: Path) -> None:
@@ -202,7 +206,7 @@ def test_agent_tool_loop_audits_actual_wiki_lookup_status(tmp_path: Path) -> Non
         }
     )
     finalizer = RecordingGroundedFinalizer(route="cannot_answer", response_text="Сейчас не могу дать точный ответ на этот вопрос.")
-    routing = RoutingService(session_factory=session_factory, answer_engine_mode="agent_tool_loop", agent_loop=loop, direct_llm=finalizer)
+    routing = RoutingService(session_factory=session_factory, answer_engine_mode="agent_tool_loop", turn_service=loop, direct_llm=finalizer)
 
     result = routing.handle_inbound(
         InboundMessage(channel="internal_test", external_user_id="igor", external_chat_id="igor", text="Какая гарантия?")
@@ -229,7 +233,7 @@ def test_agent_tool_loop_never_passes_nonready_extraction_to_finalizer(tmp_path:
         }
     )
     finalizer = RecordingGroundedFinalizer(response_text="Условия записи указаны в закреплённом посте на эту дату.")
-    routing = RoutingService(session_factory=session_factory, answer_engine_mode="agent_tool_loop", agent_loop=loop, direct_llm=finalizer)
+    routing = RoutingService(session_factory=session_factory, answer_engine_mode="agent_tool_loop", turn_service=loop, direct_llm=finalizer)
 
     routing.handle_inbound(
         InboundMessage(channel="internal_test", external_user_id="igor", external_chat_id="igor", text="Записаться можно на 29?")
@@ -258,7 +262,7 @@ def test_agent_tool_loop_wiki_outage_schedules_retry_without_customer_text(tmp_p
     routing = RoutingService(
         session_factory=session_factory,
         answer_engine_mode="agent_tool_loop",
-        agent_loop=loop,
+        turn_service=loop,
         direct_llm=finalizer,
     )
 
