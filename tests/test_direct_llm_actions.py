@@ -62,7 +62,8 @@ def test_begin_turn_requests_wiki_as_the_only_factual_source() -> None:
     prompt = str(client.calls[0]["user_prompt"])
     assert "wiki_lookup — единственный источник бизнес-фактов из Wiki." in prompt
     assert "По умолчанию вызывай wiki_lookup" in prompt
-    assert "факт об организации, её предложении, стоимости, сроке" in prompt
+    assert "Решение до инструментов" in prompt
+    assert "need_confirmed_facts" in prompt
     assert client.calls[0]["tool_choice"] == "auto"
     assert client.calls[0]["tools"][0]["function"]["name"] == "wiki_lookup"
 
