@@ -98,12 +98,14 @@ class RoutingService:
 
     def _handle_agent_tool_loop_inbound(self, session, case: dict, payload: InboundMessage) -> dict:
         context = build_context(session, payload, case, summary_service=self.summary_service)
+        calendar = self.tool_runtime.collect(text=payload.text, kb_hits=[], conversation_context=context)
+        runtime_observations = list(calendar.get("tool_results") or [])
         loop_result = self.turn_service.run(text=payload.text, context=context)
         raw_kb_result = loop_result.get("kb_result")
         kb_result: dict[str, Any] = raw_kb_result if isinstance(raw_kb_result, dict) else {}
         raw_final_result = loop_result.get("final_result")
         precomputed_final = raw_final_result if isinstance(raw_final_result, dict) else None
-        tool_observations = list(loop_result.get("tool_observations") or [])
+        tool_observations = runtime_observations + list(loop_result.get("tool_observations") or [])
         technical_kb_failure = kb_result.get("grounding_status") in {"llm_unavailable", "retry_pending"}
         grounded = kb_result.get("grounding_status") == "ready"
         # `grounded_facts` is an internal extraction product.  It may explain
@@ -155,7 +157,7 @@ class RoutingService:
             )
         source_refs = [str(ref) for ref in kb_result.get("source_refs", []) if str(ref)] if grounded else []
         actions = list((loop_result.get("trace") or {}).get("actions") or [])
-        tool_observations = list(loop_result.get("tool_observations") or [])
+        tool_observations = runtime_observations + list(loop_result.get("tool_observations") or [])
         wiki_observations = [
             item for item in tool_observations
             if isinstance(item, dict) and item.get("tool") == "wiki_lookup"

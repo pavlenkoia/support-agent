@@ -20,10 +20,10 @@ def test_canonical_profile_source_has_no_prompt_facts_or_wiki_scenarios() -> Non
     validate_profile_source(SOURCE)
 
 
-def test_canonical_profile_does_not_require_missing_evidence_refusal() -> None:
+def test_canonical_profile_requires_profile_backed_next_step_when_evidence_is_missing() -> None:
     prompt = SOURCE.joinpath("SYSTEM_PROMPT.md").read_text(encoding="utf-8")
-    assert "не превращай отсутствие evidence в отказную формулу" in prompt
-    assert "надёжного ответа нет" not in prompt
+    assert "Используй только переданную profile-backed policy evidence" in prompt
+    assert "не превращай отсутствие evidence в отказную формулу" not in prompt
 
 
 def test_profile_declares_no_answer_contact_evidence_without_customer_template() -> None:
