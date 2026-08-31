@@ -75,7 +75,7 @@ def test_begin_turn_returns_ready_social_text_without_a_second_finalizer_call() 
 
     assert result["kind"] == "final"
     assert result["result"]["route"] == "social_reply"
-    assert result["result"]["response_text"] == "Здравствуйте! Пожалуйста!"
+    assert result["result"]["response_text"] == "Пожалуйста!"
     assert result["llm_trace"][0]["step"] == "customer_turn"
 
 

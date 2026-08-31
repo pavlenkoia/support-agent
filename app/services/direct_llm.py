@@ -137,10 +137,6 @@ class DirectLLMService:
         normalized = self._normalize_prompt_reply(parsed)
         if normalized["route"] not in {"social_reply", "cannot_answer", "out_of_scope", "clarification_requested"}:
             return self._invalid_begin_turn("customer_turn_requires_wiki")
-        normalized["response_text"] = self._prepend_standard_greeting_if_missing(
-            normalized["response_text"],
-            first_reply_in_dialogue=first_reply,
-        )
         return {"kind": "final", "result": normalized, "llm_trace": list(self._active_llm_trace)}
 
     def _invalid_begin_turn(self, reason: str) -> dict[str, Any]:
@@ -260,10 +256,6 @@ class DirectLLMService:
         normalized = self._normalize_prompt_reply(parsed)
         if response_intent == "social_reply" and normalized["route"] != "retry_pending":
             normalized["route"] = "social_reply"
-        normalized["response_text"] = self._prepend_standard_greeting_if_missing(
-            normalized["response_text"],
-            first_reply_in_dialogue=first_reply_in_dialogue,
-        )
         normalized["llm_trace"] = list(self._active_llm_trace)
         return normalized
 

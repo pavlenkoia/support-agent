@@ -351,7 +351,7 @@ def test_routing_keeps_same_case_within_two_hours_on_same_local_day(tmp_path: Pa
 
 
 
-def test_direct_llm_adds_standard_greeting_to_first_body_only_reply(tmp_path: Path) -> None:
+def test_direct_llm_leaves_first_reply_greeting_to_output_boundary(tmp_path: Path) -> None:
     class BodyOnlyClient:
         def generate(self, **kwargs):
             return json.dumps(
@@ -374,7 +374,7 @@ def test_direct_llm_adds_standard_greeting_to_first_body_only_reply(tmp_path: Pa
         first_reply_in_dialogue=True,
     )
 
-    assert result["response_text"] == "Здравствуйте! Все актуальные цены доступны по ссылке https://vk.cc/cYzS5j."
+    assert result["response_text"] == "Все актуальные цены доступны по ссылке https://vk.cc/cYzS5j."
 
 
 def test_direct_llm_does_not_duplicate_recognised_model_greeting_on_first_reply(tmp_path: Path) -> None:
@@ -432,7 +432,7 @@ def test_direct_llm_keeps_model_answer_without_forced_greeting_in_any_dialogue_t
         first_reply_in_dialogue=False,
     )
 
-    assert first["response_text"] == "Здравствуйте! Все актуальные цены доступны по ссылке https://vk.cc/cYzS5j."
+    assert first["response_text"] == "Все актуальные цены доступны по ссылке https://vk.cc/cYzS5j."
     assert followup["response_text"] == "Все актуальные цены доступны по ссылке https://vk.cc/cYzS5j."
 
 
