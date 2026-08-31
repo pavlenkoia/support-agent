@@ -17,7 +17,7 @@ It is not a ticket router and not an escalation-first bot.
 3. Substantive KB reasoning must pass through a dedicated KB agent that reads the compiled wiki selectively rather than treating lexical snippets as the final reasoning surface.
 4. The customer-facing support agent and the KB agent must use separate external prompt files.
 5. The agent must not fabricate facts when KB/tool evidence is missing.
-6. One customer-facing model turn receives the native optional `wiki_lookup` tool. It may return a ready non-factual reply without calling the tool, or call Wiki before a factual/situation-specific answer; the application does not run a separate LLM classifier or semantic router. Wiki is the only business-fact source. Native `tool_choice=auto` intentionally leaves the model the option not to call Wiki, so that decision remains visible in the trace and is evaluated by literal no-send replays.
+6. One customer-facing model turn receives the native optional `wiki_lookup` tool. It may return a ready non-factual reply only for a pure short social turn without a request or customer situation. For every substantive turn, the system prompt requires `wiki_lookup` before customer facts, procedures, contacts, promises, domain clarification, `cannot_answer`, or `out_of_scope`; the application does not run a separate LLM classifier, semantic router, or forced retrieval path. Wiki is the only business-fact source. Native `tool_choice=auto` intentionally leaves the action choice with the model, while literal no-send replays prove that substantive turns selected Wiki.
 7. A planner-approved `out_of_scope` is terminal only on the first customer turn. For a follow-up after an assistant reply, it must first attempt KB reading so a contextual post-service request cannot be discarded as unrelated.
 8. Every customer-visible terminal route passes through one output boundary: first replies begin with exactly one `Здравствуйте!`. The boundary normalizes formatting but never replaces a model-written customer reply with an application template; an invalid or missing final-model payload is `retry_pending` with empty customer text.
 9. If a substantive answer cannot be grounded, the final outcome must be `cannot_answer`.
@@ -47,6 +47,7 @@ Per inbound turn:
 4. force a KB read before accepting `out_of_scope` on a contextual follow-up
 5. never answer a substantive business question from the system prompt
 6. emit one of the allowed outcomes
+7. normalize OpenAI-compatible native tool envelopes before action dispatch: accept the declared `wiki_lookup` name or the explicit `arguments.tool_call=wiki_lookup` envelope when a provider corrupts its function-name field; parse the first valid JSON object if a provider appends trailing junk. This protocol normalization never selects Wiki or creates factual content.
 
 ## Tool-aware reasoning
 
