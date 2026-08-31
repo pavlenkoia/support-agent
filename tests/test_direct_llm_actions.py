@@ -80,6 +80,16 @@ def test_begin_turn_accepts_provider_native_tool_call_with_valid_arguments() -> 
     assert result["kind"] == "wiki_lookup"
 
 
+
+def test_begin_turn_parses_valid_tool_envelope_before_provider_trailing_junk() -> None:
+    client = ActionClient('{"tool_call":"wiki_lookup","reason":"need_confirmed_facts"}```json\\n{"tool_call":"wiki_lookup"}\\n```')
+    service = DirectLLMService(client=client, prompt_service=PromptService())
+
+    result = service.begin_turn(text="Содержательный вопрос", context={"recent_messages": []})
+
+    assert result["kind"] == "wiki_lookup"
+
+
 def test_begin_turn_returns_ready_social_text_without_a_second_finalizer_call() -> None:
     client = ActionClient('{"tool_call":null,"route":"social_reply","response_text":"Пожалуйста!","confidence":1,"reason":"social"}')
     service = DirectLLMService(client=client, prompt_service=PromptService())

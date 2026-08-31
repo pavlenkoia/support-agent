@@ -113,7 +113,7 @@ class DirectLLMService:
                 tool_choice="auto",
             )
             self._record_llm_call("customer_turn")
-            parsed = json.loads(raw)
+            parsed = self._parse_json_object(raw)
         except Exception as exc:
             self._record_llm_call("customer_turn")
             return {
@@ -137,6 +137,15 @@ class DirectLLMService:
         if normalized["route"] not in {"social_reply", "cannot_answer", "out_of_scope", "clarification_requested"}:
             return self._invalid_begin_turn("customer_turn_requires_wiki")
         return {"kind": "final", "result": normalized, "llm_trace": list(self._active_llm_trace)}
+
+    @staticmethod
+    def _parse_json_object(raw: str) -> dict[str, Any]:
+        """Parse the first JSON object when a compatible provider appends junk."""
+        candidate = str(raw or "").lstrip()
+        value, _ = json.JSONDecoder().raw_decode(candidate)
+        if not isinstance(value, dict):
+            raise ValueError("customer_turn_not_object")
+        return value
 
     @staticmethod
     def _native_call_requests_wiki_lookup(call: object) -> bool:
