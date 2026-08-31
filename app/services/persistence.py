@@ -149,6 +149,7 @@ def persist_transport_event(
 
 def mark_transport_event_processed(session: Session, event: TransportEvent, *, status: str = "processed") -> TransportEvent:
     event.status = status
+    event.error_text = None
     event.processed_at = utc_now()
     session.flush()
     return event
