@@ -81,6 +81,18 @@ def test_begin_turn_accepts_provider_native_tool_call_with_valid_arguments() -> 
 
 
 
+
+def test_begin_turn_accepts_provider_tool_name_with_serialized_content_suffix() -> None:
+    client = ActionClient(
+        '{"_native_tool_calls":[{"function":{"name":"wiki_lookup:{\\\"type\\\":\\\"text\\\",\\\"text\\\":\\\"provider-content\\\"}","arguments":"{\\\"tool_call\\\":null,\\\"route\\\":\\\"social_reply\\\"}"}}]}'
+    )
+    service = DirectLLMService(client=client, prompt_service=PromptService())
+
+    result = service.begin_turn(text="Содержательный вопрос", context={"recent_messages": []})
+
+    assert result["kind"] == "wiki_lookup"
+
+
 def test_begin_turn_parses_valid_tool_envelope_before_provider_trailing_junk() -> None:
     client = ActionClient('{"tool_call":"wiki_lookup","reason":"need_confirmed_facts"}```json\\n{"tool_call":"wiki_lookup"}\\n```')
     service = DirectLLMService(client=client, prompt_service=PromptService())

@@ -154,7 +154,8 @@ class DirectLLMService:
         function = call.get("function")
         if not isinstance(function, dict):
             return False
-        if function.get("name") == "wiki_lookup":
+        function_name = function.get("name")
+        if function_name == "wiki_lookup" or (isinstance(function_name, str) and function_name.startswith("wiki_lookup:")):
             return True
         # Some OpenAI-compatible providers corrupt the function name while
         # preserving the JSON arguments.  The only registered tool in this
