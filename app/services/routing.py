@@ -105,6 +105,13 @@ class RoutingService:
         kb_result: dict[str, Any] = raw_kb_result if isinstance(raw_kb_result, dict) else {}
         raw_final_result = loop_result.get("final_result")
         precomputed_final = raw_final_result if isinstance(raw_final_result, dict) else None
+        # A final turn without a factual tool result is never independently
+        # deliverable for a substantive customer path.  It must cross the same
+        # profile-backed missing-grounding finalization boundary as a Wiki
+        # not_found result, rather than emitting an ungrounded reply or a
+        # textless retry merely because the model declined the optional tool.
+        if precomputed_final is not None and not runtime_observations:
+            precomputed_final = None
         tool_observations = runtime_observations + list(loop_result.get("tool_observations") or [])
         technical_kb_failure = kb_result.get("grounding_status") in {"llm_unavailable", "retry_pending"}
         grounded = kb_result.get("grounding_status") == "ready"
