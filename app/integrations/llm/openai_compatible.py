@@ -198,6 +198,7 @@ class OpenAICompatibleClient(BaseLLMClient):
         response_format: dict[str, Any] | None = None,
         tools: list[dict[str, Any]] | None = None,
         tool_choice: str | dict[str, Any] | None = None,
+        parallel_tool_calls: bool | None = None,
     ) -> str:
         started = time.perf_counter()
         deadline = started + self.retry_deadline_seconds if self.retry_deadline_seconds is not None else None
@@ -217,6 +218,8 @@ class OpenAICompatibleClient(BaseLLMClient):
             payload["tools"] = tools
         if tool_choice is not None:
             payload["tool_choice"] = tool_choice
+        if parallel_tool_calls is not None:
+            payload["parallel_tool_calls"] = parallel_tool_calls
 
         total_attempts = 0
         key_indexes = self._available_key_indexes()
@@ -407,6 +410,7 @@ class StubLLMClient(BaseLLMClient):
         response_format: dict[str, Any] | None = None,
         tools: list[dict[str, Any]] | None = None,
         tool_choice: str | dict[str, Any] | None = None,
+        parallel_tool_calls: bool | None = None,
     ) -> str:
         _ = (system_prompt, temperature, response_format, tools, tool_choice)
         self._set_last_call_info(

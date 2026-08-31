@@ -65,6 +65,8 @@ def test_begin_turn_requests_wiki_as_the_only_factual_source() -> None:
     assert "Решение до инструментов" in prompt
     assert "need_confirmed_facts" in prompt
     assert client.calls[0]["tool_choice"] == "auto"
+    assert client.calls[0]["parallel_tool_calls"] is False
+    assert "response_format" not in client.calls[0]
     assert client.calls[0]["tools"][0]["function"]["name"] == "wiki_lookup"
 
 
@@ -107,7 +109,7 @@ def test_begin_turn_accepts_provider_tool_name_with_serialized_content_suffix_in
 
 
 
-def test_begin_turn_accepts_any_structural_native_call_in_the_single_tool_turn() -> None:
+def test_begin_turn_does_not_guess_an_unknown_malformed_native_tool() -> None:
     client = ActionClient('{"_native_tool_calls":[{"function":{"name":"provider-garbage","arguments":"not-json-and-not-an-envelope"}}]}')
     service = DirectLLMService(client=client, prompt_service=PromptService())
 
@@ -116,7 +118,8 @@ def test_begin_turn_accepts_any_structural_native_call_in_the_single_tool_turn()
         context={"recent_messages": [{"role": "user", "content": "У вас есть услуга?"}, {"role": "assistant", "content": "Да."}]},
     )
 
-    assert result["kind"] == "wiki_lookup"
+    assert result["kind"] == "final"
+    assert result["result"]["route"] == "retry_pending"
 
 
 def test_begin_turn_parses_valid_tool_envelope_before_provider_trailing_junk() -> None:

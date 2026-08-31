@@ -99,7 +99,6 @@ class DirectLLMService:
                 system_prompt=self.prompt_service.load_system_prompt(),
                 user_prompt=user_prompt,
                 temperature=self.temperature,
-                response_format={"type": "json_object"},
                 tools=[
                     {
                         "type": "function",
@@ -111,6 +110,7 @@ class DirectLLMService:
                     }
                 ],
                 tool_choice="auto",
+                parallel_tool_calls=False,
             )
             self._record_llm_call("customer_turn")
             parsed = self._parse_json_object(raw)
@@ -129,8 +129,10 @@ class DirectLLMService:
         if not isinstance(parsed, dict):
             return self._invalid_begin_turn("customer_turn_not_object")
         native_calls = parsed.get("_native_tool_calls")
-        if isinstance(native_calls, list) and any(self._native_call_is_single_registered_tool(call) for call in native_calls):
-            return {"kind": "wiki_lookup", "llm_trace": list(self._active_llm_trace)}
+        if isinstance(native_calls, list):
+            requested_tool = self._native_registered_tool_name(native_calls, registered_tools={"wiki_lookup"})
+            if requested_tool == "wiki_lookup":
+                return {"kind": "wiki_lookup", "llm_trace": list(self._active_llm_trace)}
         if parsed.get("tool_call") == "wiki_lookup":
             return {"kind": "wiki_lookup", "llm_trace": list(self._active_llm_trace)}
         normalized = self._normalize_prompt_reply(parsed)
@@ -148,16 +150,33 @@ class DirectLLMService:
         return value
 
     @staticmethod
-    def _native_call_is_single_registered_tool(call: object) -> bool:
-        """Accept a provider-native tool-call object for this one-tool turn.
+    def _native_registered_tool_name(calls: list[object], *, registered_tools: set[str]) -> str | None:
+        """Normalize a native call only when it identifies one registered tool.
 
-        `begin_turn` exposes exactly one native capability: `wiki_lookup`.
-        Therefore a structurally recognizable native function call is evidence
-        that the model chose the tool, even when an OpenAI-compatible provider
-        corrupts its function name, arguments, or serializes answer text into
-        those fields. Do not apply this rule to a multi-tool turn.
+        A provider may append serialized content to a function name or retain
+        the requested name solely in JSON arguments.  With more than one tool,
+        arbitrary malformed native calls are intentionally *not* dispatched:
+        guessing a capability would change the model's action.
         """
-        return isinstance(call, dict) and isinstance(call.get("function"), dict)
+        for call in calls:
+            if not isinstance(call, dict):
+                continue
+            function = call.get("function")
+            if not isinstance(function, dict):
+                continue
+            name = function.get("name")
+            if isinstance(name, str):
+                for tool_name in registered_tools:
+                    if name == tool_name or name.startswith(f"{tool_name}:"):
+                        return tool_name
+            raw_arguments = function.get("arguments")
+            try:
+                arguments = json.loads(raw_arguments) if isinstance(raw_arguments, str) else raw_arguments
+            except json.JSONDecodeError:
+                continue
+            if isinstance(arguments, dict) and arguments.get("tool_call") in registered_tools:
+                return str(arguments["tool_call"])
+        return None
 
     def _invalid_begin_turn(self, reason: str) -> dict[str, Any]:
         return {

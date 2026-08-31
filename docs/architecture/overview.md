@@ -30,7 +30,7 @@ Telegram / VK inbound event
 
 ## Native tool compatibility
 
-The provider-facing adapter treats every structurally recognizable native function-call object as `wiki_lookup` during the one-tool customer turn. This is deliberately schema-based rather than string-pattern-based: only `wiki_lookup` is registered for that turn, so a native call is the model's tool decision even if an OpenAI-compatible provider corrupts the name, arguments, or appends serialized answer text. Regular JSON envelopes are parsed from their first valid object when a provider appends junk. This protocol normalization does not choose whether Wiki is needed and does not synthesize business facts.
+The provider-facing adapter normalizes native calls against the registered tool registry, never by treating arbitrary malformed calls as a valid action. It accepts a registered name, a registered name followed by provider-appended serialized content, or an explicit registered `tool_call` in arguments. Regular JSON envelopes are parsed from their first valid object when a provider appends junk. If a native call cannot be bound to one registered capability, it fails closed rather than guessing which tool to run. This protocol normalization does not choose whether Wiki is needed and does not synthesize business facts.
 
 ## Main runtime components
 
