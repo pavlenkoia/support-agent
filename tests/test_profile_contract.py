@@ -23,7 +23,7 @@ def test_canonical_profile_source_has_no_prompt_facts_or_wiki_scenarios() -> Non
 def test_canonical_profile_requires_factual_tools_for_substantive_customer_replies() -> None:
     prompt = SOURCE.joinpath("SYSTEM_PROMPT.md").read_text(encoding="utf-8")
     assert "Перед ответом, который содержит или требует факт" in prompt
-    assert "Чисто социальная реплика без запроса" in prompt
+    assert "По умолчанию сначала проверь Wiki" in prompt
 
 
 def test_profile_declares_no_answer_contact_evidence_without_customer_template() -> None:
