@@ -82,7 +82,20 @@ def test_begin_turn_accepts_provider_native_tool_call_with_valid_arguments() -> 
 
 
 
-def test_begin_turn_accepts_provider_tool_name_with_serialized_content_suffix() -> None:
+def test_begin_turn_accepts_provider_tool_name_with_serialized_content_suffix_in_followup() -> None:
+    client = ActionClient(
+        '{"_native_tool_calls":[{"function":{"name":"wiki_lookup:{\\\"type\\\":\\\"text\\\",\\\"text\\\":\\\"provider-content\\\"}","arguments":"{\\\"tool_call\\\":null,\\\"route\\\":\\\"social_reply\\\"}"}}]}'
+    )
+    service = DirectLLMService(client=client, prompt_service=PromptService())
+
+    result = service.begin_turn(
+        text="Сколько это стоит?",
+        context={"recent_messages": [{"role": "user", "content": "У вас есть услуга?"}, {"role": "assistant", "content": "Да."}]},
+    )
+
+    assert result["kind"] == "wiki_lookup"
+
+
     client = ActionClient(
         '{"_native_tool_calls":[{"function":{"name":"wiki_lookup:{\\\"type\\\":\\\"text\\\",\\\"text\\\":\\\"provider-content\\\"}","arguments":"{\\\"tool_call\\\":null,\\\"route\\\":\\\"social_reply\\\"}"}}]}'
     )

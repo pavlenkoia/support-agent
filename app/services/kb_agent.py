@@ -510,6 +510,8 @@ class KBAgentService:
             "Resolve short or elliptical follow-ups using only the explicit conversation_context; keep the current user message as the question and recover its subject from the recent dialogue instead of treating it as a standalone topic.",
             "When the current user asks about other or remaining conditions, extract all relevant requirements present in the selected pages; do not return not_found merely because the subject appears only in conversation_context.",
             "Keep the most recent explicit customer constraint or preference in conversation_context active for the current follow-up. Do not extract an excluded earlier alternative unless the current user asks to compare or changes that constraint.",
+            "If a selected page explicitly provides an authoritative source for a requested changing value, that source is direct sufficient evidence: return grounding_status=ready, include the exact source in answer_basis and grounded_facts, and do not classify it as not_found.",
+            "A nonempty grounded_facts list with cited selected pages is evidence, not a reason to return not_found.",
         ]
         if minimal_schema:
             rules.extend(
@@ -566,6 +568,13 @@ class KBAgentService:
 
         if not parsed.get("cited_source_refs"):
             parsed["cited_source_refs"] = self._extract_source_refs(answer_context)
+        selected_refs = set(self._extract_source_refs(answer_context))
+        cited_refs = [
+            str(ref).strip()
+            for ref in parsed.get("cited_source_refs", [])
+            if str(ref).strip() in selected_refs
+        ]
+        parsed["cited_source_refs"] = cited_refs
         if not isinstance(parsed.get("missing_information"), list):
             parsed["missing_information"] = []
         if not isinstance(parsed.get("answer_basis"), str):
@@ -577,6 +586,17 @@ class KBAgentService:
             parsed["grounded_facts"] = [str(item).strip() for item in grounded_facts if str(item).strip()][:MAX_GROUNDED_FACTS]
         else:
             parsed["grounded_facts"] = []
+        # A model may mistakenly label its own cited extraction as not_found.
+        # Preserve the fail-closed boundary unless it supplied nonempty facts
+        # anchored to selected pages; that combination is a coherent ready
+        # evidence packet, not a business-topic inference by application code.
+        if (
+            parsed.get("grounding_status") == "not_found"
+            and parsed["grounded_facts"]
+            and parsed["cited_source_refs"]
+        ):
+            parsed["grounding_status"] = "ready"
+            parsed["reason"] = f"{str(parsed.get('reason') or 'grounding')}:coherent_cited_evidence"
         return parsed
 
     def _prepare_kb_context(self, kb_hits: list[dict]) -> tuple[list[dict], str]:
