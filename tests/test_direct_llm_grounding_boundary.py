@@ -46,10 +46,10 @@ def test_ready_grounding_is_finalized_with_system_prompt_and_compact_evidence(mo
     assert client.calls == 1
     assert client.payload is not None
     assert client.payload["grounding_evidence"]["answer_basis"] == "Да, прыгнуть можно."
-    assert "State the direct practical conclusion first" in client.system_prompt
-    assert "explicitly acknowledge that constraint or preference" in client.system_prompt
-    assert "Keep the most recent explicit customer constraint or preference active" in client.system_prompt
-    assert "do not claim that none exist" in client.system_prompt
+    assert "Сначала дай прямой вывод, подтверждённый переданным evidence." in client.system_prompt
+    assert "явно отрази его в первом предложении" in client.system_prompt
+    assert "Сохраняй последнее явное ограничение" in client.system_prompt
+    assert "не утверждай, что других требований нет" in client.system_prompt
     assert result["route"] == "answer"
     assert result["response_text"] == "Да, прыгнуть можно. Отсутствие этой экипировки само по себе не мешает прыжку."
     assert result["reason"] == "finalized_from_grounding"
@@ -266,8 +266,8 @@ def test_case_594_finalization_contract_treats_ready_payment_evidence_as_confirm
 
     assert result["route"] == "answer"
     assert client.system_prompt is not None
-    assert "Runtime finalization contract" in client.system_prompt
-    assert "preserve that answer as the factual core" in client.system_prompt
+    assert "Контракт финализации runtime" in client.system_prompt
+    assert "сохрани этот ответ как фактическое ядро" in client.system_prompt
     assert "Оплатить можно" in result["response_text"]
     assert "уточнят при записи" not in result["response_text"]
 

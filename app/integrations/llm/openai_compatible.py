@@ -199,6 +199,7 @@ class OpenAICompatibleClient(BaseLLMClient):
         tools: list[dict[str, Any]] | None = None,
         tool_choice: str | dict[str, Any] | None = None,
         parallel_tool_calls: bool | None = None,
+        messages: list[dict[str, Any]] | None = None,
     ) -> str:
         started = time.perf_counter()
         deadline = started + self.retry_deadline_seconds if self.retry_deadline_seconds is not None else None
@@ -207,7 +208,7 @@ class OpenAICompatibleClient(BaseLLMClient):
             "model": self.model,
             "temperature": temperature,
             "stream": False,
-            "messages": [
+            "messages": messages if messages is not None else [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
@@ -411,6 +412,7 @@ class StubLLMClient(BaseLLMClient):
         tools: list[dict[str, Any]] | None = None,
         tool_choice: str | dict[str, Any] | None = None,
         parallel_tool_calls: bool | None = None,
+        messages: list[dict[str, Any]] | None = None,
     ) -> str:
         _ = (system_prompt, temperature, response_format, tools, tool_choice)
         self._set_last_call_info(

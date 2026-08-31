@@ -1,6 +1,13 @@
 from __future__ import annotations
 
-from app.services.agent_tool_loop import UnifiedTurnService, WikiLookupTool
+from app.services.agent_tool_loop import CalendarLookupTool, UnifiedTurnService, WikiLookupTool
+from app.services.tool_runtime import ToolRuntimeService
+
+
+class RecordingCalendarLookup:
+    def lookup(self, *, text: str, context: dict, tool_request: dict[str, str]) -> dict:
+        _ = (text, context, tool_request)
+        return {"status": "not_found", "summary": "", "structured": {}}
 
 
 class RecordingWikiLookup:
@@ -37,7 +44,7 @@ def test_unified_turn_returns_social_customer_text_without_wiki_lookup() -> None
 
     model = TurnModel()
     wiki = RecordingWikiLookup()
-    turn = UnifiedTurnService(model=model, wiki_lookup=wiki)
+    turn = UnifiedTurnService(model=model, wiki_lookup=wiki, calendar_lookup=RecordingCalendarLookup())
 
     result = turn.run(text="Спасибо", context={"recent_messages": []})
 
@@ -54,13 +61,134 @@ def test_unified_turn_runs_wiki_after_model_requests_its_tool() -> None:
             return {"kind": "wiki_lookup", "tool_request": {"query": "запись", "context_scope": "тандем", "needed_fact": "канал"}, "llm_trace": [{"role": "direct_llm", "step": "customer_turn"}]}
 
     wiki = RecordingWikiLookup()
-    turn = UnifiedTurnService(model=TurnModel(), wiki_lookup=wiki)
+    turn = UnifiedTurnService(model=TurnModel(), wiki_lookup=wiki, calendar_lookup=RecordingCalendarLookup())
 
     result = turn.run(text="Как записаться на тандем?", context={})
 
     assert len(wiki.calls) == 1
     assert result["kb_result"]["source_refs"] == ["compiled/concepts/booking.md"]
     assert result["trace"]["actions"] == ["wiki_lookup"]
+
+
+def test_unified_turn_runs_calendar_after_model_requests_its_tool() -> None:
+    class TurnModel:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def begin_turn(self, *, text: str, context: dict) -> dict:
+            _ = (text, context)
+            self.calls += 1
+            if self.calls == 2:
+                return {"kind": "final", "result": {"route": "answer", "response_text": "Понедельник.", "confidence": 1.0, "reason": "calendar"}, "llm_trace": []}
+            return {
+                "kind": "calendar_lookup",
+                "tool_request": {"date_expression": "сегодня", "requested_calendar_fact": "день недели"},
+                "llm_trace": [{"role": "direct_llm", "step": "customer_turn"}],
+            }
+
+    class RecordingCalendarLookup:
+        def __init__(self) -> None:
+            self.calls: list[dict] = []
+
+        def lookup(self, *, text: str, context: dict, tool_request: dict[str, str]) -> dict:
+            self.calls.append({"text": text, "context": context, "tool_request": tool_request})
+            return {
+                "status": "ready",
+                "summary": "Сегодня — понедельник.",
+                "structured": {"iso_date": "2026-08-31", "weekday_ru": "понедельник", "is_weekend": False},
+            }
+
+    calendar = RecordingCalendarLookup()
+    turn = UnifiedTurnService(model=TurnModel(), wiki_lookup=RecordingWikiLookup(), calendar_lookup=calendar)
+
+    result = turn.run(text="Офис сегодня работает?", context={"calendar_reference_at": "2026-08-31T08:00:00+00:00"})
+
+    assert calendar.calls == [{
+        "text": "Офис сегодня работает?",
+        "context": {"calendar_reference_at": "2026-08-31T08:00:00+00:00"},
+        "tool_request": {"date_expression": "сегодня", "requested_calendar_fact": "день недели"},
+    }]
+    assert result["trace"]["actions"] == ["calendar_lookup", "final_response"]
+    assert result["tool_observations"] == [{
+        "tool": "calendar_lookup",
+        "status": "ready",
+        "summary": "Сегодня — понедельник.",
+        "structured": {"iso_date": "2026-08-31", "weekday_ru": "понедельник", "is_weekend": False},
+    }]
+
+
+def test_unified_turn_returns_final_response_after_calendar_observation() -> None:
+    class TurnModel:
+        def __init__(self) -> None:
+            self.contexts: list[dict] = []
+
+        def begin_turn(self, *, text: str, context: dict) -> dict:
+            self.contexts.append(context)
+            if len(self.contexts) == 1:
+                return {
+                    "kind": "calendar_lookup",
+                    "tool_request": {"date_expression": "послезавтра", "requested_calendar_fact": "день недели"},
+                    "llm_trace": [],
+                }
+            return {
+                "kind": "final",
+                "result": {"route": "answer", "response_text": "Среда.", "confidence": 1.0, "reason": "calendar_evidence"},
+                "llm_trace": [],
+            }
+
+    class Calendar:
+        def lookup(self, *, text: str, context: dict, tool_request: dict[str, str]) -> dict:
+            _ = (text, context, tool_request)
+            return {"status": "ready", "summary": "Дата 2026-09-02 приходится на среда.", "structured": {"weekday_ru": "среда"}}
+
+    model = TurnModel()
+    result = UnifiedTurnService(model=model, wiki_lookup=RecordingWikiLookup(), calendar_lookup=Calendar()).run(
+        text="Какой день недели будет послезавтра?", context={"recent_messages": []}
+    )
+
+    assert len(model.contexts) == 2
+    assert model.contexts[1]["tool_observations"] == [{
+        "tool": "calendar_lookup",
+        "status": "ready",
+        "summary": "Дата 2026-09-02 приходится на среда.",
+        "structured": {"weekday_ru": "среда"},
+    }]
+    assert result["final_result"]["response_text"] == "Среда."
+    assert result["trace"]["actions"] == ["calendar_lookup", "final_response"]
+
+
+def test_calendar_lookup_tool_resolves_relative_date_against_message_context() -> None:
+    tool = CalendarLookupTool(runtime=ToolRuntimeService())
+
+    result = tool.lookup(
+        text="Офис сегодня работает?",
+        context={"calendar_reference_at": "2026-08-31T08:00:00+00:00"},
+        tool_request={"date_expression": "сегодня", "requested_calendar_fact": "день недели"},
+    )
+
+    assert result == {
+        "status": "ready",
+        "summary": "Дата 2026-08-31 приходится на понедельник.",
+        "structured": {
+            "iso_date": "2026-08-31",
+            "weekday_ru": "понедельник",
+            "is_weekend": False,
+            "year": 2026,
+        },
+    }
+
+
+def test_calendar_lookup_tool_interprets_reference_in_operational_timezone() -> None:
+    tool = CalendarLookupTool(runtime=ToolRuntimeService())
+
+    result = tool.lookup(
+        text="Офис сегодня работает?",
+        context={"calendar_reference_at": "2026-08-30T20:00:00+00:00"},
+        tool_request={"date_expression": "сегодня", "requested_calendar_fact": "день недели"},
+    )
+
+    assert result["structured"]["iso_date"] == "2026-08-31"
+    assert result["structured"]["weekday_ru"] == "понедельник"
 
 
 def test_unified_turn_keeps_wiki_llm_trace_for_operational_audit() -> None:
@@ -82,7 +210,7 @@ def test_unified_turn_keeps_wiki_llm_trace_for_operational_audit() -> None:
                 },
             }
 
-    turn = UnifiedTurnService(model=TurnModel(), wiki_lookup=RetryingWikiLookup())
+    turn = UnifiedTurnService(model=TurnModel(), wiki_lookup=RetryingWikiLookup(), calendar_lookup=RecordingCalendarLookup())
 
     result = turn.run(text="Вопрос", context={})
 

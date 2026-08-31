@@ -41,9 +41,9 @@ It is not a ticket router and not an escalation-first bot.
 ## Decision loop
 
 Per inbound turn:
-1. run one customer-facing model turn with the native optional `wiki_lookup(query, context_scope, needed_fact)` tool
+1. run one customer-facing model turn with the native optional `wiki_lookup(query, context_scope, needed_fact)` or `calendar_lookup(date_expression, requested_calendar_fact)` tool
 2. if the model returns a final non-factual reply, deliver that model text through the common output boundary; no second finalizer/model call is made
-3. if the model calls Wiki, validate the exact registered function name and typed JSON arguments, then read only that model-selected query/scope through the KB agent and pass only ready evidence to the common finalizer
+3. if the model calls a tool, validate the exact registered function name and typed JSON arguments, execute only that request, then resume the same OpenAI-compatible tool conversation with the original `tool_call_id` and a `role=tool` result; the resumed model returns the customer JSON
 4. force a KB read before accepting `out_of_scope` on a contextual follow-up
 5. never answer a substantive business question from the system prompt
 6. emit one of the allowed outcomes

@@ -60,10 +60,10 @@ def test_begin_turn_requests_wiki_as_the_only_factual_source() -> None:
     assert result["kind"] == "wiki_lookup"
     assert "response_text" not in result
     prompt = str(client.calls[0]["user_prompt"])
+    assert "calendar_lookup — не источник бизнес-фактов" in prompt
     assert "wiki_lookup — единственный источник бизнес-фактов из Wiki." in prompt
-    assert "По умолчанию вызывай wiki_lookup" in prompt
-    assert "Решение до инструментов" in prompt
-    assert "need_confirmed_facts" in prompt
+    assert "Если для ответа не хватает календарного факта" in prompt
+    assert "Любой неизвестный инструмент" in prompt
     assert client.calls[0]["tool_choice"] == "auto"
     assert client.calls[0]["parallel_tool_calls"] is False
     assert "response_format" not in client.calls[0]
@@ -155,7 +155,8 @@ def test_finalizer_prompt_requires_natural_grammatical_russian() -> None:
     )
 
     prompt = str(client.calls[0]["user_prompt"])
-    assert "При response_intent=answer и knowledge_mode=kb_grounded подготовь готовый прямой ответ на текущий вопрос только из evidence." in prompt
+    assert "При response_intent=answer подготовь готовый прямой ответ на текущий вопрос только из evidence." in prompt
+    assert "ready-результат календарного инструмента является прямым календарным evidence" in prompt
     assert "Если текущая реплика прямо отвечает на предыдущий вопрос ассистента, прими её как состояние диалога и продолжи ответ; не повторяй тот же вопрос." in prompt
     assert "answer_basis — служебное краткое описание evidence, а не самостоятельный источник фактов и не требование закрыть вопрос клиента." in prompt
     assert "Если evidence не содержит прямого ответа на фактическую часть текущей реплики, не возвращай route=answer." in prompt

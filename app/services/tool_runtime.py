@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import re
 from datetime import UTC, date, datetime, timedelta
+from zoneinfo import ZoneInfo
+
+from app.core.config import settings
 from typing import Any
 
 MONTHS_RU = {
@@ -49,6 +52,37 @@ class ToolRuntimeService:
 
     def matches_calendar_query(self, text: str) -> bool:
         return self._extract_calendar_period(text) is not None or self._extract_date(text) is not None
+
+    def lookup_calendar(self, *, date_expression: str, conversation_context: dict | None = None) -> dict[str, Any]:
+        """Return a calendar fact only; business rules remain exclusively in Wiki."""
+        reference_date = self._reference_date(conversation_context)
+        parsed_date = self._extract_date(date_expression, reference_date=reference_date)
+        if parsed_date is None:
+            return {"status": "not_found", "summary": "", "structured": {}}
+        weekday_index = parsed_date.weekday()
+        weekday_ru = WEEKDAY_RU[weekday_index]
+        return {
+            "status": "ready",
+            "summary": f"Дата {parsed_date.isoformat()} приходится на {weekday_ru}.",
+            "structured": {
+                "iso_date": parsed_date.isoformat(),
+                "weekday_ru": weekday_ru,
+                "is_weekend": weekday_index >= 5,
+                "year": parsed_date.year,
+            },
+        }
+
+    @staticmethod
+    def _reference_date(conversation_context: dict | None) -> date:
+        value = conversation_context.get("calendar_reference_at") if isinstance(conversation_context, dict) else None
+        if isinstance(value, str):
+            try:
+                parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+                localized = parsed.replace(tzinfo=UTC) if parsed.tzinfo is None else parsed
+                return localized.astimezone(ZoneInfo(settings.viewer_timezone)).date()
+            except ValueError:
+                pass
+        return datetime.now(UTC).date()
 
     def collect(self, *, text: str, kb_hits: list[dict], conversation_context: dict | None = None) -> dict[str, Any]:
         observations: list[dict[str, Any]] = []
@@ -250,8 +284,8 @@ class ToolRuntimeService:
             previous_month = month
         return dates
 
-    def _extract_date(self, text: str) -> date | None:
-        now = datetime.now(UTC).date()
+    def _extract_date(self, text: str, *, reference_date: date | None = None) -> date | None:
+        now = reference_date or datetime.now(UTC).date()
         now_year = now.year
         relative_date = self._extract_relative_date(text, now)
         if relative_date is not None:

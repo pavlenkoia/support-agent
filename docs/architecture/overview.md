@@ -7,13 +7,13 @@ Production runs with `ANSWER_ENGINE_MODE=agent_tool_loop`. It is one LLM-managed
 ```text
 Telegram / VK inbound event
   → raw-event journal + channel queue + stale/override guards
-  → RoutingService: case resolution + bounded dialogue context + runtime date facts
-  → DirectLLMService customer turn (native wiki_lookup available, tool_choice=auto)
+  → RoutingService: case resolution + bounded dialogue context
+  → DirectLLMService native customer turn (`wiki_lookup` / `calendar_lookup`, tool_choice=auto)
       ├─ pure social turn → direct non-factual response
-      └─ substantive turn → LLM calls wiki_lookup
-           → compact Wiki catalog → KB agent semantic navigation / selective reads / coverage review
-           → grounding_status=ready + bounded evidence
-           → common finalizer
+      └─ model-selected tool call
+           → runtime executes the typed request
+           → tool result is linked to the originating tool_call_id as role=tool
+           → same native conversation returns the customer JSON result
   → PolicyService output boundary
   → durable message persistence + transport delivery
 ```
@@ -30,7 +30,9 @@ Telegram / VK inbound event
 
 ## Typed native tool contract
 
-`wiki_lookup` is a typed native tool. The customer model selects it with `tool_choice=auto` and supplies exactly these JSON arguments:
+`wiki_lookup` and `calendar_lookup` are typed native tools. The customer model selects one with `tool_choice=auto`; the runtime validates the exact name and JSON arguments, executes only that request, then continues the same OpenAI-compatible conversation with an `assistant.tool_calls` message followed by a linked `role=tool` result using the original `tool_call_id`. The model then returns the final customer JSON; the application does not substitute a second standalone finalizer prompt for the tool continuation.
+
+`wiki_lookup` requires:
 
 ```json
 {
@@ -42,16 +44,16 @@ Telegram / VK inbound event
 
 The OpenAI-compatible adapter dispatches only an exact registered function name with JSON arguments that validate against that tool schema; malformed names, malformed JSON, missing fields, and unknown tools fail closed as `retry_pending`. It never guesses a tool from a structural call object or rewrites an argument into a business decision. `parallel_tool_calls=false` bounds the customer action to one call. The runtime passes the model-selected request to catalog navigation, coverage review, and grounded extraction. For a contextual follow-up, `context_scope` preserves the last explicit customer-selected subject; it must not be widened to a neighboring variant unless the customer asks to compare or change it.
 
-The calendar runtime remains a separate factual capability in the current release; it is not represented as `wiki_lookup` or inferred from business context.
+`calendar_lookup` requires exactly `date_expression` and `requested_calendar_fact`. It supplies calendar facts only and never infers a business schedule. A ready tool result is customer evidence only through the linked native continuation.
 
 ## Main runtime components
 
 - **`TelegramGatewayService` / polling worker** — normalizes Bot API updates, journals events, coalesces turns, retries durable `retry_pending` events, and sends replies.
 - **`VKGatewayService` / VK worker** — equivalent shared runtime integration plus outbound reconciliation and a one-hour manual-operator override.
 - **`RoutingService`** — case resolution, context construction, common evidence boundary, finalization, outcomes, and audit events.
-- **`UnifiedTurnService`** — executes the LLM-selected action: direct non-factual final result or bounded Wiki lookup.
-- **`WikiLookupTool` + `KBAgentService`** — compact-catalog navigation, selective page reads, coverage review, and grounded extraction.
-- **`DirectLLMService`** — customer tool decision and evidence-bounded final response using separate calls; records non-secret LLM traces.
+- **`UnifiedTurnService`** — executes the LLM-selected typed tool and continues the same native conversation with the linked tool result.
+- **`WikiLookupTool` / `CalendarLookupTool`** — factual adapters for Wiki grounding and calendar calculations respectively.
+- **`DirectLLMService`** — emits the customer tool decision and resumes an OpenAI-compatible tool conversation; records non-secret LLM traces.
 - **`PolicyService`** — profile-backed no-answer policy evidence and the deterministic output boundary.
 - **PostgreSQL** — system of record for conversations, cases, messages, workflow events, transport events, transport state, and VK outbound reconciliation.
 - **Internal probe API** — invokes the real routing path with `is_test` records and never publishes to Telegram or VK; use it for literal no-send replays.

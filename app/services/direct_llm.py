@@ -64,34 +64,39 @@ class DirectLLMService:
         )
 
     def begin_turn(self, *, text: str, context: dict) -> dict[str, Any]:
-        """Run one grounded customer turn by requiring the bounded Wiki tool."""
+        """Run one grounded customer turn with typed native tool requests."""
         self._reset_llm_trace()
         conversation = self._build_finalization_conversation(context)
         first_reply = not any(item.get("role") == "assistant" for item in conversation if isinstance(item, dict))
+        tool_observations = self._project_tool_observations(context)
         user_prompt = json.dumps(
             {
-                "task": "Обработай текущий ход клиента. Чистую короткую социальную реплику без запроса можно завершить JSON-ответом. Для любой содержательной реплики сначала вызови native-инструмент wiki_lookup и передай в его arguments семантический query, контекстный scope выбранного клиентом предмета и нужный факт. Не создавай клиентский ответ с фактами до результата инструмента.",
+                "task": "Обработай текущий ход клиента. Если в tool_observations уже есть готовый результат нужного зарегистрированного инструмента, сформируй финальный JSON-ответ только из этого результата и не вызывай инструмент повторно. Чистую короткую социальную реплику без запроса можно завершить JSON-ответом. Иначе сначала вызови один native-инструмент из зарегистрированного набора: calendar_lookup или wiki_lookup. После одного инструмента можно сделать максимум ещё один последовательный вызов другого зарегистрированного native-инструмента, если для прямого ответа не хватает фактов. Не создавай клиентский ответ с фактами до результата нужного инструмента.",
                 "required_json_schema": {
-                    "tool_call": "wiki_lookup or null; use only as compatibility fallback when native tool_calls are unavailable",
-                    "arguments": {"query": "string", "context_scope": "string", "needed_fact": "string"},
+                    "tool_call": "calendar_lookup|wiki_lookup or null",
+                    "arguments": {"...": "string"},
                     "route": "social_reply|cannot_answer|out_of_scope|clarification_requested when tool_call is null",
-                    "response_text": "string when tool_call is null; must be absent when tool_call=wiki_lookup",
+                    "response_text": "string when tool_call is null; must be absent when tool_call is a tool name",
                     "confidence": "number 0..1 when tool_call is null",
                     "reason": "short string",
                 },
                 "user_message": text,
                 "first_reply_in_dialogue": first_reply,
                 "conversation": conversation,
+                "tool_observations": tool_observations,
                 "rules": [
+                    "calendar_lookup — не источник бизнес-фактов, а факт о календаре из текущего текста; используйте его только если вопрос или уточнение зависит от даты, дня недели или календарного периода.",
                     "wiki_lookup — единственный источник бизнес-фактов из Wiki.",
-                    "По умолчанию вызывай wiki_lookup; откажись от него только для чистой короткой социальной реплики без предметного содержания.",
-                    "Решение до инструментов: если реплика не является чистой короткой социальной, единственный допустимый JSON — {\"tool_call\":\"wiki_lookup\",\"reason\":\"need_confirmed_facts\"}. Не возвращай route, response_text или confidence на этом шаге.",
-                    "Обязательно вызови wiki_lookup для любого вопроса или ситуации, где нужен факт об организации, её предложении, стоимости, сроке, порядке, контакте, действии, дате, условии, проблеме, невыполненном ожидаемом результате, ожидании результата или затруднении — даже если сообщение начинается с приветствия и даже без вопросительного знака.",
-                    "До wiki_lookup нельзя возвращать клиентский текст, содержащий бизнес-факт, процедуру, обещание, контакт, объяснение результата, уточнение по предметной области, cannot_answer или out_of_scope.",
-                    "social_reply разрешён только для очевидной чисто социальной реплики, которая не содержит и не продолжает запрос, проблему или ситуацию клиента; в нём не должно быть бизнес-фактов, процедуры, обещаний или следующего шага.",
-                    "Не используй ключевые слова, скрытые сценарии, историю диалога, память модели или приложение как источник бизнес-ответа; выбирай действие по смыслу диалога и вызывай Wiki при малейшей потребности в фактах.",
-                    "Для wiki_lookup context_scope обязан сохранять последний явно выбранный клиентом предметный вариант из conversation. Нельзя заменять такой вариант более общим родовым словом; если клиент не просит сравнение или смену варианта, query и needed_fact должны быть сформулированы только для выбранного варианта.",
+                    "Для любого содержательного ответа можно использовать не более двух последовательных native-инструментов без параллельных вызовов.",
+                    "Если для ответа не хватает календарного факта, можно запросить calendar_lookup, а затем при необходимости wiki_lookup; если не хватает бизнес-факта, можно запросить wiki_lookup, а затем при необходимости calendar_lookup.",
+                    "Каждый tool_call должен быть exact-name match и передавать JSON-объект с точной схемой аргументов. Не используй строки вместо JSON, не добавляй лишних ключей и не запрашивай параллельные инструменты.",
+                    "Любой неизвестный инструмент, отсутствующие аргументы, лишние аргументы, не-JSON arguments или параллельные native_tool_calls считаются ошибкой и должны приводить к retry_pending без клиентского текста.",
+                    "Пока не получены нужные tool observations, не выдавай business answer. Социальная реплика допустима только когда нет содержательного запроса.",
                     "В arguments передавай только смысловую цель поиска и контекстное ограничение; не вписывай туда предполагаемые бизнес-факты, контакты, ответы или инструкции.",
+                    "Для calendar_lookup используй exact-name JSON с ключами date_expression и requested_calendar_fact; date_expression должен отражать фрагмент текущей реплики, а requested_calendar_fact — только то календарное наблюдение, которое нужно подтвердить.",
+                    "Для wiki_lookup используй exact-name JSON с ключами query, context_scope и needed_fact; query должен быть семантическим, а не словарным.",
+                    "Не используй ключевые слова, скрытые сценарии, историю диалога, память модели или приложение как источник бизнес-ответа; выбирай действие по смыслу диалога и вызывай нужный инструмент при малейшей потребности в фактах.",
+                    "Для wiki_lookup context_scope обязан сохранять последний явно выбранный клиентом предметный вариант из conversation. Нельзя заменять такой вариант более общим родовым словом; если клиент не просит сравнение или смену варианта, query и needed_fact должны быть сформулированы только для выбранного варианта.",
                 ],
             },
             ensure_ascii=False,
@@ -101,25 +106,7 @@ class DirectLLMService:
                 system_prompt=self.prompt_service.load_system_prompt(),
                 user_prompt=user_prompt,
                 temperature=self.temperature,
-                tools=[
-                    {
-                        "type": "function",
-                        "function": {
-                            "name": "wiki_lookup",
-                            "description": "Read the Wiki before any factual or situation-specific customer answer.",
-                            "parameters": {
-                                "type": "object",
-                                "required": ["query", "context_scope", "needed_fact"],
-                                "properties": {
-                                    "query": {"type": "string", "description": "Focused semantic query for the Wiki."},
-                                    "context_scope": {"type": "string", "description": "Selected subject or constraint inherited from the dialogue."},
-                                    "needed_fact": {"type": "string", "description": "Specific fact needed for this customer turn."},
-                                },
-                                "additionalProperties": False,
-                            },
-                        },
-                    }
-                ],
+                tools=self._native_tools(),
                 tool_choice="auto",
                 parallel_tool_calls=False,
             )
@@ -141,17 +128,20 @@ class DirectLLMService:
             return self._invalid_begin_turn("customer_turn_not_object")
         native_calls = parsed.get("_native_tool_calls")
         if isinstance(native_calls, list):
-            tool_call = self._native_registered_tool_call(native_calls, registered_tools={"wiki_lookup"})
+            tool_call = self._native_registered_tool_call(native_calls, registered_tools={"wiki_lookup", "calendar_lookup"})
             if tool_call is not None:
-                return {"kind": "wiki_lookup", "tool_request": tool_call["arguments"], "llm_trace": list(self._active_llm_trace)}
-        if parsed.get("tool_call") == "wiki_lookup":
-            tool_request = self._validated_wiki_request(parsed.get("arguments"))
+                return {"kind": tool_call["name"], "tool_request": tool_call["arguments"], "tool_call_id": tool_call["id"], "llm_trace": list(self._active_llm_trace)}
+            if native_calls:
+                return self._invalid_begin_turn("native_tool_request_invalid")
+        tool_name = str(parsed.get("tool_call") or "")
+        if tool_name in {"wiki_lookup", "calendar_lookup"}:
+            tool_request = self._validated_legacy_tool_request(tool_name, parsed.get("arguments"))
             if tool_request is not None:
-                return {"kind": "wiki_lookup", "tool_request": tool_request, "llm_trace": list(self._active_llm_trace)}
-            return self._invalid_begin_turn("wiki_lookup_arguments_invalid")
+                return {"kind": tool_name, "tool_request": tool_request, "llm_trace": list(self._active_llm_trace)}
+            return self._invalid_begin_turn(f"{tool_name}_arguments_invalid")
         normalized = self._normalize_prompt_reply(parsed)
         if normalized["route"] not in {"social_reply", "cannot_answer", "out_of_scope", "clarification_requested"}:
-            return self._invalid_begin_turn("customer_turn_requires_wiki")
+            return self._invalid_begin_turn("customer_turn_requires_tool")
         return {"kind": "final", "result": normalized, "llm_trace": list(self._active_llm_trace)}
 
     @staticmethod
@@ -163,9 +153,98 @@ class DirectLLMService:
             raise ValueError("customer_turn_not_object")
         return value
 
+    def continue_after_tool(
+        self,
+        *,
+        text: str,
+        context: dict,
+        tool_name: str,
+        tool_call_id: str,
+        tool_request: dict[str, str],
+        observation: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Continue an OpenAI native tool conversation with a linked tool result."""
+        self._reset_llm_trace()
+        conversation = self._build_finalization_conversation(context)
+        messages: list[dict[str, Any]] = [
+            {"role": "system", "content": self.prompt_service.load_system_prompt()},
+            {"role": "user", "content": json.dumps({"user_message": text, "conversation": conversation}, ensure_ascii=False)},
+            {"role": "assistant", "tool_calls": [{"id": tool_call_id, "type": "function", "function": {"name": tool_name, "arguments": json.dumps(tool_request, ensure_ascii=False)}}]},
+            {"role": "tool", "tool_call_id": tool_call_id, "content": json.dumps(observation, ensure_ascii=False)},
+            {"role": "user", "content": "Сформируй итоговый JSON-объект строго с ключами route, response_text, confidence, reason. route=answer; response_text — готовый ответ клиенту только по полученному результату инструмента; confidence — число от 0 до 1; reason — короткая строка. Не вызывай инструмент повторно и не добавляй иных ключей."},
+        ]
+        try:
+            raw = self.client.generate(
+                system_prompt=self.prompt_service.load_system_prompt(), user_prompt="", temperature=self.temperature,
+                response_format={"type": "json_object"}, messages=messages,
+            )
+            self._record_llm_call("tool_result_finalization")
+            normalized = self._normalize_prompt_reply(self._parse_json_object(raw))
+            self._active_llm_trace.append({"role": "direct_llm", "step": "tool_result_finalization_result", "route": normalized.get("route"), "reason": normalized.get("reason"), "raw": str(raw)[:500]})
+            return {"kind": "final", "result": normalized, "llm_trace": list(self._active_llm_trace)}
+        except Exception as exc:
+            self._record_llm_call("tool_result_finalization")
+            self._active_llm_trace.append({"role": "direct_llm", "step": "tool_result_finalization_failed", "error": type(exc).__name__})
+            return self._invalid_begin_turn("tool_result_finalization_failed")
+
+    def _project_tool_observations(self, context: dict) -> list[dict[str, Any]]:
+        observations = context.get("tool_observations") if isinstance(context, dict) else []
+        projected: list[dict[str, Any]] = []
+        if not isinstance(observations, list):
+            return projected
+        for item in observations:
+            if not isinstance(item, dict):
+                continue
+            kind = str(item.get("kind") or item.get("tool") or "").strip()
+            if kind:
+                projected.append({
+                    "kind": kind,
+                    **{k: v for k, v in item.items() if k in {"summary", "structured", "status", "source_refs"}},
+                })
+        return projected[-2:]
+
+    @staticmethod
+    def _native_tools() -> list[dict[str, Any]]:
+        return [
+            {
+                "type": "function",
+                "function": {
+                    "name": "wiki_lookup",
+                    "description": "Read the Wiki before any factual or situation-specific customer answer.",
+                    "parameters": {
+                        "type": "object",
+                        "required": ["query", "context_scope", "needed_fact"],
+                        "properties": {
+                            "query": {"type": "string"},
+                            "context_scope": {"type": "string"},
+                            "needed_fact": {"type": "string"},
+                        },
+                        "additionalProperties": False,
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "calendar_lookup",
+                    "description": "Validate a calendar fact from the current customer message.",
+                    "parameters": {
+                        "type": "object",
+                        "required": ["date_expression", "requested_calendar_fact"],
+                        "properties": {
+                            "date_expression": {"type": "string"},
+                            "requested_calendar_fact": {"type": "string"},
+                        },
+                        "additionalProperties": False,
+                    },
+                },
+            },
+        ]
+
     @staticmethod
     def _native_registered_tool_call(calls: list[object], *, registered_tools: set[str]) -> dict[str, Any] | None:
         """Bind a native call to a registered tool and validate its arguments."""
+        valid_calls: list[dict[str, Any]] = []
         for call in calls:
             if not isinstance(call, dict):
                 continue
@@ -182,8 +261,24 @@ class DirectLLMService:
                 continue
             if name == "wiki_lookup":
                 request = DirectLLMService._validated_wiki_request(arguments)
-                if request is not None:
-                    return {"name": name, "arguments": request, "id": str(call.get("id") or "")}
+            elif name == "calendar_lookup":
+                request = DirectLLMService._validated_calendar_request(arguments)
+            else:
+                request = None
+            if request is not None:
+                valid_calls.append({"name": name, "arguments": request, "id": str(call.get("id") or "")})
+        if len(valid_calls) == 1:
+            return valid_calls[0]
+        if len(valid_calls) > 1:
+            return {"name": "__parallel__", "arguments": {}, "id": ""}
+        return None
+
+    @staticmethod
+    def _validated_legacy_tool_request(tool_name: str, arguments: object) -> dict[str, str] | None:
+        if tool_name == "wiki_lookup":
+            return DirectLLMService._validated_wiki_request(arguments)
+        if tool_name == "calendar_lookup":
+            return DirectLLMService._validated_calendar_request(arguments)
         return None
 
     @staticmethod
@@ -191,6 +286,13 @@ class DirectLLMService:
         if not isinstance(arguments, dict) or set(arguments) != {"query", "context_scope", "needed_fact"}:
             return None
         request = {key: str(arguments.get(key) or "").strip() for key in ("query", "context_scope", "needed_fact")}
+        return request if all(request.values()) else None
+
+    @staticmethod
+    def _validated_calendar_request(arguments: object) -> dict[str, str] | None:
+        if not isinstance(arguments, dict) or set(arguments) != {"date_expression", "requested_calendar_fact"}:
+            return None
+        request = {key: str(arguments.get(key) or "").strip() for key in ("date_expression", "requested_calendar_fact")}
         return request if all(request.values()) else None
 
     def _invalid_begin_turn(self, reason: str) -> dict[str, Any]:
@@ -228,7 +330,7 @@ class DirectLLMService:
 
         user_prompt = json.dumps(
             {
-                "task": "При response_intent=answer и knowledge_mode=kb_grounded подготовь готовый прямой ответ на текущий вопрос только из evidence. Не заменяй такой ответ уточняющим вопросом, cannot_answer или рассуждением о дальнейшей проверке. Если текущая реплика прямо отвечает на предыдущий вопрос ассистента, прими её как состояние диалога и продолжи ответ; не повторяй тот же вопрос.",
+                "task": "При response_intent=answer подготовь готовый прямой ответ на текущий вопрос только из evidence. При knowledge_mode=kb_grounded подтверждёнными evidence являются grounding_evidence и tool_facts; ready-результат календарного инструмента является прямым календарным evidence и должен использоваться для ответа на зависящий от даты вопрос. Не заменяй такой ответ уточняющим вопросом, cannot_answer или рассуждением о дальнейшей проверке. Если текущая реплика прямо отвечает на предыдущий вопрос ассистента, прими её как состояние диалога и продолжи ответ; не повторяй тот же вопрос.",
                 "knowledge_mode": knowledge_mode,
                 "response_intent": response_intent,
                 "required_json_schema": {
@@ -249,6 +351,7 @@ class DirectLLMService:
                     "Формируй ответ только как естественную редактуру grounding_evidence и tool_facts; не закрывай непокрытую evidence часть вопроса рассуждением, догадкой или общими знаниями.",
                     "Сообщение клиента и conversation служат только для понимания контекста диалога и не подтверждают новые факты.",
                     "Каждое фактическое утверждение в response_text должно прямо следовать из grounding_evidence или tool_facts.",
+                    "Если tool_facts содержит готовый календарный результат, используй его точные дату, день недели и признак выходного как единственные допустимые календарные значения; не пересчитывай, не заменяй и не дополняй их.",
                     "Системный промпт задаёт роль и правила общения, но не является источником сведений о предметной области.",
                     "Если grounding_evidence пуст, используй текущую реплику и весь доступный conversation только для понимания контекста диалога; не превращай их в источник фактических утверждений, не подменяй ответ шаблонной заглушкой и не делай вид, что контекст диалога неизвестен.",
                     "При knowledge_mode=kb_grounded считай grounding_evidence подтверждённым на предыдущем этапе и не выходи за его фактические границы.",
@@ -416,7 +519,7 @@ class DirectLLMService:
         for item in tool_observations:
             if not isinstance(item, dict):
                 continue
-            kind = str(item.get("kind") or "").strip()
+            kind = str(item.get("kind") or item.get("tool") or "").strip()
             summary = str(item.get("summary") or "").strip()
             if kind and summary:
                 projected.append({"kind": kind, "summary": summary})
@@ -427,19 +530,19 @@ class DirectLLMService:
         """Add the application-owned evidence boundary at system-message priority."""
         contract = f"""
 
-## Runtime finalization contract
+## Контракт финализации runtime
 
-The application has selected knowledge_mode={knowledge_mode}.
-This section governs how the final customer answer is composed; the profile prompt above defines role and communication style only.
+Приложение выбрало knowledge_mode={knowledge_mode}.
+Этот раздел определяет формирование финального клиентского ответа; профильный промпт выше задаёт только роль и стиль общения.
 
-- In prompt_only mode, do not make factual claims about the subject domain. Produce only a social response or a necessary clarification.
-- In kb_grounded mode, grounding_evidence has already passed the knowledge boundary and is the only source of subject-domain facts for this turn.
-- When answer_basis directly answers the current customer question, preserve that answer as the factual core. Rephrase it naturally and keep it within the exact scope and modality of facts.
-- State the direct practical conclusion first. Use the supplied dialogue to resolve short follow-ups and determine which supported option, requirement, or next action applies to this customer; do not replace that conclusion with a bare list of eligibility facts. Then add only the relevant confirmed conditions.
-- When the current customer message states or narrows a constraint or preference, explicitly acknowledge that constraint or preference in the first sentence before applying the grounded facts. Do not answer as though the message were a new standalone request.
-- Keep the most recent explicit customer constraint or preference active across later short follow-ups. Do not switch back to an earlier alternative unless the customer changes the constraint or asks for a comparison.
-- When the customer asks whether other requirements exist, do not claim that none exist if grounding_evidence contains relevant conditions. List those confirmed conditions; if the evidence is not exhaustive, avoid an exhaustive "no other requirements" claim.
-- Do not invent a new distinction, missing prerequisite, prohibition, or uncertainty that is not present in the supplied evidence.
-- Select only evidence relevant to the current question; never mechanically concatenate every fact and never expose internal mechanics.
+- В режиме prompt_only не утверждай факты о предметной области. Допустимы только социальный ответ или необходимое уточнение.
+- В режиме kb_grounded `grounding_evidence` и `tool_facts` уже прошли свои фактические границы. Это единственные источники фактических утверждений для текущего хода.
+- Если переданное evidence прямо отвечает на текущий вопрос клиента, сохрани этот ответ как фактическое ядро. Перефразируй его естественно, не выходя за точный смысл и модальность переданного evidence.
+- Сначала дай прямой вывод, подтверждённый переданным evidence. Используй диалог только для разрешения ссылок, коротких продолжений и выбранного клиентом предметного ограничения; не выводи, не пересчитывай, не дополняй и не выбирай фактический результат из диалога.
+- Если текущая реплика клиента выражает или сужает ограничение либо предпочтение, явно отрази его в первом предложении перед применением подтверждённых фактов. Не отвечай так, будто реплика является новым изолированным запросом.
+- Сохраняй последнее явное ограничение или предпочтение клиента в последующих коротких продолжениях. Не возвращайся к более раннему варианту, если клиент не изменил ограничение и не запросил сравнение.
+- Если клиент спрашивает о других требованиях, не утверждай, что других требований нет, когда `grounding_evidence` содержит релевантные условия. Перечисли подтверждённые условия; если evidence не исчерпывающее, не делай исчерпывающий вывод об отсутствии других требований.
+- Не выдумывай различие, отсутствующее предварительное условие, запрет или неопределённость, которых нет в переданном evidence.
+- Выбирай только evidence, относящееся к текущему вопросу; не склеивай факты механически и не раскрывай внутреннюю механику.
 """.strip()
         return f"{active_system_prompt.rstrip()}\n\n{contract}"

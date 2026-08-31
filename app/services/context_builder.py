@@ -35,6 +35,7 @@ def build_context(
 
     return {
         "user_message": payload.text,
+        "calendar_reference_at": payload.received_at.isoformat() if payload.received_at is not None else None,
         "recent_turns": recent_turns,
         "recent_messages": recent_messages_payload,
         "session_summary": session_summary,
