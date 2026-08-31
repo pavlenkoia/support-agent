@@ -17,7 +17,7 @@ It is not a ticket router and not an escalation-first bot.
 3. Substantive KB reasoning must pass through a dedicated KB agent that reads the compiled wiki selectively rather than treating lexical snippets as the final reasoning surface.
 4. The customer-facing support agent and the KB agent must use separate external prompt files.
 5. The agent must not fabricate facts when KB/tool evidence is missing.
-6. One customer-facing model turn receives the native optional `wiki_lookup` tool. It may return a ready non-factual reply only for a pure short social turn without a request or customer situation. For every substantive turn, the system prompt requires `wiki_lookup` before customer facts, procedures, contacts, promises, domain clarification, `cannot_answer`, or `out_of_scope`; the application does not run a separate LLM classifier, semantic router, or forced retrieval path. Wiki is the only business-fact source. Native `tool_choice=auto` intentionally leaves the action choice with the model, while literal no-send replays prove that substantive turns selected Wiki.
+6. One customer-facing model turn receives the native optional `wiki_lookup` tool with the required JSON arguments `query`, `context_scope`, and `needed_fact`. The model chooses it through `tool_choice=auto`; the application validates the exact tool name and its typed arguments, then executes only that request. For a contextual follow-up, the model must preserve the selected subject in `context_scope`. A pure short social turn without a request or customer situation may return a ready non-factual reply. For every substantive turn, the system prompt requires `wiki_lookup` before customer facts, procedures, contacts, promises, domain clarification, `cannot_answer`, or `out_of_scope`; the application does not run a separate LLM classifier, semantic router, or forced retrieval path. Wiki is the only business-fact source. Literal no-send replays prove that substantive turns selected Wiki.
 7. A planner-approved `out_of_scope` is terminal only on the first customer turn. For a follow-up after an assistant reply, it must first attempt KB reading so a contextual post-service request cannot be discarded as unrelated.
 8. Every customer-visible terminal route passes through one output boundary: first replies begin with exactly one `Здравствуйте!`. The boundary normalizes formatting but never replaces a model-written customer reply with an application template; an invalid or missing final-model payload is `retry_pending` with empty customer text.
 9. If a substantive answer cannot be grounded, the final outcome must be `cannot_answer`.
@@ -41,13 +41,13 @@ It is not a ticket router and not an escalation-first bot.
 ## Decision loop
 
 Per inbound turn:
-1. run one customer-facing model turn with the native optional `wiki_lookup` tool
+1. run one customer-facing model turn with the native optional `wiki_lookup(query, context_scope, needed_fact)` tool
 2. if the model returns a final non-factual reply, deliver that model text through the common output boundary; no second finalizer/model call is made
-3. if the model calls Wiki, read the selected material through the KB agent and pass only ready evidence to the common finalizer
+3. if the model calls Wiki, validate the exact registered function name and typed JSON arguments, then read only that model-selected query/scope through the KB agent and pass only ready evidence to the common finalizer
 4. force a KB read before accepting `out_of_scope` on a contextual follow-up
 5. never answer a substantive business question from the system prompt
 6. emit one of the allowed outcomes
-7. normalize OpenAI-compatible native tool envelopes before action dispatch: accept the declared `wiki_lookup` name or the explicit `arguments.tool_call=wiki_lookup` envelope when a provider corrupts its function-name field; parse the first valid JSON object if a provider appends trailing junk. This protocol normalization never selects Wiki or creates factual content.
+7. malformed function names, malformed JSON, missing required tool arguments, unknown tools, or parallel calls fail closed as `retry_pending`; application code never guesses a tool or rewrites semantic arguments.
 
 ## Tool-aware reasoning
 

@@ -28,9 +28,21 @@ Telegram / VK inbound event
 - **Technical LLM/Wiki failure is fail-closed.** It creates `retry_pending` with empty customer text and is retried by the transport worker. It is never converted into a guessed domain answer.
 - **The first-reply greeting is deterministic.** `PolicyService.finalize_simple_customer_text()` adds exactly one `Здравствуйте!` to the first non-empty customer-visible reply. It adds none to later replies and does not duplicate a model-provided greeting.
 
-## Native tool compatibility
+## Typed native tool contract
 
-The provider-facing adapter normalizes native calls against the registered tool registry, never by treating arbitrary malformed calls as a valid action. It accepts a registered name, a registered name followed by provider-appended serialized content, or an explicit registered `tool_call` in arguments. Regular JSON envelopes are parsed from their first valid object when a provider appends junk. If a native call cannot be bound to one registered capability, it fails closed rather than guessing which tool to run. This protocol normalization does not choose whether Wiki is needed and does not synthesize business facts.
+`wiki_lookup` is a typed native tool. The customer model selects it with `tool_choice=auto` and supplies exactly these JSON arguments:
+
+```json
+{
+  "query": "focused semantic Wiki query",
+  "context_scope": "subject or constraint selected in the dialogue",
+  "needed_fact": "specific fact needed for the current turn"
+}
+```
+
+The OpenAI-compatible adapter dispatches only an exact registered function name with JSON arguments that validate against that tool schema; malformed names, malformed JSON, missing fields, and unknown tools fail closed as `retry_pending`. It never guesses a tool from a structural call object or rewrites an argument into a business decision. `parallel_tool_calls=false` bounds the customer action to one call. The runtime passes the model-selected request to catalog navigation, coverage review, and grounded extraction. For a contextual follow-up, `context_scope` preserves the last explicit customer-selected subject; it must not be widened to a neighboring variant unless the customer asks to compare or change it.
+
+The calendar runtime remains a separate factual capability in the current release; it is not represented as `wiki_lookup` or inferred from business context.
 
 ## Main runtime components
 
