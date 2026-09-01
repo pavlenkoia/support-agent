@@ -10,6 +10,8 @@ python3 scripts/release.py
 
 Before the command, build a fresh `deploy/runtime-profile/` from the current clean checkout and promote that exact tree to the external runtime profile using the reviewed atomic profile-swap procedure. The generated directory is ignored by Git.
 
+A failed candidate preparation is **not** a live-profile rollback event. It must not delete, recreate, or copy the external profile path after containers may have mounted it: Docker bind mounts retain the old directory inode and can otherwise lose access to prompts and Wiki files. Candidate rollback is limited to candidate/authored artifacts; only the atomic promotion function may replace the external profile, and it must run before this release command recreates the application plane.
+
 The command independently rebuilds `deploy/profile-source/` in a temporary directory and verifies that `deploy/runtime-profile/` matches it exactly. It then verifies that the external runtime profile has the same exact file set and bytes, obtains the full Git SHA, builds release-tagged images for `app`, `worker`, `vk-worker`, `viewer-web`, and `viewer-push-worker`, and force-recreates exactly those services. It never recreates `db` or its volume.
 
 A release is successful only when the command exits with `RELEASE SUCCESS` and writes a JSON receipt beneath `${SUPPORT_AGENT_RUNTIME_ROOT_HOST:-/home/tian/support-agent-runtime}/releases/`.
