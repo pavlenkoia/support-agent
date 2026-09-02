@@ -1,5 +1,11 @@
 # Durable VK turn state-machine replacement
 
+## Current implementation status
+
+- Slices 1–4 are implemented in source and covered by Docker tests: VK ingress opens/extends a durable turn, the worker runs `ingest → expired-turn recovery → due-turn processing`, and normal/retry generation share `process_due_turns` with one journaled outbound intent.
+- The prior in-memory `InboundQueue` remains injectable only for legacy unit-test compatibility. Production construction does not create it; the VK worker uses the durable processor.
+- Slice 5 migration safety is intentionally conservative: `scripts/classify_legacy_vk_events.py` is read-only by default and never sends/replays. Existing nonterminal historical rows must be reviewed explicitly before any separate operator-approved state change.
+
 ## Goal
 
 Replace the current split ownership of a VK customer turn (in-memory `InboundQueue`, `transport_events`, `conversation_transport_states`, and separate retry delivery) with one database-backed turn record and one delivery state machine.
