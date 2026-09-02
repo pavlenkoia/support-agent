@@ -64,6 +64,23 @@ def claim_due_turn(session: Session, *, turn_id: int, now: datetime, lease_secon
     return turn
 
 
+def claim_next_due_turn(session: Session, *, now: datetime, lease_seconds: int) -> VkTurn | None:
+    current = _utc(now)
+    turns = session.scalars(
+        select(VkTurn)
+        .where(
+            ((VkTurn.status.in_(("open", "retry_pending"))) & (VkTurn.due_at <= current))
+            | ((VkTurn.status == "claimed") & (VkTurn.claim_until <= current))
+        )
+        .order_by(VkTurn.due_at, VkTurn.id)
+        .with_for_update(skip_locked=True)
+        .limit(1)
+    ).all()
+    if not turns:
+        return None
+    return claim_due_turn(session, turn_id=turns[0].id, now=current, lease_seconds=lease_seconds)
+
+
 def suppress_turn(session: Session, *, turn_id: int, claim_token: str | None, reason: str) -> bool:
     turn = session.scalar(select(VkTurn).where(VkTurn.id == turn_id).with_for_update())
     if turn is None or turn.status in {"sent", "suppressed", "failed"}:
