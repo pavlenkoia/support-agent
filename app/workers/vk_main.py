@@ -51,11 +51,11 @@ def process_once(gateway: VKGatewayService, poller: VKLongPollClient, acker: Lon
 def process_tick(gateway: VKGatewayService, poller: VKLongPollClient, acker: LongPollAcker, state: VKLongPollState | None) -> dict:
     """Persist all currently available VK input before any retry can send."""
     result = process_once(gateway=gateway, poller=poller, acker=acker, state=state)
-    recovery = gateway.recover_expired_received_events()
-    retry = gateway.process_due_retries()
+    recovery = gateway.recover_expired_turns()
+    due_turns = gateway.process_due_turns()
     return result | {
         "recovered": recovery["recovered"],
-        "retried": retry["processed"],
+        "retried": due_turns,
     }
 
 

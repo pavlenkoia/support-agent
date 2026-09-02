@@ -18,6 +18,7 @@ from app.models.message import Message
 from app.models.outbound_transport_send import OutboundTransportSend
 from app.models.transport_event import TransportEvent
 from app.models.user import User
+from app.models.vk_turn import VkTurn
 from app.schemas.message import InboundMessage
 from app.services.case_resolution import ensure_conversation, resolve_case
 from app.services.inbound_queue import Generation, InboundQueue
@@ -41,7 +42,7 @@ from app.services.persistence import (
     set_last_inbound_message,
 )
 from app.services.routing import RoutingService
-from app.services.vk_turns import open_or_extend_turn
+from app.services.vk_turns import claim_next_due_turn, open_or_extend_turn, recover_expired_turns
 
 
 class VKGatewayService:
@@ -60,12 +61,10 @@ class VKGatewayService:
         self.client = client or getattr(self.sender, "client", None) or VKAPIClient()
         self.session_factory = session_factory
         self.override_silence_seconds = override_silence_seconds or settings.vk_override_silence_seconds
-        self.queue = queue or InboundQueue(
-            self._process_generation,
-            quiet_seconds=settings.inbound_coalesce_quiet_seconds,
-            max_wait_seconds=settings.inbound_coalesce_max_wait_seconds,
-            autostart=True,
-        )
+        # VK production uses the durable database turn ledger. `queue` remains
+        # injectable only while legacy tests are migrated; it is never created
+        # implicitly and therefore cannot own a production turn after restart.
+        self.queue = queue
 
     def handle_event(self, event: dict[str, Any]) -> dict[str, Any]:
         event_type = str(event.get("type") or "")
@@ -123,8 +122,10 @@ class VKGatewayService:
                 session.commit()
                 return {"ok": True, "ignored": False, "suppressed": True, "reason": "human_override_active", "case": case, "event_type": "message_new"}
             session.commit()
-        batch = self.queue.submit(inbound)
-        return {"ok": True, "ignored": False, "queued": True, "event_type": "message_new", "batch_id": batch.batch_id, "revision": batch.revision}
+        if self.queue is not None:
+            batch = self.queue.submit(inbound)
+            return {"ok": True, "ignored": False, "queued": True, "event_type": "message_new", "batch_id": batch.batch_id, "revision": batch.revision}
+        return {"ok": True, "ignored": False, "queued": False, "durable_turn_id": turn.id, "event_type": "message_new"}
 
     def _process_generation(self, inbound: InboundMessage, generation: Generation) -> str | None:
         """Run one combined turn; raw events were persisted at ingress already."""
@@ -538,6 +539,161 @@ class VKGatewayService:
             "suppressed": False,
         }
 
+    def recover_expired_turns(self, *, now: datetime | None = None) -> dict[str, int]:
+        current = self._as_utc(now or datetime.now(UTC))
+        with self.session_factory() as session:
+            recovered = recover_expired_turns(
+                session,
+                now=current,
+                retry_delay_seconds=settings.kb_agent_deferred_retry_delay_seconds,
+            )
+            session.commit()
+        return {"recovered": recovered}
+
+    def process_due_turns(self, *, now: datetime | None = None) -> int:
+        """Claim and deliver durable VK turns without relying on process memory."""
+        current = self._as_utc(now or datetime.now(UTC))
+        processed = 0
+        while True:
+            with self.session_factory() as session:
+                turn = claim_next_due_turn(
+                    session,
+                    now=current,
+                    lease_seconds=settings.vk_generation_lease_seconds,
+                )
+                if turn is None:
+                    session.commit()
+                    return processed
+                turn_id, claim_token = turn.id, turn.claim_token
+                events = list(
+                    session.scalars(
+                        select(TransportEvent)
+                        .where(
+                            TransportEvent.platform == "vk",
+                            TransportEvent.event_type == "message_new",
+                            TransportEvent.conversation_external_id == f"vk:{turn.conversation_id}".replace("vk:", ""),
+                            TransportEvent.id >= turn.first_event_id,
+                            TransportEvent.id <= turn.last_event_id,
+                        )
+                        .order_by(TransportEvent.received_at, TransportEvent.id)
+                    )
+                )
+                # Conversation external_id is stored as `vk:<peer>` whereas the
+                # transport ledger retains the same value; use the canonical
+                # conversation lookup when event IDs alone are insufficient.
+                if not events:
+                    conversation = session.get(Conversation, turn.conversation_id)
+                    if conversation is not None:
+                        events = list(
+                            session.scalars(
+                                select(TransportEvent)
+                                .where(
+                                    TransportEvent.platform == "vk",
+                                    TransportEvent.event_type == "message_new",
+                                    TransportEvent.conversation_external_id == conversation.external_id,
+                                    TransportEvent.id >= turn.first_event_id,
+                                    TransportEvent.id <= turn.last_event_id,
+                                )
+                                .order_by(TransportEvent.received_at, TransportEvent.id)
+                            )
+                        )
+                session.commit()
+            if not events or claim_token is None:
+                self._finish_turn(turn_id, claim_token, status="failed", reason="turn_sources_missing")
+                processed += 1
+                continue
+
+            inbound = self._combined_retry_inbound(events)
+            try:
+                result = self.routing.handle_inbound(inbound, persist_inbound=False)
+            except Exception as exc:
+                self._finish_turn(turn_id, claim_token, status="retry_pending", reason=f"routing_error:{type(exc).__name__}", due_at=current)
+                processed += 1
+                continue
+            if self._is_retry_pending(result):
+                self._finish_turn(turn_id, claim_token, status="retry_pending", reason="routing_retry_pending", due_at=current)
+                processed += 1
+                continue
+            reply_text = self._build_reply_text(result)
+            if not reply_text:
+                self._finish_turn(turn_id, claim_token, status="failed", reason="completed_without_customer_reply")
+                processed += 1
+                continue
+
+            with self.session_factory() as session:
+                turn = session.get(VkTurn, turn_id)
+                conversation = session.get(Conversation, turn.conversation_id) if turn is not None else None
+                if turn is None or turn.status != "claimed" or turn.claim_token != claim_token or conversation is None:
+                    session.commit()
+                    processed += 1
+                    continue
+                state = self._locked_transport_state(session, conversation_id=conversation.id)
+                if self._is_stale_or_overridden(state, inbound, now=current):
+                    turn.status, turn.reason, turn.claim_token, turn.claim_until = "suppressed", "stale_or_human_override", None, None
+                    for event in events:
+                        stored = session.get(TransportEvent, event.id)
+                        if stored is not None:
+                            mark_transport_event_processed(session, stored, status="suppressed")
+                    session.commit()
+                    processed += 1
+                    continue
+                case_id = (result.get("case") or {}).get("case_id") or turn.case_id
+                random_id = str(self._retry_random_id(turn.id))
+                existing = session.scalar(select(OutboundTransportSend).where(OutboundTransportSend.random_id == random_id))
+                if existing is None:
+                    persist_outbound_transport_send(
+                        session,
+                        platform="vk",
+                        conversation_id=conversation.id,
+                        case_id=case_id,
+                        peer_external_id=inbound.external_chat_id,
+                        random_id=random_id,
+                        content_text=reply_text,
+                        send_status="pending",
+                    )
+                session.commit()
+            try:
+                delivery = self.sender.send_message(peer_id=inbound.external_chat_id, text=reply_text, random_id=random_id)
+            except Exception as exc:
+                self._finish_turn(turn_id, claim_token, status="retry_pending", reason=f"send_error:{type(exc).__name__}", due_at=current)
+                processed += 1
+                continue
+            sent = bool(delivery.get("sent", delivery.get("ok")))
+            with self.session_factory() as session:
+                turn = session.get(VkTurn, turn_id)
+                if turn is not None and turn.status == "claimed" and turn.claim_token == claim_token:
+                    turn.status = "sent" if sent else "retry_pending"
+                    turn.reason = None if sent else self._format_delivery_error(delivery)
+                    turn.claim_token = turn.claim_until = None
+                    for event in events:
+                        stored = session.get(TransportEvent, event.id)
+                        if stored is not None:
+                            mark_transport_event_processed(session, stored, status="processed" if sent else "retry_pending")
+                    finalize_outbound_transport_send(
+                        session,
+                        random_id=random_id,
+                        external_message_id=delivery.get("external_message_id") if sent else None,
+                        sent_at=delivery.get("sent_at"),
+                        send_status="sent" if sent else "failed",
+                    )
+                    if sent:
+                        current_state = self._locked_transport_state(session, conversation_id=turn.conversation_id)
+                        set_last_bot_reply(session, current_state, replied_at=delivery.get("sent_at"))
+                    session.commit()
+            if sent and case_id is not None:
+                self.routing.record_outbound_message(case_id, reply_text)
+            processed += 1
+
+    def _finish_turn(self, turn_id: int, claim_token: str | None, *, status: str, reason: str, due_at: datetime | None = None) -> None:
+        with self.session_factory() as session:
+            turn = session.get(VkTurn, turn_id)
+            if turn is not None and turn.status == "claimed" and turn.claim_token == claim_token:
+                turn.status, turn.reason = status, reason
+                turn.claim_token = turn.claim_until = None
+                if due_at is not None:
+                    turn.due_at = due_at + timedelta(seconds=settings.kb_agent_deferred_retry_delay_seconds)
+                session.commit()
+
     def process_due_retries(self, *, now: datetime | None = None) -> dict[str, int]:
         due_at = self._as_utc(now or datetime.now(UTC))
         with self.session_factory() as session:
@@ -932,7 +1088,8 @@ class VKGatewayService:
                 admin_replied_at=event_time,
                 silence_seconds=self.override_silence_seconds,
             )
-            self.queue.cancel("vk", peer_id)
+            if self.queue is not None:
+                self.queue.cancel("vk", peer_id)
             mark_transport_event_processed(session, transport_event)
             session.commit()
             return {

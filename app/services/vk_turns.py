@@ -95,6 +95,23 @@ def claim_next_due_turn(session: Session, *, now: datetime, lease_seconds: int) 
     return claim_due_turn(session, turn_id=turns[0].id, now=current, lease_seconds=lease_seconds)
 
 
+def recover_expired_turns(session: Session, *, now: datetime, retry_delay_seconds: int) -> int:
+    current = _utc(now)
+    turns = session.scalars(
+        select(VkTurn)
+        .where(VkTurn.status == "claimed", VkTurn.claim_until <= current)
+        .with_for_update(skip_locked=True)
+    ).all()
+    for turn in turns:
+        turn.status = "retry_pending"
+        turn.reason = "claim_lease_expired"
+        turn.claim_token = None
+        turn.claim_until = None
+        turn.due_at = current + timedelta(seconds=retry_delay_seconds)
+    session.flush()
+    return len(turns)
+
+
 def suppress_turn(session: Session, *, turn_id: int, claim_token: str | None, reason: str) -> bool:
     turn = session.scalar(select(VkTurn).where(VkTurn.id == turn_id).with_for_update())
     if turn is None or turn.status in {"sent", "suppressed", "failed"}:

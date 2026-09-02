@@ -35,13 +35,13 @@ class OrderedGateway(RecordingGateway):
         self.steps.append("inbound")
         return super().handle_event(event)
 
-    def recover_expired_received_events(self):
+    def recover_expired_turns(self):
         self.steps.append("recovery")
         return {"recovered": 0}
 
-    def process_due_retries(self):
-        self.steps.append("retry")
-        return {"processed": 0}
+    def process_due_turns(self):
+        self.steps.append("due_turn")
+        return 0
 
 
 class RecordingAcker:
@@ -110,7 +110,7 @@ def test_vk_tick_persists_new_longpoll_updates_before_due_retries() -> None:
     )
 
     assert result["processed"] == 1
-    assert gateway.steps == ["inbound", "recovery", "retry"]
+    assert gateway.steps == ["inbound", "recovery", "due_turn"]
 
 
 def test_vk_longpoll_default_wait_keeps_due_retries_under_fifteen_seconds() -> None:
