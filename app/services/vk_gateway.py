@@ -103,9 +103,13 @@ class VKGatewayService:
             conversation = ensure_conversation(session, channel="vk", external_chat_id=peer_id)
             state = self._locked_transport_state(session, conversation_id=conversation.id)
             set_last_inbound_message(session, state, external_message_id=message_id)
+            case = resolve_case(session, inbound)
+            # Viewer history is an audit projection of accepted VK input, not a
+            # record of only turns that reached automatic delivery.  Persist it
+            # before queuing so a manual operator reply/cancel cannot erase the
+            # customer's original question from the dialogue.
+            persist_inbound_message(session, case["case_id"], inbound)
             if is_override_active(state, now=event_time):
-                case = resolve_case(session, inbound)
-                persist_inbound_message(session, case["case_id"], inbound)
                 mark_transport_event_processed(session, transport_event, status="suppressed")
                 session.commit()
                 return {"ok": True, "ignored": False, "suppressed": True, "reason": "human_override_active", "case": case, "event_type": "message_new"}
@@ -167,7 +171,6 @@ class VKGatewayService:
                     self._mark_generation_sources(session, generation, status="suppressed")
                     session.commit()
                     return "superseded"
-                persist_inbound_message(session, case_id, inbound)
                 random_id = str(random.randint(1, 2_147_483_647))
                 persist_outbound_transport_send(
                     session,
@@ -670,10 +673,9 @@ class VKGatewayService:
                         mark_transport_event_failed(session, source_event, "retry_completed_without_case")
                     session.commit()
                     return claimed_count
-                # Persist the combined unanswered customer turn and its durable
-                # outbound intent atomically. The stable random_id makes replay
-                # idempotent after a process crash.
-                persist_inbound_message(session, case_id, inbound)
+                # Inbound messages were durably projected at VK ingress.  Only
+                # journal the retry reply here; replaying the source turn must
+                # not duplicate Viewer history.
                 persist_outbound_transport_send(
                     session,
                     platform="vk",

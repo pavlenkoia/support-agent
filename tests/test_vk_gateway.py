@@ -369,7 +369,8 @@ def test_vk_gateway_coalesces_two_messages_into_one_runtime_turn(tmp_path: Path)
     with session_factory() as session:
         messages = session.scalars(select(Message).order_by(Message.id)).all()
         assert [(message.role, message.content) for message in messages] == [
-            ("user", "Муж хочет прыгнуть с парашютом😁\nХочу ему сделать подарок"),
+            ("user", "Муж хочет прыгнуть с парашютом😁"),
+            ("user", "Хочу ему сделать подарок"),
         ]
         assert routing.recorded_outbound == [(1, "Ответ на полный запрос")]
         events = session.scalars(select(TransportEvent).order_by(TransportEvent.id)).all()
@@ -579,7 +580,8 @@ def test_vk_gateway_retries_all_unanswered_messages_in_order_as_one_turn(tmp_pat
     with session_factory() as session:
         persisted_messages = list(session.scalars(select(Message).order_by(Message.id)))
         assert [(message.role, message.content) for message in persisted_messages] == [
-            ("user", "больше требований никаких нет?\nкакой-то инструктаж проходят"),
+            ("user", "больше требований никаких нет?"),
+            ("user", "какой-то инструктаж проходят"),
         ]
 
 
@@ -991,6 +993,49 @@ def test_vk_gateway_recovers_missing_inbound_context_before_persisting_admin_rep
         user = session.scalar(select(User).where(User.external_id == "vk:3002"))
         assert user is not None
         assert user.display_name == "Иван Петров"
+
+
+def test_vk_gateway_keeps_queued_inbounds_in_viewer_when_operator_answers_manually(tmp_path: Path) -> None:
+    sender = RecordingVKSender()
+    routing = StubRouting(response_text="Автоматический ответ не должен уйти")
+    service, session_factory = make_service(tmp_path, sender=sender, routing=routing)
+    service.queue = InboundQueue(service._process_generation, quiet_seconds=60, max_wait_seconds=120)
+
+    for message_id, message_text in [(101, "Первый вопрос"), (102, "Уточнение к первому вопросу")]:
+        queued = service.handle_event(
+            {
+                "type": "message_new",
+                "group_id": 55,
+                "object": {
+                    "message": {
+                        "id": message_id,
+                        "peer_id": 2002,
+                        "from_id": 3002,
+                        "text": message_text,
+                        "date": 1780000000 + message_id,
+                    }
+                },
+            }
+        )
+        assert queued["queued"] is True
+
+    admin_reply = service.handle_event(
+        {
+            "type": "message_reply",
+            "group_id": 55,
+            "object": {"message": {"id": 7001, "peer_id": 2002, "text": "Отвечу сам", "date": 1780000200}},
+        }
+    )
+    assert admin_reply["sent_by"] == "admin"
+    assert sender.calls == []
+
+    with session_factory() as session:
+        messages = session.scalars(select(Message).order_by(Message.created_at, Message.id)).all()
+        assert [(message.role, message.content) for message in messages] == [
+            ("user", "Первый вопрос"),
+            ("user", "Уточнение к первому вопросу"),
+            ("human", "Отвечу сам"),
+        ]
 
 
 def test_vk_gateway_unmatched_admin_reply_activates_override_and_suppresses_inbound(tmp_path: Path) -> None:

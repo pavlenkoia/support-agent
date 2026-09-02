@@ -148,9 +148,10 @@ For `retry_pending`, `outcome.outcome_payload.reason` preserves the internal fai
 ## Transport persistence side-contracts
 
 These are internal persistence contracts rather than public HTTP endpoints, but they are part of the shipped repository behavior:
-- Telegram and VK accepted text events are deduplicated, journaled as individual raw `transport_events`, and enqueued before `RoutingService.handle_inbound()`; transport polling/webhook handlers return without waiting for routing or an external send
+- Telegram and VK accepted text events are deduplicated, journaled as individual raw `transport_events`, durably projected as individual `user` messages before enqueue, and then enqueued before `RoutingService.handle_inbound()`; transport polling/webhook handlers return without waiting for routing or an external send
+- queue coalescing affects one routing/answer turn only; it must not merge, remove, or duplicate the individual customer messages shown in Viewer
 - the shared in-memory queue is keyed by `(channel, external_chat_id)`, combines a package after 5 seconds of quiet or 15 seconds from its first source event, and joins source texts with one newline in receive order
-- a package revision is superseded by a new source event or human override; only the current revision can persist its combined `user` message or send/store its `assistant` reply
+- a package revision is superseded by a new source event or human override; only the current revision can journal/send/store its `assistant` reply, while already accepted inbound `user` messages remain in Viewer history
 - human override cancels the pending package and is rechecked immediately in the final delivery boundary
 - package state is process-local; pending packages are not restored/replayed after a worker restart
 - raw transport events are journaled with a dedupe key and processing status
