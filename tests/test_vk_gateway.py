@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -200,6 +201,19 @@ class StubRouting:
 
     def record_outbound_message(self, case_id: int, text: str) -> None:
         self.recorded_outbound.append((case_id, text))
+
+
+class BlockingRouting(StubRouting):
+    def __init__(self) -> None:
+        super().__init__()
+        self.started = threading.Event()
+        self.release = threading.Event()
+
+    def handle_inbound(self, payload, *, persist_inbound: bool = True) -> dict:
+        _ = (payload, persist_inbound)
+        self.started.set()
+        assert self.release.wait(timeout=3)
+        return super().handle_inbound(payload, persist_inbound=False)
 
 
 class EmptyReplyRouting(StubRouting):
@@ -1161,6 +1175,35 @@ def test_vk_gateway_marks_empty_completed_reply_for_human_handling(tmp_path: Pat
         assert event.status == "waiting_human"
         assert event.error_text == "completed_without_customer_reply"
 
+
+
+def test_vk_gateway_does_not_recover_an_active_generation_as_a_second_turn(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr("app.services.vk_gateway.settings.vk_received_event_timeout_seconds", 1)
+    routing = BlockingRouting()
+    sender = RecordingVKSender()
+    service, session_factory = make_service(tmp_path, routing=routing, sender=sender)
+    service.queue = InboundQueue(service._process_generation, quiet_seconds=0, max_wait_seconds=0)
+
+    queued = service.handle_event(
+        {
+            "type": "message_new",
+            "group_id": 55,
+            "object": {"message": {"id": 107, "peer_id": 2008, "from_id": 3008, "text": "Можно купить?", "date": 1780000800}},
+        }
+    )
+    assert queued["queued"] is True
+    assert service.queue.flush_due(background=True) == 1
+    assert routing.started.wait(timeout=1)
+
+    assert service.recover_expired_received_events(now=datetime.now(UTC) + timedelta(seconds=2)) == {"recovered": 0}
+    with session_factory() as session:
+        event = session.scalar(select(TransportEvent).where(TransportEvent.dedupe_key == "vk:message_new:2008:107"))
+        assert event is not None
+        assert event.status == "processing"
+
+    routing.release.set()
+    assert threading.Event().wait(0.1) is False
+    assert sender.calls == [("2008", "Готовый ответ")]
 
 
 def test_vk_gateway_recovers_expired_received_event_by_retrying_automatically(tmp_path: Path, monkeypatch) -> None:

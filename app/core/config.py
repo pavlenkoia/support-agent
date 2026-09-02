@@ -92,6 +92,7 @@ class Settings(BaseSettings):
     vk_retry_backoff_seconds: float = 1.0
     vk_override_silence_seconds: int = 3600
     vk_received_event_timeout_seconds: int = 90
+    vk_generation_lease_seconds: int = 600
 
     viewer_timezone: str = "Asia/Yekaterinburg"
     viewer_auth_enabled: bool = False

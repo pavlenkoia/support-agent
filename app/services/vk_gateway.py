@@ -119,6 +119,7 @@ class VKGatewayService:
 
     def _process_generation(self, inbound: InboundMessage, generation: Generation) -> str | None:
         """Run one combined turn; raw events were persisted at ingress already."""
+        self._claim_generation_sources(generation)
         try:
             result = self.routing.handle_inbound(inbound, persist_inbound=False)
         except Exception as exc:
@@ -292,6 +293,18 @@ class VKGatewayService:
                         )
             session.commit()
         return {"recovered": len(events)}
+
+    def _claim_generation_sources(self, generation: Generation) -> None:
+        """Lease the active queue turn so timeout recovery cannot run it twice."""
+        lease_until = datetime.now(UTC) + timedelta(seconds=settings.vk_generation_lease_seconds)
+        with self.session_factory() as session:
+            for source in generation.source_messages:
+                if source.external_event_id and (event := find_transport_event(session, source.external_event_id)) is not None:
+                    if event.status == "received":
+                        event.status = "processing"
+                        event.available_at = lease_until
+                        event.error_text = None
+            session.commit()
 
     def _mark_generation_sources(self, session, generation: Generation, *, status: str) -> None:
         for source in generation.source_messages:
