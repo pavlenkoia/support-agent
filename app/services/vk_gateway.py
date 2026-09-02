@@ -565,38 +565,24 @@ class VKGatewayService:
                     session.commit()
                     return processed
                 turn_id, claim_token = turn.id, turn.claim_token
-                events = list(
-                    session.scalars(
-                        select(TransportEvent)
-                        .where(
-                            TransportEvent.platform == "vk",
-                            TransportEvent.event_type == "message_new",
-                            TransportEvent.conversation_external_id == f"vk:{turn.conversation_id}".replace("vk:", ""),
-                            TransportEvent.id >= turn.first_event_id,
-                            TransportEvent.id <= turn.last_event_id,
-                        )
-                        .order_by(TransportEvent.received_at, TransportEvent.id)
-                    )
-                )
-                # Conversation external_id is stored as `vk:<peer>` whereas the
-                # transport ledger retains the same value; use the canonical
-                # conversation lookup when event IDs alone are insufficient.
-                if not events:
-                    conversation = session.get(Conversation, turn.conversation_id)
-                    if conversation is not None:
-                        events = list(
-                            session.scalars(
-                                select(TransportEvent)
-                                .where(
-                                    TransportEvent.platform == "vk",
-                                    TransportEvent.event_type == "message_new",
-                                    TransportEvent.conversation_external_id == conversation.external_id,
-                                    TransportEvent.id >= turn.first_event_id,
-                                    TransportEvent.id <= turn.last_event_id,
-                                )
-                                .order_by(TransportEvent.received_at, TransportEvent.id)
+                conversation = session.get(Conversation, turn.conversation_id)
+                events = (
+                    list(
+                        session.scalars(
+                            select(TransportEvent)
+                            .where(
+                                TransportEvent.platform == "vk",
+                                TransportEvent.event_type == "message_new",
+                                TransportEvent.conversation_external_id == conversation.external_id,
+                                TransportEvent.id >= turn.first_event_id,
+                                TransportEvent.id <= turn.last_event_id,
                             )
+                            .order_by(TransportEvent.received_at, TransportEvent.id)
                         )
+                    )
+                    if conversation is not None
+                    else []
+                )
                 session.commit()
             if not events or claim_token is None:
                 self._finish_turn(turn_id, claim_token, status="failed", reason="turn_sources_missing")
