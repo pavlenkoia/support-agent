@@ -22,6 +22,20 @@ def open_or_extend_turn(
     quiet_seconds: int,
 ) -> VkTurn:
     current = _utc(now)
+    # A claimed turn is already generating an answer. A newly accepted customer
+    # message is a newer durable turn boundary and invalidates that unfinished
+    # answer before it can create an outbound intent.
+    claimed_turns = session.scalars(
+        select(VkTurn)
+        .where(VkTurn.conversation_id == conversation_id, VkTurn.status == "claimed")
+        .with_for_update()
+    ).all()
+    for claimed_turn in claimed_turns:
+        claimed_turn.status = "suppressed"
+        claimed_turn.reason = "newer_inbound"
+        claimed_turn.claim_token = None
+        claimed_turn.claim_until = None
+
     turn = session.scalar(
         select(VkTurn)
         .where(VkTurn.conversation_id == conversation_id, VkTurn.status == "open")

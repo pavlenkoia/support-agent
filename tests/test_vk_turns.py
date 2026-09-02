@@ -66,6 +66,31 @@ def test_due_turn_has_one_claim_owner_and_stale_token_cannot_suppress(tmp_path):
         assert stored.reason == "human_override"
 
 
+def test_new_inbound_supersedes_a_claimed_turn_before_opening_next_turn(tmp_path):
+    session_factory = make_session(tmp_path)
+    now = datetime.now(UTC)
+    with session_factory() as session:
+        item = conversation(session)
+        first = open_or_extend_turn(session, conversation_id=item.id, event_id=10, now=now, quiet_seconds=0)
+        claim = claim_due_turn(session, turn_id=first.id, now=now, lease_seconds=60)
+        assert claim is not None
+        next_turn = open_or_extend_turn(
+            session,
+            conversation_id=item.id,
+            event_id=11,
+            now=now + timedelta(seconds=1),
+            quiet_seconds=5,
+        )
+        session.commit()
+
+        previous = session.get(VkTurn, first.id)
+        assert previous is not None
+        assert previous.status == "suppressed"
+        assert previous.reason == "newer_inbound"
+        assert next_turn.id != first.id
+        assert next_turn.status == "open"
+
+
 def test_expired_claim_can_be_reclaimed_with_new_token(tmp_path):
     session_factory = make_session(tmp_path)
     now = datetime.now(UTC)
