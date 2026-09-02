@@ -112,6 +112,21 @@ def recover_expired_turns(session: Session, *, now: datetime, retry_delay_second
     return len(turns)
 
 
+def suppress_active_turns(session: Session, *, conversation_id: int, reason: str) -> int:
+    turns = session.scalars(
+        select(VkTurn)
+        .where(VkTurn.conversation_id == conversation_id, VkTurn.status.in_(("open", "claimed", "retry_pending")))
+        .with_for_update()
+    ).all()
+    for turn in turns:
+        turn.status = "suppressed"
+        turn.reason = reason
+        turn.claim_token = None
+        turn.claim_until = None
+    session.flush()
+    return len(turns)
+
+
 def suppress_turn(session: Session, *, turn_id: int, claim_token: str | None, reason: str) -> bool:
     turn = session.scalar(select(VkTurn).where(VkTurn.id == turn_id).with_for_update())
     if turn is None or turn.status in {"sent", "suppressed", "failed"}:

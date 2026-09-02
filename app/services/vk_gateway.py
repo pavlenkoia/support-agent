@@ -42,7 +42,7 @@ from app.services.persistence import (
     set_last_inbound_message,
 )
 from app.services.routing import RoutingService
-from app.services.vk_turns import claim_next_due_turn, open_or_extend_turn, recover_expired_turns
+from app.services.vk_turns import claim_next_due_turn, open_or_extend_turn, recover_expired_turns, suppress_active_turns
 
 
 class VKGatewayService:
@@ -1088,6 +1088,7 @@ class VKGatewayService:
                 admin_replied_at=event_time,
                 silence_seconds=self.override_silence_seconds,
             )
+            suppress_active_turns(session, conversation_id=conversation.id, reason="human_override")
             if self.queue is not None:
                 self.queue.cancel("vk", peer_id)
             mark_transport_event_processed(session, transport_event)
