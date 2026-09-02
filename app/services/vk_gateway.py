@@ -41,6 +41,7 @@ from app.services.persistence import (
     set_last_inbound_message,
 )
 from app.services.routing import RoutingService
+from app.services.vk_turns import open_or_extend_turn
 
 
 class VKGatewayService:
@@ -109,6 +110,14 @@ class VKGatewayService:
             # before queuing so a manual operator reply/cancel cannot erase the
             # customer's original question from the dialogue.
             persist_inbound_message(session, case["case_id"], inbound)
+            turn = open_or_extend_turn(
+                session,
+                conversation_id=conversation.id,
+                event_id=transport_event.id,
+                now=event_time,
+                quiet_seconds=settings.inbound_coalesce_quiet_seconds,
+            )
+            turn.case_id = case["case_id"]
             if is_override_active(state, now=event_time):
                 mark_transport_event_processed(session, transport_event, status="suppressed")
                 session.commit()
