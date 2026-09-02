@@ -1,10 +1,11 @@
 # Durable VK turn state-machine replacement
 
-## Current implementation status
+## Production implementation status — 2026-09-02
 
-- Slices 1–4 are implemented in source and covered by Docker tests: VK ingress opens/extends a durable turn, the worker runs `ingest → expired-turn recovery → due-turn processing`, and normal/retry generation share `process_due_turns` with one journaled outbound intent.
+- Slices 1–4 are deployed: VK ingress opens/extends a durable turn, and the worker runs `ingest → expired-turn recovery → due-turn processing`; normal/retry generation share `process_due_turns` with one journaled outbound intent.
 - The prior in-memory `InboundQueue` remains injectable only for legacy unit-test compatibility. Production construction does not create it; the VK worker uses the durable processor.
-- Slice 5 migration safety is intentionally conservative: `scripts/classify_legacy_vk_events.py` is read-only by default and never sends/replays. Existing nonterminal historical rows must be reviewed explicitly before any separate operator-approved state change.
+- Migration `0007_vk_turns` is applied in production. Release `18a9a74ae2d264cb32da7e9ddbeec1e268ede4d1` rebuilt/recreated the whole application plane and wrote receipt `/home/tian/support-agent-runtime/releases/20260902T123705Z-18a9a74ae2d2.json` with `status=success`.
+- Slice 5 historical safety is intentionally conservative: `scripts/classify_legacy_vk_events.py` is read-only by default and never sends/replays. The 11 existing nonterminal historical rows were classified `requires_operator_review`; no historical event was replayed or state-modified.
 
 ## Goal
 
