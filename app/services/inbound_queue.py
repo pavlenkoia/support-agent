@@ -198,8 +198,12 @@ class InboundQueue:
     def _combined_inbound(batch: Batch) -> InboundMessage:
         first = batch.messages[0]
         latest = batch.messages[-1]
+        combined_metadata = {"batch_id": batch.batch_id, "source_event_count": len(batch.messages)}
+        agent_texts = [InboundQueue._agent_text(message) for message in batch.messages]
+        if any(agent_text != message.text for agent_text, message in zip(agent_texts, batch.messages, strict=True)):
+            combined_metadata["agent_text"] = "\n".join(agent_texts)
         return first.model_copy(update={
-            "text": "\n".join(message.text for message in batch.messages),
+            "text": combined_metadata.get("agent_text") or "\n".join(message.text for message in batch.messages),
             "received_at": latest.received_at,
             # The delivery boundary compares this value with the durable
             # per-conversation latest-inbound marker.  Keep the newest source
@@ -208,8 +212,14 @@ class InboundQueue:
             "external_message_id": latest.external_message_id,
             "external_event_id": None,
             "raw_event": None,
-            "metadata": {"batch_id": batch.batch_id, "source_event_count": len(batch.messages)},
+            "metadata": combined_metadata,
         })
+
+    @staticmethod
+    def _agent_text(message: InboundMessage) -> str:
+        metadata = message.metadata or {}
+        agent_text = metadata.get("agent_text") if isinstance(metadata, dict) else None
+        return str(agent_text).strip() if agent_text else message.text
 
     @staticmethod
     def _normalized_now(now: datetime | None) -> datetime:

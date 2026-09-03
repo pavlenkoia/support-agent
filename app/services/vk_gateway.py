@@ -42,7 +42,12 @@ from app.services.persistence import (
     set_last_inbound_message,
 )
 from app.services.routing import RoutingService
-from app.services.vk_turns import claim_next_due_turn, open_or_extend_turn, recover_expired_turns, suppress_active_turns
+from app.services.vk_turns import (
+    claim_next_due_turn,
+    open_or_extend_turn,
+    recover_expired_turns,
+    suppress_active_turns,
+)
 
 
 class VKGatewayService:
@@ -82,13 +87,14 @@ class VKGatewayService:
         message_id = self._string_id(message.get("id"))
         if not text or not peer_id or not from_id or not message_id:
             return {"ok": True, "ignored": True, "reason": "unsupported_message_new"}
+        metadata = self._vk_inbound_metadata(event, message, peer_id=peer_id, from_id=from_id)
         event_time = self._event_time(message)
         dedupe_key = f"vk:message_new:{peer_id}:{message_id}"
         inbound = InboundMessage(
             channel="vk", external_user_id=from_id, external_chat_id=peer_id, text=text,
             external_message_id=message_id, external_event_type="message_new", external_event_id=dedupe_key,
             received_at=event_time, raw_event=event,
-            metadata={"group_id": event.get("group_id"), "peer_id": peer_id, "from_id": from_id},
+            metadata=metadata,
         )
         with self.session_factory() as session:
             transport_event, created = persist_transport_event(
@@ -373,6 +379,7 @@ class VKGatewayService:
         message_id = self._string_id(message.get("id"))
         if not text or not peer_id or not from_id or not message_id:
             return {"ok": True, "ignored": True, "reason": "unsupported_message_new"}
+        metadata = self._vk_inbound_metadata(event, message, peer_id=peer_id, from_id=from_id)
 
         event_time = self._event_time(message)
         dedupe_key = f"vk:message_new:{peer_id}:{message_id}"
@@ -386,11 +393,7 @@ class VKGatewayService:
             external_event_id=dedupe_key,
             received_at=event_time,
             raw_event=event,
-            metadata={
-                "group_id": event.get("group_id"),
-                "peer_id": peer_id,
-                "from_id": from_id,
-            },
+            metadata=metadata,
         )
         if inbound_override is not None:
             inbound = inbound_override
@@ -955,14 +958,15 @@ class VKGatewayService:
         source_messages = [self._inbound_from_event(event.payload_json) for event in events]
         first = source_messages[0]
         latest = source_messages[-1]
+        agent_texts = [self._message_agent_text(message) for message in source_messages]
         return first.model_copy(
             update={
-                "text": "\n".join(message.text for message in source_messages),
+                "text": "\n".join(agent_texts),
                 "received_at": latest.received_at,
                 "external_message_id": latest.external_message_id,
                 "external_event_id": None,
                 "raw_event": latest.raw_event,
-                "metadata": {"retry_source_event_count": len(source_messages)},
+                "metadata": {"retry_source_event_count": len(source_messages), "agent_text": "\n".join(agent_texts)},
             }
         )
 
@@ -999,17 +1003,18 @@ class VKGatewayService:
         peer_id = self._string_id(message.get("peer_id"))
         from_id = self._string_id(message.get("from_id"))
         message_id = self._string_id(message.get("id"))
+        text = str(message.get("text") or "").strip()
         return InboundMessage(
             channel="vk",
             external_user_id=from_id,
             external_chat_id=peer_id,
-            text=str(message.get("text") or "").strip(),
+            text=text,
             external_message_id=message_id,
             external_event_type="message_new",
             external_event_id=f"vk:message_new:{peer_id}:{message_id}",
             received_at=self._event_time(message),
             raw_event=event,
-            metadata={"group_id": event.get("group_id"), "peer_id": peer_id, "from_id": from_id},
+            metadata=self._vk_inbound_metadata(event, message, peer_id=peer_id, from_id=from_id),
         )
 
     def _handle_message_reply(self, event: dict[str, Any]) -> dict[str, Any]:
@@ -1208,6 +1213,81 @@ class VKGatewayService:
         if error_msg:
             parts.append(f"error_msg={error_msg}")
         return "; ".join(parts)
+
+    def _vk_inbound_metadata(
+        self,
+        event: dict[str, Any],
+        message: dict[str, Any],
+        *,
+        peer_id: str,
+        from_id: str,
+    ) -> dict[str, Any]:
+        metadata: dict[str, Any] = {"group_id": event.get("group_id"), "peer_id": peer_id, "from_id": from_id}
+        attachment_context = self._vk_market_attachment_context(message)
+        if attachment_context:
+            metadata["vk_market_attachments"] = attachment_context
+            metadata["agent_text"] = self._compose_agent_text(
+                str(message.get("text") or "").strip(),
+                attachment_context,
+            )
+        return metadata
+
+    @staticmethod
+    def _message_agent_text(message: InboundMessage) -> str:
+        metadata = message.metadata or {}
+        agent_text = metadata.get("agent_text") if isinstance(metadata, dict) else None
+        return str(agent_text).strip() if agent_text else message.text
+
+    @staticmethod
+    def _compose_agent_text(text: str, market_context: list[dict[str, str]]) -> str:
+        lines = [text, "", "Контекст VK Market-вложения:"]
+        for index, item in enumerate(market_context, start=1):
+            prefix = f"{index}. " if len(market_context) > 1 else ""
+            if title := item.get("title"):
+                lines.append(f"{prefix}Название: {title}")
+            if price := item.get("price_text"):
+                lines.append(f"Цена в карточке: {price}")
+            if description := item.get("description"):
+                lines.append(f"Описание карточки: {description}")
+            identifiers = []
+            if market_id := item.get("id"):
+                identifiers.append(f"id={market_id}")
+            if owner_id := item.get("owner_id"):
+                identifiers.append(f"owner_id={owner_id}")
+            if seo_slug := item.get("seo_slug"):
+                identifiers.append(f"seo_slug={seo_slug}")
+            if identifiers:
+                lines.append("Идентификаторы карточки: " + ", ".join(identifiers))
+        return "\n".join(line for line in lines if line != "")
+
+    @staticmethod
+    def _vk_market_attachment_context(message: dict[str, Any]) -> list[dict[str, str]]:
+        attachments = message.get("attachments")
+        if not isinstance(attachments, list):
+            return []
+        context: list[dict[str, str]] = []
+        for attachment in attachments:
+            if not isinstance(attachment, dict) or attachment.get("type") != "market":
+                continue
+            market = attachment.get("market")
+            if not isinstance(market, dict):
+                continue
+            item: dict[str, str] = {}
+            for key in ("title", "description", "seo_slug"):
+                value = str(market.get(key) or "").strip()
+                if value:
+                    item[key] = value
+            price = market.get("price")
+            if isinstance(price, dict):
+                price_text = str(price.get("text") or "").strip()
+                if price_text:
+                    item["price_text"] = price_text
+            for key in ("id", "owner_id"):
+                if market.get(key) is not None:
+                    item[key] = str(market[key])
+            if item:
+                context.append(item)
+        return context
 
     @staticmethod
     def _extract_message(event: dict[str, Any]) -> dict[str, Any]:

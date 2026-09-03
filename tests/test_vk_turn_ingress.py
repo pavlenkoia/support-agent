@@ -100,3 +100,48 @@ def test_durable_due_turn_processor_combines_persisted_events_and_sends_once(tmp
         turn = session.scalar(select(VkTurn))
         assert turn is not None
         assert turn.status == "sent"
+
+
+def test_durable_due_turn_processor_rehydrates_vk_market_attachment_context(tmp_path):
+    factory = make_session_factory(f"sqlite+pysqlite:///{tmp_path / 'processor_market.db'}")
+    Base.metadata.create_all(bind=factory.kw["bind"])
+    routing = _Routing()
+    sender = _Sender()
+    service = VKGatewayService(routing=routing, sender=sender, session_factory=factory)
+    now = datetime.now(UTC)
+
+    accepted = service.handle_event(
+        {
+            "type": "message_new",
+            "group_id": 55,
+            "object": {
+                "message": {
+                    "id": 912,
+                    "peer_id": 42,
+                    "from_id": 7,
+                    "text": "Здравствуйте!\nМеня заинтересовала данная услуга.",
+                    "date": int(now.timestamp()),
+                    "attachments": [
+                        {
+                            "type": "market",
+                            "market": {
+                                "title": "Тандем-прыжок ( с инструктором)",
+                                "description": "Высота - 2000-2500 м",
+                                "price": {"text": "16 200 ₽"},
+                            },
+                        }
+                    ],
+                }
+            },
+        }
+    )
+    assert accepted["queued"] is False
+
+    assert service.process_due_turns(now=now + timedelta(seconds=6)) == 1
+
+    assert len(routing.payloads) == 1
+    payload, persisted = routing.payloads[0]
+    assert persisted is False
+    assert "Контекст VK Market-вложения" in payload.text
+    assert "Тандем-прыжок ( с инструктором)" in payload.text
+    assert "16 200 ₽" in payload.text

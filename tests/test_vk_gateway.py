@@ -391,6 +391,53 @@ def test_vk_gateway_coalesces_two_messages_into_one_runtime_turn(tmp_path: Path)
         assert [(event.external_message_id, event.status) for event in events] == [("201", "processed"), ("202", "processed")]
 
 
+def test_vk_gateway_passes_market_attachment_context_to_routing_without_polluting_viewer_history(tmp_path: Path) -> None:
+    routing = StubRouting(response_text="Уточняющий ответ")
+    service, session_factory = make_service(tmp_path, routing=routing, sender=RecordingVKSender())
+    now = datetime.now(UTC)
+
+    service.handle_event(
+        {
+            "type": "message_new",
+            "group_id": 55,
+            "object": {
+                "message": {
+                    "id": 912,
+                    "peer_id": 2912,
+                    "from_id": 3912,
+                    "text": "Здравствуйте!\nМеня заинтересовала данная услуга.",
+                    "date": int(now.timestamp()),
+                    "attachments": [
+                        {
+                            "type": "market",
+                            "market": {
+                                "id": 16061591,
+                                "owner_id": -9826000,
+                                "title": "Тандем-прыжок ( с инструктором)",
+                                "description": "ЦЕНА: 16000 р. + 200 р. страховка. Высота - 2000-2500 м",
+                                "price": {"text": "16 200 ₽"},
+                                "seo_slug": "tandem-pryzhok-s-instruktorom",
+                            },
+                        }
+                    ],
+                }
+            },
+        }
+    )
+
+    assert len(routing.handled_payloads) == 1
+    routed_text = routing.handled_payloads[0].text
+    assert "Контекст VK Market-вложения" in routed_text
+    assert "Тандем-прыжок ( с инструктором)" in routed_text
+    assert "16 200 ₽" in routed_text
+    assert "Здравствуйте!\nМеня заинтересовала данная услуга." in routed_text
+    with session_factory() as session:
+        messages = session.scalars(select(Message).order_by(Message.id)).all()
+        assert [(message.role, message.content) for message in messages] == [
+            ("user", "Здравствуйте!\nМеня заинтересовала данная услуга."),
+        ]
+
+
 def test_vk_gateway_suppresses_old_generation_when_newer_inbound_is_already_durable(tmp_path: Path) -> None:
     sender = RecordingVKSender()
     routing = StubRouting(response_text="Устаревший ответ")
