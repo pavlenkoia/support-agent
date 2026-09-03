@@ -1,10 +1,10 @@
 ---
 title: Certificates
 created: 2026-06-29
-updated: 2026-08-30
+updated: 2026-09-03
 type: concept
 tags: [services, certificates, booking, office]
-sources: [raw/documents/certificates-source.md, raw/documents/faq-main-source.md, raw/documents/faq-short-source.md, raw/documents/legacy-approved-policy-source.md, raw/documents/operator-case-vk-841-certificate-printing.md]
+sources: [raw/documents/certificates-source.md, raw/documents/faq-main-source.md, raw/documents/faq-short-source.md, raw/documents/legacy-approved-policy-source.md, raw/documents/operator-case-vk-841-certificate-printing.md, raw/documents/payment-methods-governor-2026-09-03.md]
 confidence: high
 contested: false
 contradictions: []
@@ -18,6 +18,7 @@ contradictions: []
 ## Покупка и получение
 - Онлайн-покупка доступна на `https://dzkalachevo.ru`; электронный сертификат можно распечатать самостоятельно.
 - Бумажный сертификат можно получить в офисе по будням.
+- Покупка сертификата в офисе возможна наличными и безналично.
 - Доставка и курьерская отправка не предусмотрены.
 - Электронный сертификат приходит на электронную почту в течение суток.
 - Если письмо не пришло, нужно проверить папку «Спам», затем связаться с офисом.

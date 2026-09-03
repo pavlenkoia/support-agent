@@ -1,10 +1,10 @@
 ---
 title: Booking Channels
 created: 2026-08-25
-updated: 2026-08-25
+updated: 2026-09-01
 type: concept
-tags: [booking, tandem, solo-jump, flights]
-sources: [raw/documents/faq-main-source.md, raw/documents/faq-short-source.md, raw/documents/general-info-source.md, raw/documents/legacy-approved-policy-source.md]
+tags: [booking, tandem, solo-jump, flights, vk, chat]
+sources: [raw/documents/faq-main-source.md, raw/documents/faq-short-source.md, raw/documents/general-info-source.md, raw/documents/legacy-approved-policy-source.md, raw/documents/operator-case-vk-291545750-chat.md]
 confidence: high
 contested: false
 contradictions: []
@@ -21,6 +21,8 @@ contradictions: []
 - Если после записи на тандем клиента не добавили в чат, связаться нужно с офисом.
 - Текущий набор группы и наличие мест на конкретную дату — оперативные значения; их уточняют при записи по телефону.
 - Для записи на тандем подтверждением служат инструкции после формы и добавление в чат Telegram или MAX.
+- В группе ВКонтакте клиентов в чат не добавляют.
+- По вопросу о недобавлении в чат из группы ВКонтакте клиенту дают телефон офиса `+7 (351) 214-30-30`.
 
 ## Flights
 - Полёт на Як-52: запись напрямую у пилота по телефону `+7 (951) 440-94-77`.
