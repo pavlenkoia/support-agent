@@ -175,6 +175,67 @@ def test_viewer_dialogs_excludes_operator_only_vk_orphan(tmp_path, monkeypatch) 
     assert response.json() == []
 
 
+def test_viewer_dialogs_excludes_internal_test_vk_conversations(tmp_path, monkeypatch) -> None:
+    reset_test_state()
+    configure_viewer_auth(monkeypatch, enabled=False)
+    db_path = tmp_path / "viewer_test_conversation.db"
+    session_factory = make_session_factory(f"sqlite+pysqlite:///{db_path}")
+    Base.metadata.create_all(bind=session_factory.kw["bind"])
+    with session_factory() as session:
+        real_conversation = Conversation(external_id="vk:123")
+        test_conversation = Conversation(
+            external_id="vk:2912001",
+            is_test=True,
+            source="support_governor",
+            session_type="governor_probe",
+            scenario_name="case-912-vk-market-attachment",
+        )
+        session.add_all([real_conversation, test_conversation])
+        session.flush()
+        real_case = SupportCase(conversation_id=real_conversation.id, status="resolved", route_mode="answer")
+        test_case = SupportCase(
+            conversation_id=test_conversation.id,
+            status="resolved",
+            route_mode="answer",
+            is_test=True,
+            source="support_governor",
+            session_type="governor_probe",
+            scenario_name="case-912-vk-market-attachment",
+        )
+        session.add_all([real_case, test_case])
+        session.flush()
+        session.add_all(
+            [
+                Message(
+                    case_id=real_case.id,
+                    role="user",
+                    content="Реальный вопрос",
+                    created_at=datetime(2026, 9, 3, 12, 0, tzinfo=UTC),
+                ),
+                Message(
+                    case_id=test_case.id,
+                    role="user",
+                    content="Тестовый probe не должен попасть во viewer",
+                    created_at=datetime(2026, 9, 3, 12, 1, tzinfo=UTC),
+                ),
+            ]
+        )
+        session.commit()
+
+    service = ViewerService(session_factory=session_factory)
+    app.dependency_overrides[get_viewer_service] = lambda: service
+    try:
+        dialogs = client.get("/api/viewer/dialogs", params={"day": "2026-09-03"})
+        test_messages = client.get("/api/viewer/dialogs/vk:2912001/messages", params={"day": "2026-09-03"})
+    finally:
+        reset_test_state()
+
+    assert dialogs.status_code == 200
+    assert [item["conversation_id"] for item in dialogs.json()] == ["vk:123"]
+    assert test_messages.status_code == 200
+    assert test_messages.json()["messages"] == []
+
+
 def test_viewer_dialogs_keeps_a_reply_day_when_case_has_older_inbound_message(tmp_path, monkeypatch) -> None:
     reset_test_state()
     configure_viewer_auth(monkeypatch, enabled=False)

@@ -63,6 +63,8 @@ class ViewerService:
                 .outerjoin(User, User.external_id == Conversation.external_id)
                 .where(
                     Conversation.external_id.like("vk:%"),
+                    Conversation.is_test.is_(False),
+                    SupportCase.is_test.is_(False),
                     Message.created_at >= day_start,
                     Message.created_at < day_end,
                 )
@@ -95,6 +97,8 @@ class ViewerService:
                 .where(
                     Conversation.external_id == conversation_id,
                     Conversation.external_id.like("vk:%"),
+                    Conversation.is_test.is_(False),
+                    SupportCase.is_test.is_(False),
                     Message.created_at >= day_start,
                     Message.created_at < day_end,
                 )
@@ -130,7 +134,11 @@ class ViewerService:
             select(Conversation.external_id, func.max(SupportCase.id).label("case_id"), User.display_name)
             .outerjoin(SupportCase, SupportCase.conversation_id == Conversation.id)
             .outerjoin(User, User.external_id == Conversation.external_id)
-            .where(Conversation.external_id == conversation_id, Conversation.external_id.like("vk:%"))
+            .where(
+                Conversation.external_id == conversation_id,
+                Conversation.external_id.like("vk:%"),
+                Conversation.is_test.is_(False),
+            )
             .group_by(Conversation.external_id, User.display_name)
         )
         row = session.execute(stmt).one_or_none()
