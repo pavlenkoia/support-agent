@@ -137,6 +137,7 @@ Current UI/runtime contract:
 - outgoing community activity event: `message_reply`
 - target surface: direct messages to the VK community
 - inbound `message_new` handling should opportunistically enrich missing `users.display_name` via `users.get` and cache it for the viewer/runtime
+- VK Market attachments on inbound `message_new` are normalized into the routing-only agent text so references such as "данная услуга" carry the attached service title, description, price text, and card identifiers into Wiki/finalization. Viewer history still stores the customer's original message text without this synthetic attachment context.
 - out of scope for v1: VK chats / besedy and history backfill
 
 ### VK manual-admin override rule
