@@ -1079,7 +1079,13 @@ class VKGatewayService:
                 admin_replied_at=event_time,
                 silence_seconds=self.override_silence_seconds,
             )
-            suppress_active_turns(session, conversation_id=conversation.id, reason="human_override")
+            suppressed_turns = suppress_active_turns(session, conversation_id=conversation.id, reason="human_override")
+            suppressed_events = self._suppress_unfinished_inbound_events(
+                session,
+                peer_id=peer_id,
+                before=event_time,
+                reason="human_override",
+            )
             if self.queue is not None:
                 self.queue.cancel("vk", peer_id)
             mark_transport_event_processed(session, transport_event)
@@ -1090,7 +1096,34 @@ class VKGatewayService:
                 "event_type": "message_reply",
                 "sent_by": "admin",
                 "override_until": state.human_override_until.isoformat() if state.human_override_until else None,
+                "suppressed_turns": suppressed_turns,
+                "suppressed_events": suppressed_events,
             }
+
+    def _suppress_unfinished_inbound_events(
+        self,
+        session,
+        *,
+        peer_id: str,
+        before: datetime,
+        reason: str,
+    ) -> int:
+        events = session.scalars(
+            select(TransportEvent)
+            .where(
+                TransportEvent.platform == "vk",
+                TransportEvent.event_type == "message_new",
+                TransportEvent.conversation_external_id == self._conversation_external_id(peer_id),
+                TransportEvent.status.in_(("received", "processing", "retry_pending")),
+                TransportEvent.received_at <= before,
+            )
+            .with_for_update()
+        ).all()
+        for event in events:
+            mark_transport_event_processed(session, event, status="suppressed")
+            event.error_text = reason
+        session.flush()
+        return len(events)
 
     def _recover_missing_inbound_context(self, session, *, peer_id: str, conversation: Conversation) -> None:
         has_inbound = session.scalar(

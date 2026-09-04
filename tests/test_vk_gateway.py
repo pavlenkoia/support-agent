@@ -1163,6 +1163,37 @@ def test_vk_gateway_second_admin_reply_extends_override(tmp_path: Path) -> None:
         assert state.human_override_until.replace(tzinfo=UTC) == expected_override_until
 
 
+def test_vk_gateway_admin_reply_suppresses_unfinished_message_new_event(tmp_path: Path) -> None:
+    service, session_factory = make_service(tmp_path)
+    service.queue = InboundQueue(service._process_generation, quiet_seconds=60, max_wait_seconds=60)
+
+    inbound_result = service.handle_event(
+        {
+            "type": "message_new",
+            "group_id": 55,
+            "object": {"message": {"id": 110, "peer_id": 2011, "from_id": 3011, "text": "Можно купить?", "date": 1780001600}},
+        }
+    )
+    assert inbound_result["queued"] is True
+
+    admin_result = service.handle_event(
+        {
+            "type": "message_reply",
+            "group_id": 55,
+            "object": {"message": {"id": 111, "peer_id": 2011, "from_id": -55, "out": 1, "text": "Ответ оператора", "date": 1780001610}},
+        }
+    )
+
+    assert admin_result["sent_by"] == "admin"
+    assert admin_result["suppressed_events"] == 1
+    with session_factory() as session:
+        event = session.scalar(select(TransportEvent).where(TransportEvent.dedupe_key == "vk:message_new:2011:110"))
+        assert event is not None
+        assert event.status == "suppressed"
+        assert event.error_text == "human_override"
+        assert event.processed_at is not None
+
+
 def test_vk_gateway_rechecks_override_before_send_and_drops_stale_reply(tmp_path: Path) -> None:
     sender = RecordingVKSender()
     service, session_factory = make_service(tmp_path)

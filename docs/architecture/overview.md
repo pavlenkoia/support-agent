@@ -66,6 +66,10 @@ The OpenAI-compatible adapter dispatches only an exact registered function name 
 - `clarification_requested` — a short clarification is required before a grounded answer.
 - `retry_pending` — technical failure only; empty customer text and durable transport retry.
 
+When LLM Wiki catalog navigation succeeds but selects no source pages, the KB result is `not_found`, not a technical failure. The routing layer must finalize it as `cannot_answer` with an empty evidence packet instead of returning `retry_pending`/empty customer text.
+
+When an unmatched VK `message_reply` activates manual override, the VK gateway suppresses unfinished `message_new` source events for the same peer (`received`, `processing`, or `retry_pending`) so historical customer questions do not remain indefinitely in intake state after an operator has answered.
+
 ## Release boundary
 
 `deploy/profile-source/` is reviewed source. `scripts/build_runtime_profile.py` validates it into `deploy/runtime-profile/`; the exact generated tree is atomically promoted to the external runtime profile before `python3 scripts/release.py` recreates the full application plane (`app`, `worker`, `vk-worker`, `viewer-web`, `viewer-push-worker`). PostgreSQL is not recreated.
