@@ -31,6 +31,7 @@ class KBAgentService:
             max_retries=settings.kb_agent_max_retries,
             retry_backoff_seconds=settings.kb_agent_retry_backoff_seconds,
             retry_deadline_seconds=settings.kb_agent_retry_deadline_seconds,
+            drop_params=settings.openai_compatible_drop_params,
         )
         self.temperature = settings.kb_agent_temperature
         self.prompt_service = prompt_service or KBAgentPromptService()
@@ -232,7 +233,7 @@ class KBAgentService:
             )
             if not selected_refs:
                 if trace.get("kb_architecture") == "llm_wiki":
-                    if navigation.get("_navigation_succeeded") and not navigation.get("information_needs"):
+                    if navigation.get("_navigation_succeeded"):
                         return {
                             "kb_status": "found",
                             "kb_mode": "llm_wiki_selected_pages",
@@ -242,10 +243,10 @@ class KBAgentService:
                             "answer_basis": "",
                             "missing_information": [],
                             "source_refs": [],
-                            "reason": "no_information_need",
+                            "reason": "navigation_selected_no_pages",
                             "trace": trace | {
                                 "navigation": navigation,
-                                "review": {"coverage_status": "not_run", "reason": "no_information_need"},
+                                "review": {"coverage_status": "not_run", "reason": "navigation_selected_no_pages"},
                                 "selected_source_refs": [],
                                 "llm_trace": list(self._active_llm_trace),
                             },

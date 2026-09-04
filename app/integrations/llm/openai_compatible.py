@@ -38,6 +38,7 @@ class OpenAICompatibleClient(BaseLLMClient):
         retry_backoff_seconds: float = 0.0,
         retry_deadline_seconds: float | None = None,
         rate_limit_cooldown_seconds: float = 60.0,
+        drop_params: bool = False,
     ) -> None:
         self.provider = provider
         self.base_url = base_url.rstrip("/")
@@ -61,6 +62,7 @@ class OpenAICompatibleClient(BaseLLMClient):
         self.retry_backoff_seconds = max(0.0, float(retry_backoff_seconds))
         self.retry_deadline_seconds = None if retry_deadline_seconds is None else max(0.0, float(retry_deadline_seconds))
         self.rate_limit_cooldown_seconds = max(0.0, float(rate_limit_cooldown_seconds))
+        self.drop_params = bool(drop_params)
 
     def _get_active_key_index(self) -> int:
         with self._pool_lock:
@@ -221,6 +223,10 @@ class OpenAICompatibleClient(BaseLLMClient):
             payload["tool_choice"] = tool_choice
         if parallel_tool_calls is not None:
             payload["parallel_tool_calls"] = parallel_tool_calls
+        if self.drop_params:
+            # LiteLLM-compatible proxies can drop OpenAI parameters that the
+            # selected backend model (for example Ollama chat) does not accept.
+            payload["drop_params"] = True
 
         total_attempts = 0
         key_indexes = self._available_key_indexes()

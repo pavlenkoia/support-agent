@@ -19,6 +19,7 @@ class SummaryService:
             max_retries=settings.summary_llm_max_retries,
             retry_backoff_seconds=settings.summary_llm_retry_backoff_seconds,
             retry_deadline_seconds=settings.summary_llm_retry_deadline_seconds,
+            drop_params=settings.openai_compatible_drop_params,
         )
         self.temperature = settings.summary_llm_temperature
 

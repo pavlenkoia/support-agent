@@ -465,3 +465,31 @@ def test_openai_compatible_client_reserves_time_for_retry_after_a_timed_out_atte
     assert calls["count"] == 2
     assert request_timeouts[0] < 45.0
     assert client.get_last_call_info()["attempts"] == 2
+
+
+def test_openai_compatible_client_can_request_litellm_drop_params(monkeypatch) -> None:
+    captured_payloads: list[dict] = []
+
+    def fake_urlopen(req, timeout):
+        _ = timeout
+        captured_payloads.append(json.loads(req.data.decode("utf-8")))
+        return FakeResponse({"choices": [{"message": {"content": "ok"}}]})
+
+    monkeypatch.setattr("app.integrations.llm.openai_compatible.request.urlopen", fake_urlopen)
+    client = OpenAICompatibleClient(
+        provider="openai_compatible",
+        base_url="https://example.test/v1",
+        api_key="token",
+        model="test-model",
+        drop_params=True,
+    )
+
+    assert client.generate(
+        system_prompt="sys",
+        user_prompt="usr",
+        tools=[{"type": "function", "function": {"name": "wiki_lookup", "parameters": {"type": "object"}}}],
+        tool_choice="auto",
+        parallel_tool_calls=False,
+    ) == "ok"
+    assert captured_payloads[0]["drop_params"] is True
+    assert captured_payloads[0]["parallel_tool_calls"] is False

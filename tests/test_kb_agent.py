@@ -88,8 +88,43 @@ def test_llm_wiki_navigation_with_no_information_need_is_not_missing_grounding(t
     )
 
     assert result["grounding_status"] == "not_found"
-    assert result["reason"] == "no_information_need"
+    assert result["reason"] == "navigation_selected_no_pages"
     assert result["trace"]["navigation"]["selected_source_refs"] == []
+
+
+def test_llm_wiki_navigation_with_information_need_but_no_pages_is_not_retry_pending(tmp_path: Path) -> None:
+    catalog = tmp_path / "index.md"
+    catalog.write_text("# Catalog\n", encoding="utf-8")
+    client = SequentialClient(
+        [
+            {
+                "user_intent": "можно ли заряжать велосипедные аккумуляторы в ДОСААФ",
+                "information_needs": ["правила зарядки аккумуляторов"],
+                "selected_source_refs": [],
+                "reason": "No relevant page in the catalog.",
+            }
+        ]
+    )
+    service = KBAgentService(client=client)
+
+    result = service.read(
+        "Можно велосипедные аккумуляторы в ДОСААФ заряжать?",
+        [
+            {
+                "source_ref": str(catalog),
+                "source_type": "wiki_index",
+                "retrieval_mode": "llm_wiki_catalog",
+                "kb_architecture": "llm_wiki",
+                "text": "# Catalog",
+            }
+        ],
+        require_coverage_review=True,
+    )
+
+    assert result["grounding_status"] == "not_found"
+    assert result["reason"] == "navigation_selected_no_pages"
+    assert result["source_refs"] == []
+    assert result["trace"]["review"] == {"coverage_status": "not_run", "reason": "navigation_selected_no_pages"}
 
 
 def test_kb_agent_navigates_reviews_and_extracts_grounded_facts_from_selected_pages(tmp_path: Path) -> None:

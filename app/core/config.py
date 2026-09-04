@@ -34,6 +34,7 @@ class Settings(BaseSettings):
     direct_llm_max_retries: int = 3
     direct_llm_retry_backoff_seconds: float = 0.75
     direct_llm_retry_deadline_seconds: float = 45.0
+    openai_compatible_drop_params: bool = False
 
     kb_agent_provider: str | None = None
     kb_agent_base_url: str | None = None
