@@ -142,6 +142,7 @@ def test_removed_prompt_facts_are_preserved_in_canonical_wiki() -> None:
         ],
         "kb/concepts/restrictions-and-safety.md": [
             "Самостоятельный прыжок доступен с 14 лет",
+            "Производный числовой вывод для запроса о 15-летнем клиенте",
             "До 18 лет требуется разрешение родителей",
             "возраст с 12 лет",
             "другой — с 14 лет",

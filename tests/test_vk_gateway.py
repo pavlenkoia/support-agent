@@ -1164,7 +1164,8 @@ def test_vk_gateway_second_admin_reply_extends_override(tmp_path: Path) -> None:
 
 
 def test_vk_gateway_admin_reply_suppresses_unfinished_message_new_event(tmp_path: Path) -> None:
-    service, session_factory = make_service(tmp_path)
+    sender = RecordingVKSender()
+    service, session_factory = make_service(tmp_path, sender=sender)
     service.queue = InboundQueue(service._process_generation, quiet_seconds=60, max_wait_seconds=60)
 
     inbound_result = service.handle_event(
@@ -1180,18 +1181,75 @@ def test_vk_gateway_admin_reply_suppresses_unfinished_message_new_event(tmp_path
         {
             "type": "message_reply",
             "group_id": 55,
-            "object": {"message": {"id": 111, "peer_id": 2011, "from_id": -55, "out": 1, "text": "Ответ оператора", "date": 1780001610}},
+            "object": {"message": {"id": 7001, "peer_id": 2011, "text": "Отвечу сам", "date": 1780001601}},
         }
     )
-
     assert admin_result["sent_by"] == "admin"
-    assert admin_result["suppressed_events"] == 1
+    assert sender.calls == []
+
     with session_factory() as session:
+        messages = session.scalars(select(Message).order_by(Message.created_at, Message.id)).all()
+        assert [(message.role, message.content) for message in messages] == [
+            ("user", "Можно купить?"),
+            ("human", "Отвечу сам"),
+        ]
         event = session.scalar(select(TransportEvent).where(TransportEvent.dedupe_key == "vk:message_new:2011:110"))
         assert event is not None
         assert event.status == "suppressed"
         assert event.error_text == "human_override"
         assert event.processed_at is not None
+
+
+def test_vk_gateway_retries_pending_fragment_recombines_after_newer_message_and_sends_once(tmp_path: Path) -> None:
+    service, session_factory = make_service(tmp_path)
+    service.queue = InboundQueue(service._process_generation, quiet_seconds=0, max_wait_seconds=0)
+    sender = RecordingVKSender()
+    service.sender = sender
+
+    class RetryThenAnswerRouting(StubRouting):
+        def __init__(self) -> None:
+            super().__init__(response_text="Сводный ответ")
+            self.calls = 0
+
+        def handle_inbound(self, payload, *, persist_inbound: bool = True) -> dict:
+            self.calls += 1
+            self.handled_payloads.append(payload.text)
+            if self.calls == 1:
+                return {"case": {"conversation_id": 1, "case_id": 1, "case_status": "retry_pending"}, "outcome": {"outcome_type": "retry_pending", "outcome_payload": {"response_text": ""}}}
+            return {"case": {"conversation_id": 1, "case_id": 1, "case_status": "open"}, "outcome": {"outcome_payload": {"response_text": "Сводный ответ"}}}
+
+    routing = RetryThenAnswerRouting()
+    service.routing = routing
+
+    first = service.handle_event(
+        {
+            "type": "message_new",
+            "group_id": 55,
+            "object": {"message": {"id": 111, "peer_id": 2012, "from_id": 3012, "text": "Первая реплика", "date": 1780001700}},
+        }
+    )
+    assert first["queued"] is True
+    now = datetime.now(UTC)
+    assert service.queue.flush_due(now=now, background=False) == 1
+
+    second = service.handle_event(
+        {
+            "type": "message_new",
+            "group_id": 55,
+            "object": {"message": {"id": 112, "peer_id": 2012, "from_id": 3012, "text": "Продолжение", "date": 1780001717}},
+        }
+    )
+    assert second["queued"] is True
+
+    assert service.queue.flush_due(now=now + timedelta(seconds=1), background=False) == 1
+    assert routing.handled_payloads[-1] == "Первая реплика\nПродолжение"
+    assert routing.handled_payloads.count("Первая реплика\nПродолжение") == 1
+    assert sender.calls == [("2012", "Сводный ответ")]
+
+    with session_factory() as session:
+        sends = session.scalars(select(OutboundTransportSend)).all()
+        assert len(sends) == 1
+        assert sends[0].send_status == "sent"
 
 
 def test_vk_gateway_rechecks_override_before_send_and_drops_stale_reply(tmp_path: Path) -> None:

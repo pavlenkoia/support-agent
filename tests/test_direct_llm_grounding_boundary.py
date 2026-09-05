@@ -182,6 +182,67 @@ def test_finalizer_payload_is_allowlisted_and_excludes_internal_reasoning(monkey
         assert forbidden not in serialized
 
 
+def test_finalizer_contract_excludes_internal_reasoning_from_customer_output(monkeypatch) -> None:
+    class CapturingClient(BaseLLMClient):
+        def __init__(self) -> None:
+            self.system_prompt = ""
+
+        def generate(self, **kwargs):
+            self.system_prompt = kwargs["system_prompt"]
+            return json.dumps({"route": "answer", "response_text": "Оплатить можно в офисе.", "confidence": 0.9}, ensure_ascii=False)
+
+    client = CapturingClient()
+    monkeypatch.setattr(direct_llm_module.settings, "direct_llm_provider", "mistral")
+    result = DirectLLMService(client=client).respond(
+        "Как оплатить?",
+        {"kb_status": "found", "grounding_status": "ready", "answer_basis": "Оплатить можно в офисе.", "grounded_facts": ["Оплатить можно в офисе."]},
+    )
+
+    assert result["route"] == "answer"
+    assert "Не объясняй, как был получен, проверен или выбран ответ" in client.system_prompt
+    assert "внутренние источники, противоречия, проверки либо ход рассуждения" in client.system_prompt
+
+def test_finalizer_treats_combined_customer_fragments_as_one_practical_request(monkeypatch) -> None:
+    class CombinedTurnClient(BaseLLMClient):
+        def __init__(self) -> None:
+            self.system_prompt = ""
+            self.payload: dict | None = None
+
+        def generate(self, **kwargs):
+            self.system_prompt = kwargs["system_prompt"]
+            self.payload = json.loads(kwargs["user_prompt"])
+            return json.dumps(
+                {
+                    "route": "answer",
+                    "response_text": "В 15 лет тандем доступен при согласии родителей; записаться можно через форму.",
+                    "confidence": 0.9,
+                    "reason": "combined_turn_answer",
+                },
+                ensure_ascii=False,
+            )
+
+    client = CombinedTurnClient()
+    monkeypatch.setattr(direct_llm_module.settings, "direct_llm_provider", "mistral")
+    result = DirectLLMService(client=client).respond(
+        "Хотим записаться на тандем завтра. Подросток 15 лет.",
+        {
+            "grounding_status": "ready",
+            "answer_basis": "15-летний клиент проходит оба возрастных порога; запись на тандем доступна через форму.",
+            "grounded_facts": [
+                "15-летний клиент проходит оба указанных в источниках порога.",
+                "До 18 лет требуется разрешение родителей и обычно присутствие одного из родителей.",
+                "Тандем-прыжок: форма https://vk.cc/cMwabq или телефон офиса.",
+            ],
+        },
+        knowledge_mode="kb_grounded",
+    )
+
+    assert result["route"] == "answer"
+    assert client.payload is not None
+    assert client.payload["user_message"] == "Хотим записаться на тандем завтра. Подросток 15 лет."
+    assert "единым практическим запросом" in client.system_prompt
+
+
 def test_nonready_extraction_is_not_finalizer_evidence(monkeypatch) -> None:
     class CapturingClient(BaseLLMClient):
         def __init__(self) -> None:

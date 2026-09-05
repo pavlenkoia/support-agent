@@ -150,12 +150,12 @@ def test_newer_message_unblocks_a_generation_that_becomes_retry_pending() -> Non
     calls: list[str] = []
     queue: InboundQueue
 
-    def processor(payload: InboundMessage, _) -> str:
+    def processor(payload: InboundMessage, generation) -> str:
         calls.append(payload.text)
         if payload.text == "Первый":
             queue.submit(inbound(text="Уточнение", message_id="2"), now=now + timedelta(seconds=1))
             return "retry_pending"
-        return "delivered"
+        return generation.run_if_current(lambda: "delivered") or "superseded"
 
     queue = InboundQueue(processor, quiet_seconds=0, max_wait_seconds=0)
     queue.submit(inbound(text="Первый", message_id="1"), now=now)
@@ -163,6 +163,33 @@ def test_newer_message_unblocks_a_generation_that_becomes_retry_pending() -> Non
     assert queue.flush_due(now=now, background=False) == 1
     assert queue.flush_due(now=now + timedelta(seconds=1), background=False) == 1
     assert calls == ["Первый", "Первый\nУточнение"]
+
+
+def test_retry_pending_generation_is_superseded_by_new_message_before_delivery() -> None:
+    now = datetime(2026, 8, 11, tzinfo=UTC)
+    started = threading.Event()
+    release = threading.Event()
+    calls: list[str] = []
+    queue: InboundQueue
+
+    def processor(payload: InboundMessage, generation) -> str:
+        calls.append(payload.text)
+        if payload.text == "Первая":
+            started.set()
+            assert release.wait(timeout=2)
+            return "retry_pending"
+        return generation.run_if_current(lambda: "delivered") or "superseded"
+
+    queue = InboundQueue(processor, quiet_seconds=0, max_wait_seconds=0)
+    queue.submit(inbound(text="Первая", message_id="1"), now=now)
+    assert queue.flush_due(now=now, background=True) == 1
+    assert started.wait(timeout=2)
+    queue.submit(inbound(text="Продолжение", message_id="2"), now=now + timedelta(seconds=1))
+    release.set()
+
+    threading.Event().wait(0.05)
+    assert queue.flush_due(now=now + timedelta(seconds=1), background=False) == 1
+    assert calls == ["Первая", "Первая\nПродолжение"]
 
 
 def test_different_dialogs_flush_independently() -> None:
