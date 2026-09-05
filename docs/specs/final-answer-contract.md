@@ -102,3 +102,4 @@ Internal planner, KB, route, LLM, and tool traces remain available in `response_
 7. A non-factual social or clarification regression can use `SYSTEM_PROMPT.md` without reading KB; a substantive factual request cannot.
 8. Targeted tests, the full suite, production image/hash checks, and literal internal production probes all pass before the change is reported complete.
 9. Exact isolated replay of a historical multi-message failure preserves the unanswered follow-ups in chronological order, sends the combined newline-delimited turn through the common finalizer, keeps the customer's latest explicit constraint active, and produces exactly one practical answer before listing relevant conditions.
+10. The finalizer treats combined customer fragments as one practical request and returns the customer result plus a confirmed next step without narrating evidence selection, internal sources, checks, contradictions, or reasoning.
