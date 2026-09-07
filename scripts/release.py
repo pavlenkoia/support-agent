@@ -224,13 +224,34 @@ class BrokenClient:
 module.settings.direct_llm_provider = "mistral"
 result = DirectLLMService(client=BrokenClient()).respond("Проверочный вопрос", {
     "kb_status": "found", "grounding_status": "ready",
-    "grounded_facts": ["Подтверждённый проверочный факт."],
-    "answer_basis": "Подтверждённый проверочный ответ.",
+    "source_refs": ["release/probe.md"],
+    "answer_evidence": {
+        "schema_version": "answer-evidence/v1",
+        "user_question": "Проверочный вопрос",
+        "context_scope": "release finalizer failure check",
+        "acquisition_status": "ready",
+        "facts": [{
+            "id": "release-probe-fact",
+            "text": "Подтверждённый проверочный факт.",
+            "source_refs": ["release/probe.md"],
+            "conditions": [],
+            "modality": None,
+        }],
+        "coverage": {
+            "status": "full",
+            "answered_parts": [{
+                "question_part": "Проверочный вопрос",
+                "fact_ids": ["release-probe-fact"],
+            }],
+            "missing_parts": [], "conflicts": [], "unresolved_constraints": [],
+        },
+        "answer_basis": "Подтверждённый проверочный ответ.",
+        "calendar_facts": [], "policy_evidence": [],
+    },
 })
 assert result["route"] == "retry_pending", result
 assert result["response_text"] == "", result
-assert result["llm_trace"][0]["step"] == "final_response_failed_closed", result
-assert result["llm_trace"][0]["customer_reply_emitted"] is False, result
+assert any(item.get("step") == "final_response_failed_closed" and item.get("customer_reply_emitted") is False for item in result["llm_trace"]), result
 print(json.dumps({"route": result["route"], "reason": result["reason"]}, ensure_ascii=False))'''
     result: dict[str, str] = {}
     for service in RUNTIME_CODE_SERVICES:
