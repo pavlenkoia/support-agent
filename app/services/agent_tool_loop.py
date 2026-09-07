@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import Any, Protocol
 
 
@@ -16,7 +17,7 @@ class UnifiedTurnModel(Protocol):
 
 
 class UnifiedTurnService:
-    """One customer-facing model turn may return text or request the Wiki tool."""
+    """Collect bounded native tool evidence; never write customer text."""
 
     def __init__(self, *, model: UnifiedTurnModel, wiki_lookup: WikiLookup, calendar_lookup: CalendarLookup) -> None:
         self.model = model
@@ -24,103 +25,86 @@ class UnifiedTurnService:
         self.calendar_lookup = calendar_lookup
 
     def run(self, *, text: str, context: dict) -> dict[str, Any]:
-        turn = self.model.begin_turn(text=text, context=context)
-        llm_trace = [item for item in turn.get("llm_trace", []) if isinstance(item, dict)] if isinstance(turn, dict) else []
-        kind = str(turn.get("kind") or "") if isinstance(turn, dict) else ""
-        if kind == "final":
-            result = turn.get("result")
-            if isinstance(result, dict):
-                return {
-                    "kb_result": {},
-                    "final_result": result,
-                    "trace": {"actions": ["final_response"]},
-                    "tool_observations": [],
-                    "llm_trace": llm_trace,
-                }
-        if kind == "calendar_lookup":
-            tool_request = turn.get("tool_request")
-            if not isinstance(tool_request, dict):
-                return self._invalid_tool_request(llm_trace)
-            calendar_result = self.calendar_lookup.lookup(text=text, context=context, tool_request=tool_request)
-            observation = {
-                "tool": "calendar_lookup",
-                "status": str(calendar_result.get("status") or "not_found"),
-                "summary": str(calendar_result.get("summary") or ""),
-                "structured": calendar_result.get("structured") if isinstance(calendar_result.get("structured"), dict) else {},
-            }
-            result = self._continue_after_tool(text=text, context=context, observation=observation, action="calendar_lookup", tool_request=tool_request, tool_call_id=str(turn.get("tool_call_id") or "call_calendar"), llm_trace=llm_trace)
-            result["tool_requests"] = [{"tool": kind, "tool_call_id": str(turn.get("tool_call_id") or "call_calendar"), "tool_request": dict(tool_request)}]
-            return result
-        if kind == "wiki_lookup":
-            tool_request = turn.get("tool_request")
-            if not isinstance(tool_request, dict):
-                return self._invalid_tool_request(llm_trace)
-            wiki_result = self.wiki_lookup.lookup(text=text, context=context, tool_request=tool_request)
-            kb_trace = (wiki_result.get("trace") or {}).get("llm_trace", []) if isinstance(wiki_result, dict) else []
-            llm_trace.extend(item for item in kb_trace if isinstance(item, dict))
-            return {
-                "kb_result": wiki_result,
-                "trace": {"actions": ["wiki_lookup"]},
-                "tool_requests": [{"tool": kind, "tool_call_id": turn.get("tool_call_id"), "tool_request": dict(tool_request)}],
-                "tool_observations": [{
-                    "tool": "wiki_lookup",
-                    "status": str(wiki_result.get("grounding_status") or "not_found"),
-                    "source_refs": self._source_refs(wiki_result),
-                    "grounded_facts": list(wiki_result.get("grounded_facts") or []),
-                }],
-                "llm_trace": llm_trace,
-            }
-        return {
-            "kb_result": {},
-            "final_result": {
-                "route": "retry_pending",
-                "response_text": "",
-                "confidence": 0.0,
-                "reason": "unified_turn_invalid",
-            },
-            "trace": {"actions": ["invalid_turn"]},
-            "tool_observations": [],
-            "llm_trace": llm_trace,
-        }
+        from app.services.direct_llm import DirectLLMService
 
-    def _continue_after_tool(
-        self,
-        *,
-        text: str,
-        context: dict,
-        observation: dict[str, Any],
-        action: str,
-        tool_request: dict[str, str],
-        tool_call_id: str,
-        llm_trace: list[dict],
-    ) -> dict[str, Any]:
-        """Continue the same model-managed turn with the typed tool observation."""
-        continuation_context = dict(context)
-        existing_observations = context.get("tool_observations")
-        previous = existing_observations if isinstance(existing_observations, list) else []
-        continuation_context["tool_observations"] = [*previous, observation][-2:]
-        continuation_method = getattr(self.model, "continue_after_tool", None)
-        if callable(continuation_method):
-            continuation = continuation_method(
-                text=text, context=continuation_context, tool_name=action, tool_call_id=tool_call_id,
-                tool_request=tool_request, observation=observation,
-            )
-        else:
-            continuation = self.model.begin_turn(text=text, context=continuation_context)
-        continuation_trace = continuation.get("llm_trace", []) if isinstance(continuation, dict) else []
-        llm_trace.extend(item for item in continuation_trace if isinstance(item, dict))
-        if not isinstance(continuation, dict) or str(continuation.get("kind") or "") != "final":
-            return self._invalid_tool_request(llm_trace)
-        final_result = continuation.get("result")
-        if not isinstance(final_result, dict):
-            return self._invalid_tool_request(llm_trace)
-        return {
-            "kb_result": {},
-            "final_result": final_result,
-            "trace": {"actions": [action, "final_response"]},
-            "tool_observations": [observation],
-            "llm_trace": llm_trace,
-        }
+        actions: list[str] = []
+        requests: list[dict] = []
+        observations: list[dict] = []
+        history: list[dict] = []
+        trace: list[dict] = []
+        kb_result: dict = {}
+
+        def packet() -> dict[str, Any]:
+            return {"kb_result": kb_result, "trace": {"actions": list(actions)},
+                    "tool_requests": list(requests), "tool_observations": list(observations), "llm_trace": list(trace)}
+
+        def failure(reason: str) -> dict[str, Any]:
+            return {**packet(), "final_result": {"route": "retry_pending", "response_text": "", "confidence": None, "reason": reason}}
+
+        current = self.model.begin_turn(text=text, context=context)
+        for decision_index in range(3):
+            if not isinstance(current, dict):
+                return failure("invalid_selector_output")
+            trace.extend(item for item in current.get("llm_trace", []) if isinstance(item, dict))
+            kind = current.get("kind")
+            if kind == "finalization_requested":
+                if current.get("response_intent") not in {"answer", "social_reply", "clarification", "missing_grounding"}:
+                    return failure("invalid_selector_output")
+                return {**packet(), "finalization_requested": {"response_intent": current["response_intent"], "reason": current.get("reason", "")}}
+            if kind == "final":
+                result = current.get("result")
+                if isinstance(result, dict) and result.get("route") == "retry_pending":
+                    return {**packet(), "final_result": result}
+                return failure("invalid_selector_output")
+            if kind not in {"wiki_lookup", "calendar_lookup"}:
+                return failure("tool_request_invalid")
+            if decision_index == 2:
+                return failure("tool_budget_exceeded")
+            if kind in actions:
+                return failure("tool_duplicate_call")
+            request = current.get("tool_request")
+            if DirectLLMService._validated_legacy_tool_request(kind, request) is None:
+                return failure("tool_request_invalid")
+            ident = current.get("tool_call_id")
+            if not isinstance(ident, str) or not ident.strip() or any(r["tool_call_id"] == ident for r in requests):
+                return failure("tool_call_id_invalid")
+            requests.append({"tool": kind, "tool_call_id": ident, "tool_request": dict(request)})
+            actions.append(kind)
+            tool_context = {**context, "tool_observations": list(observations)}
+            lookup = self.wiki_lookup if kind == "wiki_lookup" else self.calendar_lookup
+            try:
+                value = lookup.lookup(text=text, context=tool_context, tool_request=request)
+            except (OSError, ValueError):
+                return failure("tool_unavailable")
+            if not isinstance(value, dict):
+                return failure("tool_result_invalid")
+            if kind == "wiki_lookup":
+                kb_result = value
+                kb_trace = value.get("trace")
+                if isinstance(kb_trace, dict):
+                    trace.extend(t for t in kb_trace.get("llm_trace", []) if isinstance(t, dict))
+                status = value.get("grounding_status")
+                observation = {"tool": kind, "status": status, "source_refs": self._source_refs(value),
+                               "grounded_facts": value.get("grounded_facts", []) if status == "ready" else []}
+            else:
+                status = value.get("status")
+                observation = {"tool": kind, "status": status, "summary": value.get("summary", ""), "structured": value.get("structured", {})}
+            observations.append(observation)
+            if status in {"unavailable", "llm_unavailable", "retry_pending"}:
+                return failure("tool_unavailable")
+            if status not in {"ready", "not_found"}:
+                return failure("tool_result_invalid")
+            history.extend([
+                {"role": "assistant", "tool_calls": [{"id": ident, "type": "function", "function": {"name": kind, "arguments": json.dumps(request, ensure_ascii=False)}}]},
+                {"role": "tool", "tool_call_id": ident, "content": json.dumps(observation, ensure_ascii=False)},
+            ])
+            continuation_context = {**context, "tool_observations": list(observations), "tool_requests": list(requests), "native_tool_messages": list(history)}
+            continuation = getattr(self.model, "continue_after_tool", None)
+            if callable(continuation):
+                current = continuation(text=text, context=continuation_context, tool_name=kind, tool_call_id=ident, tool_request=request, observation=observation)
+            else:
+                current = self.model.begin_turn(text=text, context=continuation_context)
+        return failure("tool_budget_exceeded")
 
     @staticmethod
     def _invalid_tool_request(llm_trace: list[dict]) -> dict[str, Any]:

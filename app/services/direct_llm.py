@@ -73,41 +73,7 @@ class DirectLLMService:
     def begin_turn(self, *, text: str, context: dict) -> dict[str, Any]:
         """Run one grounded customer turn with typed native tool requests."""
         self._reset_llm_trace()
-        conversation = self._build_finalization_conversation(context)
-        first_reply = not any(item.get("role") == "assistant" for item in conversation if isinstance(item, dict))
-        tool_observations = self._project_tool_observations(context)
-        user_prompt = json.dumps(
-            {
-                "task": "Обработай текущий ход клиента. Если в tool_observations уже есть готовый результат нужного зарегистрированного инструмента, сформируй финальный JSON-ответ только из этого результата и не вызывай инструмент повторно. Чистую короткую социальную реплику без запроса можно завершить JSON-ответом. Иначе сначала вызови один native-инструмент из зарегистрированного набора: calendar_lookup или wiki_lookup. После одного инструмента можно сделать максимум ещё один последовательный вызов другого зарегистрированного native-инструмента, если для прямого ответа не хватает фактов. Не создавай клиентский ответ с фактами до результата нужного инструмента.",
-                "required_json_schema": {
-                    "tool_call": "calendar_lookup|wiki_lookup or null",
-                    "arguments": {"...": "string"},
-                    "route": "social_reply|cannot_answer|out_of_scope|clarification_requested when tool_call is null",
-                    "response_text": "string when tool_call is null; must be absent when tool_call is a tool name",
-                    "confidence": "number 0..1 when tool_call is null",
-                    "reason": "short string",
-                },
-                "user_message": text,
-                "first_reply_in_dialogue": first_reply,
-                "conversation": conversation,
-                "tool_observations": tool_observations,
-                "rules": [
-                    "calendar_lookup — не источник бизнес-фактов, а факт о календаре из текущего текста; используйте его только если вопрос или уточнение зависит от даты, дня недели или календарного периода.",
-                    "wiki_lookup — единственный источник бизнес-фактов из Wiki.",
-                    "Для любого содержательного ответа можно использовать не более двух последовательных native-инструментов без параллельных вызовов.",
-                    "Если для ответа не хватает календарного факта, можно запросить calendar_lookup, а затем при необходимости wiki_lookup; если не хватает бизнес-факта, можно запросить wiki_lookup, а затем при необходимости calendar_lookup.",
-                    "Каждый tool_call должен быть exact-name match и передавать JSON-объект с точной схемой аргументов. Не используй строки вместо JSON, не добавляй лишних ключей и не запрашивай параллельные инструменты.",
-                    "Любой неизвестный инструмент, отсутствующие аргументы, лишние аргументы, не-JSON arguments или параллельные native_tool_calls считаются ошибкой и должны приводить к retry_pending без клиентского текста.",
-                    "Пока не получены нужные tool observations, не выдавай business answer. Социальная реплика допустима только когда нет содержательного запроса.",
-                    "В arguments передавай только смысловую цель поиска и контекстное ограничение; не вписывай туда предполагаемые бизнес-факты, контакты, ответы или инструкции.",
-                    "Для calendar_lookup используй exact-name JSON с ключами date_expression и requested_calendar_fact; date_expression должен отражать фрагмент текущей реплики, а requested_calendar_fact — только то календарное наблюдение, которое нужно подтвердить.",
-                    "Для wiki_lookup используй exact-name JSON с ключами query, context_scope и needed_fact; query должен быть семантическим, а не словарным.",
-                    "Не используй ключевые слова, скрытые сценарии, историю диалога, память модели или приложение как источник бизнес-ответа; выбирай действие по смыслу диалога и вызывай нужный инструмент при малейшей потребности в фактах.",
-                    "Для wiki_lookup context_scope обязан сохранять последний явно выбранный клиентом предметный вариант из conversation. Нельзя заменять такой вариант более общим родовым словом; если клиент не просит сравнение или смену варианта, query и needed_fact должны быть сформулированы только для выбранного варианта.",
-                ],
-            },
-            ensure_ascii=False,
-        )
+        user_prompt = self._build_selector_prompt(text=text, context=context)
         recorded_call = False
         try:
             raw = self.client.generate(
@@ -134,25 +100,66 @@ class DirectLLMService:
                 },
                 "llm_trace": list(self._active_llm_trace),
             }
+        return self._selector_decision(parsed)
+
+    def _build_selector_prompt(self, *, text: str, context: dict) -> str:
+        conversation = self._build_finalization_conversation(context)
+        first_reply = not any(item.get("role") == "assistant" for item in conversation if isinstance(item, dict))
+        tool_observations = self._project_tool_observations(context)
+        tool_state = {"wiki_lookup": "not_started", "calendar_lookup": "not_started"}
+        for observation in tool_observations:
+            if observation["kind"] in tool_state:
+                tool_state[observation["kind"]] = observation.get("status", "unavailable")
+        remaining_tool_calls = sum(status == "not_started" for status in tool_state.values())
+        return json.dumps(
+            {
+                "task": "Выбери следующее действие для текущего хода клиента. Если для ответа ещё нужны сведения зарегистрированного инструмента, который не вызывался в этом ходу, вызови один native-инструмент: calendar_lookup или wiki_lookup. Иначе заверши сбор сведений JSON-объектом с action=finalize по указанной схеме. После результата одного инструмента можно вызвать другой, если его сведения нужны для ответа; готовность одного результата не означает достаточность всех сведений. Чистая социальная реплика может перейти к финализации без инструментов. На этом этапе не создавай клиентский текст или его черновик: его сформирует одна общая финализация после сборки пакета.",
+                "required_json_schema": {
+                    "action": "finalize",
+                    "response_intent": "answer|social_reply|clarification|missing_grounding",
+                    "reason": "Короткое основание выбора действия без рассуждений и клиентского текста.",
+                },
+                "user_message": text,
+                "first_reply_in_dialogue": first_reply,
+                "conversation": conversation,
+                "tool_observations": tool_observations,
+                "tool_state": tool_state,
+                "remaining_tool_calls": remaining_tool_calls,
+                "rules": [
+                    "calendar_lookup — не источник бизнес-фактов, а факт о календаре из текущего текста; используйте его только если вопрос или уточнение зависит от даты, дня недели или календарного периода.",
+                    "wiki_lookup — единственный источник бизнес-фактов из Wiki.",
+                    "Для любого содержательного ответа можно использовать не более двух последовательных native-инструментов без параллельных вызовов.",
+                    "Каждый зарегистрированный инструмент можно вызвать не более одного раза за ход. Повторный, третий, неизвестный или параллельный вызов нарушает контракт. После двух вызовов допустимо только завершение сбора через action=finalize, без клиентского текста.",
+                    "Если для ответа не хватает календарного факта, можно запросить calendar_lookup, а затем при необходимости wiki_lookup; если не хватает бизнес-факта, можно запросить wiki_lookup, а затем при необходимости calendar_lookup.",
+                    "Каждый tool_call должен быть exact-name match и передавать JSON-объект с точной схемой аргументов. Не используй строки вместо JSON, не добавляй лишних ключей и не запрашивай параллельные инструменты.",
+                    "Любой неизвестный инструмент, отсутствующие аргументы, лишние аргументы, не-JSON arguments или параллельные native_tool_calls считаются ошибкой и должны приводить к retry_pending без клиентского текста.",
+                    "Не возвращай route, response_text, confidence или клиентский черновик на этапе выбора действий. Для завершения верни только action, response_intent и reason. Значение social_reply допустимо только для чистой социальной реплики без содержательного запроса; оно не разрешает обходить получение нужных фактов.",
+                    "В arguments передавай только смысловую цель поиска и контекстное ограничение; не вписывай туда предполагаемые бизнес-факты, контакты, ответы или инструкции.",
+                    "Для calendar_lookup используй exact-name JSON с ключами date_expression и requested_calendar_fact; date_expression должен отражать фрагмент текущей реплики, а requested_calendar_fact — только то календарное наблюдение, которое нужно подтвердить.",
+                    "Для wiki_lookup используй exact-name JSON с ключами query, context_scope и needed_fact; query должен быть семантическим, а не словарным.",
+                    "Не используй ключевые слова, скрытые сценарии, историю диалога, память модели или приложение как источник бизнес-ответа; выбирай действие по смыслу диалога и вызывай нужный инструмент при малейшей потребности в фактах.",
+                    "Для wiki_lookup context_scope обязан сохранять последний явно выбранный клиентом предметный вариант из conversation. Нельзя заменять такой вариант более общим родовым словом; если клиент не просит сравнение или смену варианта, query и needed_fact должны быть сформулированы только для выбранного варианта.",
+                ],
+            },
+            ensure_ascii=False,
+        )
+
+    def _selector_decision(self, parsed: object) -> dict[str, Any]:
         if not isinstance(parsed, dict):
-            return self._invalid_begin_turn("invalid_finalizer_output")
-        native_calls = parsed.get("_native_tool_calls")
-        if isinstance(native_calls, list):
-            tool_call = self._native_registered_tool_call(native_calls, registered_tools={"wiki_lookup", "calendar_lookup"})
-            if tool_call is not None:
-                return {"kind": tool_call["name"], "tool_request": tool_call["arguments"], "tool_call_id": tool_call["id"], "llm_trace": list(self._active_llm_trace)}
-            if native_calls:
+            return self._invalid_begin_turn("invalid_selector_output")
+        if "_native_tool_calls" in parsed:
+            calls = parsed["_native_tool_calls"]
+            if not isinstance(calls, list) or len(calls) != 1 or any(k in parsed for k in {"action", "route", "response_text", "confidence"}):
                 return self._invalid_begin_turn("native_tool_request_invalid")
-        tool_name = str(parsed.get("tool_call") or "")
-        if tool_name in {"wiki_lookup", "calendar_lookup"}:
-            tool_request = self._validated_legacy_tool_request(tool_name, parsed.get("arguments"))
-            if tool_request is not None:
-                return {"kind": tool_name, "tool_request": tool_request, "llm_trace": list(self._active_llm_trace)}
-            return self._invalid_begin_turn(f"{tool_name}_arguments_invalid")
-        normalized = self._normalize_prompt_reply(parsed)
-        if normalized["route"] not in {"retry_pending", "social_reply", "cannot_answer", "out_of_scope", "clarification_requested"}:
-            return self._invalid_begin_turn("customer_turn_requires_tool")
-        return {"kind": "final", "result": normalized, "llm_trace": list(self._active_llm_trace)}
+            call = self._native_registered_tool_call(calls, registered_tools={"wiki_lookup", "calendar_lookup"})
+            ident = calls[0].get("id") if isinstance(calls[0], dict) else None
+            if call is None or call["name"] not in {"wiki_lookup", "calendar_lookup"} or not isinstance(ident, str) or not ident.strip():
+                return self._invalid_begin_turn("native_tool_request_invalid")
+            self._active_llm_trace[-1]["native_tool_call_id"] = ident
+            return {"kind": call["name"], "tool_request": call["arguments"], "tool_call_id": ident, "llm_trace": list(self._active_llm_trace)}
+        if set(parsed) != {"action", "response_intent", "reason"} or parsed.get("action") != "finalize" or not isinstance(parsed.get("response_intent"), str) or parsed["response_intent"] not in {"answer", "social_reply", "clarification", "missing_grounding"} or not isinstance(parsed.get("reason"), str):
+            return self._invalid_begin_turn("invalid_selector_output")
+        return {"kind": "finalization_requested", "response_intent": parsed["response_intent"], "reason": parsed["reason"], "llm_trace": list(self._active_llm_trace)}
 
     @staticmethod
     def _parse_json_object(raw: str) -> Any:
@@ -173,30 +180,63 @@ class DirectLLMService:
     ) -> dict[str, Any]:
         """Continue an OpenAI native tool conversation with a linked tool result."""
         self._reset_llm_trace()
-        conversation = self._build_finalization_conversation(context)
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": self.prompt_service.load_system_prompt()},
-            {"role": "user", "content": json.dumps({"user_message": text, "conversation": conversation}, ensure_ascii=False)},
+            {"role": "user", "content": json.dumps({**json.loads(self._build_selector_prompt(text=text, context=context)), "tool_requests": context.get("tool_requests", []), "tool_observations": context.get("tool_observations", [])}, ensure_ascii=False)},
             {"role": "assistant", "tool_calls": [{"id": tool_call_id, "type": "function", "function": {"name": tool_name, "arguments": json.dumps(tool_request, ensure_ascii=False)}}]},
             {"role": "tool", "tool_call_id": tool_call_id, "content": json.dumps(observation, ensure_ascii=False)},
-            {"role": "user", "content": "Сформируй итоговый JSON-объект строго с ключами route, response_text, confidence, reason. route=answer; response_text — готовый ответ клиенту только по полученному результату инструмента; confidence — число от 0 до 1; reason — короткая строка. Не вызывай инструмент повторно и не добавляй иных ключей."},
+            {"role": "user", "content": json.dumps({"task": "Продолжи выбор действий по текущему вопросу и полученным результатам инструментов. Если для ответа ещё нужны сведения другого зарегистрированного инструмента, который не вызывался в этом ходу, вызови его через native tool call. Всего допустимо не более двух последовательных вызовов, каждый инструмент — не более одного раза. Иначе верни только JSON с action=finalize, response_intent=answer|social_reply|clarification|missing_grounding и коротким reason. Не создавай клиентский ответ, route, response_text, confidence или черновик. Все полученные результаты будут переданы одной общей финализации.", "required_json_schema": {"action": "finalize", "response_intent": "answer|social_reply|clarification|missing_grounding", "reason": "Короткое основание выбора действия без рассуждений и клиентского текста."}}, ensure_ascii=False)},
         ]
+        history = context.get("native_tool_messages")
+        if history is not None:
+            if not isinstance(history, list) or not history or len(history) > 4 or len(history) % 2:
+                return self._invalid_begin_turn("tool_call_id_mismatch")
+            seen = set()
+            seen_tools = set()
+            try:
+                for index in range(0, len(history), 2):
+                    assistant, tool = history[index:index + 2]
+                    calls = assistant["tool_calls"]
+                    if assistant["role"] != "assistant" or tool["role"] != "tool" or len(calls) != 1:
+                        return self._invalid_begin_turn("tool_call_id_mismatch")
+                    validated = self._native_registered_tool_call(calls, registered_tools={"wiki_lookup", "calendar_lookup"})
+                    if validated is None or validated["name"] in seen_tools:
+                        return self._invalid_begin_turn("tool_call_id_mismatch")
+                    seen_tools.add(validated["name"])
+                    ident = calls[0]["id"]
+                    if not isinstance(ident, str) or not ident.strip() or ident in seen or tool["tool_call_id"] != ident:
+                        return self._invalid_begin_turn("tool_call_id_mismatch")
+                    seen.add(ident)
+                latest = history[-2]["tool_calls"][0]
+                if latest["id"] != tool_call_id or latest["function"]["name"] != tool_name or json.loads(latest["function"]["arguments"]) != tool_request or json.loads(history[-1]["content"]) != observation:
+                    return self._invalid_begin_turn("tool_call_id_mismatch")
+            except (KeyError, TypeError, ValueError, IndexError):
+                return self._invalid_begin_turn("tool_call_id_mismatch")
+            messages[2:4] = history
+        if not isinstance(tool_call_id, str) or not tool_call_id.strip() or self._validated_legacy_tool_request(tool_name, tool_request) is None:
+            return self._invalid_begin_turn("tool_request_invalid")
+        used_tools = {tool_name}
+        if history:
+            used_tools.update(message["tool_calls"][0]["function"]["name"] for message in history if message.get("role") == "assistant")
+        available_tools = [tool for tool in self._native_tools() if tool["function"]["name"] not in used_tools]
+        # Capability advertisement follows the same hard budget as execution.
+        # This does not choose a tool or synthesize a finalize decision.
+        selection_options: dict[str, Any] = {"tools": available_tools, "tool_choice": "auto", "parallel_tool_calls": False} if available_tools else {"response_format": {"type": "json_object"}}
         recorded_call = False
         try:
             raw = self.client.generate(
                 system_prompt=self.prompt_service.load_system_prompt(), user_prompt="", temperature=self.temperature,
-                response_format={"type": "json_object"}, messages=messages,
+                messages=messages, **selection_options,
             )
-            self._record_llm_call("tool_result_finalization", capture_model_input("continue_after_tool", {**json.loads(messages[1]["content"]), "tool_observation": json.loads(messages[3]["content"])}))
+            self._record_llm_call("tool_result_selection", capture_model_input("continue_after_tool", {**json.loads(messages[1]["content"]), "tool_observation": observation}))
             recorded_call = True
-            normalized = self._normalize_prompt_reply(self._parse_json_object(raw))
-            self._active_llm_trace.append({"role": "direct_llm", "step": "tool_result_finalization_result", "route": normalized.get("route"), "reason": normalized.get("reason")})
-            return {"kind": "final", "result": normalized, "llm_trace": list(self._active_llm_trace)}
+            parsed = self._parse_json_object(raw)
         except Exception as exc:
             if not recorded_call:
-                self._record_llm_call("tool_result_finalization", capture_model_input("continue_after_tool", {**json.loads(messages[1]["content"]), "tool_observation": json.loads(messages[3]["content"])}))
+                self._record_llm_call("tool_result_selection", capture_model_input("continue_after_tool", {**json.loads(messages[1]["content"]), "tool_observation": observation}))
             self._active_llm_trace.append({"role": "direct_llm", "step": "tool_result_finalization_failed", "error": type(exc).__name__})
             return self._invalid_begin_turn("tool_result_finalization_failed")
+        return self._selector_decision(parsed)
 
     def _project_tool_observations(self, context: dict) -> list[dict[str, Any]]:
         observations = context.get("tool_observations") if isinstance(context, dict) else []
@@ -294,14 +334,14 @@ class DirectLLMService:
 
     @staticmethod
     def _validated_wiki_request(arguments: object) -> dict[str, str] | None:
-        if not isinstance(arguments, dict) or set(arguments) != {"query", "context_scope", "needed_fact"}:
+        if not isinstance(arguments, dict) or set(arguments) != {"query", "context_scope", "needed_fact"} or not all(isinstance(value, str) for value in arguments.values()):
             return None
         request = {key: str(arguments.get(key) or "").strip() for key in ("query", "context_scope", "needed_fact")}
         return request if all(request.values()) else None
 
     @staticmethod
     def _validated_calendar_request(arguments: object) -> dict[str, str] | None:
-        if not isinstance(arguments, dict) or set(arguments) != {"date_expression", "requested_calendar_fact"}:
+        if not isinstance(arguments, dict) or set(arguments) != {"date_expression", "requested_calendar_fact"} or not all(isinstance(value, str) for value in arguments.values()):
             return None
         request = {key: str(arguments.get(key) or "").strip() for key in ("date_expression", "requested_calendar_fact")}
         return request if all(request.values()) else None
@@ -528,6 +568,8 @@ class DirectLLMService:
 
 Приложение выбрало knowledge_mode={knowledge_mode}.
 Этот раздел определяет формирование финального клиентского ответа; профильный промпт выше задаёт только роль и стиль общения.
+
+- Возвращай только JSON-объект по required_json_schema из входного пакета. Клиентский текст помещай только в response_text, не вне JSON.
 
 - В режиме prompt_only не утверждай факты о предметной области. Допустимы только социальный ответ или необходимое уточнение.
 - В режиме kb_grounded `grounding_evidence` и `tool_facts` уже прошли свои фактические границы. Это единственные источники фактических утверждений для текущего хода.

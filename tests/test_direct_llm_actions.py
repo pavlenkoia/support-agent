@@ -49,7 +49,7 @@ def test_stub_provider_returns_retry_pending_without_customer_template(monkeypat
 
 
 def test_begin_turn_requests_wiki_as_the_only_factual_source() -> None:
-    client = ActionClient('{"tool_call":"wiki_lookup","arguments":{"query":"вопрос о чате","context_scope":"текущий вопрос","needed_fact":"способ решения"}}')
+    client = ActionClient('{"_native_tool_calls": [{"id": "fixture-native", "type": "function", "function": {"name": "wiki_lookup", "arguments": "{\\"query\\": \\"вопрос о чате\\", \\"context_scope\\": \\"текущий вопрос\\", \\"needed_fact\\": \\"способ решения\\"}"}}]}')
     service = DirectLLMService(client=client, prompt_service=PromptService())
 
     result = service.begin_turn(
@@ -73,7 +73,7 @@ def test_begin_turn_requests_wiki_as_the_only_factual_source() -> None:
 
 def test_begin_turn_accepts_provider_native_tool_call_with_valid_arguments() -> None:
     client = ActionClient(
-        '{"_native_tool_calls":[{"function":{"name":"wiki_lookup","arguments":"{\\\"query\\\":\\\"вопрос\\\",\\\"context_scope\\\":\\\"контекст\\\",\\\"needed_fact\\\":\\\"факт\\\"}"}}]}'
+        '{"_native_tool_calls":[{"id":"native-wiki","function":{"name":"wiki_lookup","arguments":"{\\\"query\\\":\\\"вопрос\\\",\\\"context_scope\\\":\\\"контекст\\\",\\\"needed_fact\\\":\\\"факт\\\"}"}}]}'
     )
     service = DirectLLMService(client=client, prompt_service=PromptService())
 
@@ -86,7 +86,7 @@ def test_begin_turn_accepts_provider_native_tool_call_with_valid_arguments() -> 
 
 def test_begin_turn_accepts_provider_tool_name_with_serialized_content_suffix_in_followup() -> None:
     client = ActionClient(
-        '{"_native_tool_calls":[{"function":{"name":"wiki_lookup","arguments":"{\\\"query\\\":\\\"стоимость\\\",\\\"context_scope\\\":\\\"самостоятельный вариант\\\",\\\"needed_fact\\\":\\\"цена\\\"}"}}]}'
+        '{"_native_tool_calls":[{"id":"native-wiki-1","function":{"name":"wiki_lookup","arguments":"{\\\"query\\\":\\\"стоимость\\\",\\\"context_scope\\\":\\\"самостоятельный вариант\\\",\\\"needed_fact\\\":\\\"цена\\\"}"}}]}'
     )
     service = DirectLLMService(client=client, prompt_service=PromptService())
 
@@ -96,16 +96,7 @@ def test_begin_turn_accepts_provider_tool_name_with_serialized_content_suffix_in
     )
 
     assert result["kind"] == "wiki_lookup"
-
-
-    client = ActionClient(
-        '{"_native_tool_calls":[{"function":{"name":"wiki_lookup","arguments":"{\\\"query\\\":\\\"стоимость\\\",\\\"context_scope\\\":\\\"самостоятельный вариант\\\",\\\"needed_fact\\\":\\\"цена\\\"}"}}]}'
-    )
-    service = DirectLLMService(client=client, prompt_service=PromptService())
-
-    result = service.begin_turn(text="Содержательный вопрос", context={"recent_messages": []})
-
-    assert result["kind"] == "wiki_lookup"
+    assert result["tool_call_id"] == "native-wiki-1"
 
 
 
@@ -123,7 +114,7 @@ def test_begin_turn_does_not_guess_an_unknown_malformed_native_tool() -> None:
 
 
 def test_begin_turn_parses_valid_tool_envelope_before_provider_trailing_junk() -> None:
-    client = ActionClient('{"tool_call":"wiki_lookup","arguments":{"query":"вопрос","context_scope":"контекст","needed_fact":"факт"},"reason":"need_confirmed_facts"}```json\\n{"tool_call":"wiki_lookup"}\\n```')
+    client = ActionClient('{"_native_tool_calls": [{"id": "fixture-native", "type": "function", "function": {"name": "wiki_lookup", "arguments": "{\\"query\\": \\"вопрос\\", \\"context_scope\\": \\"контекст\\", \\"needed_fact\\": \\"факт\\"}"}}]}```json\\n{"tool_call":"wiki_lookup"}\\n```')
     service = DirectLLMService(client=client, prompt_service=PromptService())
 
     result = service.begin_turn(text="Содержательный вопрос", context={"recent_messages": []})
@@ -131,16 +122,47 @@ def test_begin_turn_parses_valid_tool_envelope_before_provider_trailing_junk() -
     assert result["kind"] == "wiki_lookup"
 
 
-def test_begin_turn_returns_ready_social_text_without_a_second_finalizer_call() -> None:
-    client = ActionClient('{"tool_call":null,"route":"social_reply","response_text":"Пожалуйста!","confidence":1,"reason":"social"}')
+def test_begin_turn_requests_social_finalization_without_customer_text() -> None:
+    client = ActionClient('{"action":"finalize","response_intent":"social_reply","reason":"social"}')
     service = DirectLLMService(client=client, prompt_service=PromptService())
 
     result = service.begin_turn(text="Спасибо", context={"recent_messages": []})
 
-    assert result["kind"] == "final"
-    assert result["result"]["route"] == "social_reply"
-    assert result["result"]["response_text"] == "Пожалуйста!"
+    assert result["kind"] == "finalization_requested"
+    assert result["response_intent"] == "social_reply"
     assert result["llm_trace"][0]["step"] == "customer_turn"
+
+
+
+def test_begin_turn_prompt_requests_action_finalize_without_client_text() -> None:
+    client = ActionClient('{"action":"finalize","response_intent":"social_reply","reason":"social"}')
+    service = DirectLLMService(client=client, prompt_service=PromptService())
+
+    service.begin_turn(text="Спасибо", context={"recent_messages": []})
+
+    prompt = str(client.calls[0]["user_prompt"])
+    assert '"action": "finalize"' in prompt
+    assert '"response_intent": "answer|social_reply|clarification|missing_grounding"' in prompt
+    assert "Не возвращай route, response_text, confidence или клиентский черновик на этапе выбора действий." in prompt
+    assert "Поля `action=finalize`" not in prompt
+
+def test_continue_after_tool_prompt_requests_action_finalize_without_client_text() -> None:
+    client = ActionClient('{"route":"answer","response_text":"Готово.","confidence":1,"reason":"done"}')
+    service = DirectLLMService(client=client, prompt_service=PromptService())
+
+    service.continue_after_tool(
+        text="Вопрос",
+        context={"recent_messages": []},
+        tool_name="wiki_lookup",
+        tool_call_id="expected-id",
+        tool_request={"query": "вопрос", "context_scope": "контекст", "needed_fact": "факт"},
+        observation={"status": "ready", "summary": "Факт"},
+    )
+
+    prompt = str(client.calls[0]["messages"][-1]["content"])
+    assert 'action=finalize' in prompt
+    assert 'response_intent=answer|social_reply|clarification|missing_grounding' in prompt
+    assert "Не создавай клиентский ответ, route, response_text, confidence или черновик." in prompt
 
 
 def test_malformed_json_only_records_one_provider_call() -> None:

@@ -22,10 +22,14 @@ class Model:
 
     def generate(self, **kwargs):
         self.calls.append(kwargs)
-        if len(self.calls) % 2:
+        tools = kwargs.get('tools') or []
+        tool_names = {tool.get('function', {}).get('name') for tool in tools if isinstance(tool, dict)}
+        if tool_names and not kwargs.get("messages"):
             arguments = ({'query': 'Запрос', 'context_scope': 'Выбранный предмет', 'needed_fact': 'Условие'}
                          if self.kind == 'wiki_lookup' else {'date_expression': '2026-01-01', 'requested_calendar_fact': 'weekday'})
             return json.dumps({'_native_tool_calls': [{'id': 'native-123', 'function': {'name': self.kind, 'arguments': json.dumps(arguments)}}]})
+        if tool_names:
+            return json.dumps({'action': 'finalize', 'response_intent': 'answer', 'reason': 'need_response'})
         return json.dumps({'route':'answer','response_text':'Подтверждённый ответ.','confidence':None,'reason':'exact-final-reason'})
 
     def get_last_call_info(self):
@@ -62,12 +66,12 @@ def run_trace(tmp_path, **kwargs):
     return result, routing, client, factory
 
 
-@pytest.mark.parametrize('attempts,expected', [(0,0),(None,None),(2,4)])
+@pytest.mark.parametrize('attempts,expected', [(0,0),(None,None),(2,6)])
 def test_real_model_metrics_keep_unknown_and_zero(tmp_path, attempts, expected):
     result, _, _, _ = run_trace(tmp_path, attempts=attempts)
     assert result['audit']['route_reason'] == 'exact-final-reason'
     assert result['audit']['route_confidence'] is None
-    assert result['audit']['logical_llm_call_count'] == 2
+    assert result['audit']['logical_llm_call_count'] == 3
     assert result['audit']['provider_attempt_count'] == expected
 
 
@@ -83,13 +87,11 @@ def test_packet_is_actual_finalization_input_not_reconstructed_kb(tmp_path, kind
     actual = client.calls[-1]
     captured = packet['finalization_input']
     assert captured['status'] == 'complete'
-    if kind == 'wiki_lookup':
-        sent = json.loads(actual['user_prompt'])
-        assert captured['data']['grounding_evidence'] == sent['grounding_evidence']
-        assert captured['data']['tool_facts'] == sent['tool_facts']
-        assert captured['data']['conversation'] == sent['conversation']
-    else:
-        assert captured['data']['tool_observation'] == json.loads(actual['messages'][3]['content'])
+    sent = json.loads(actual['user_prompt'])
+    assert captured['data']['grounding_evidence'] == sent['grounding_evidence']
+    assert captured['data']['tool_facts'] == sent['tool_facts']
+    assert captured['data']['conversation'] == sent['conversation']
+    if kind == 'calendar_lookup':
         assert result['audit']['kb_status'] == 'not_started'
         assert packet['evidence_status'] == 'ready'
     assert 'MUST_NOT_BE_CAPTURED' not in json.dumps(packet)
@@ -182,7 +184,7 @@ def test_parse_failure_counts_one_real_call_and_no_metadata(tmp_path,boundary):
     elif boundary=='respond':
         value=direct.respond('x',{})
     else:
-        value=direct.continue_after_tool(text='x',context={},tool_name='calendar_lookup',tool_call_id='id',tool_request={},observation={})
+        value=direct.continue_after_tool(text='x',context={},tool_name='calendar_lookup',tool_call_id='id',tool_request={'date_expression':'2026-01-01','requested_calendar_fact':'weekday'},observation={})
     calls=[x for x in value['llm_trace'] if x.get('entry_kind')=='model_call']
     assert len(calls)==1
     assert calls[0]['attempts']==0
@@ -243,10 +245,10 @@ def test_technical_wiki_failure_does_not_invent_finalization(tmp_path):
     assert len(model.calls)==1
     assert result["audit"]["trace_packet"]["finalization_input"]["status"]=="not_invoked"
     assert result["audit"]["trace_packet"]["result"]["delivery_status"]=="not_applicable"
-    assert result["route"]["reason"]=="kb_technical_failure"
+    assert result["route"]["reason"]=="tool_unavailable"
 
 
-@pytest.mark.parametrize("kind,step", [("wiki_lookup","final_response"),("calendar_lookup","tool_result_finalization")])
+@pytest.mark.parametrize("kind,step", [("wiki_lookup","final_response"),("calendar_lookup","final_response")])
 def test_real_final_action_references_packet_call_by_local_id(tmp_path,kind,step):
     result,_,_,_=run_trace(tmp_path,kind=kind)
     packet=result["audit"]["trace_packet"]

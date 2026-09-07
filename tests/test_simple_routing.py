@@ -36,7 +36,7 @@ class ForbiddenLegacyDependency:
 
 class RecordingAgentLoop:
     def __init__(self, result: dict) -> None:
-        self.result = result
+        self.result = {"finalization_requested": {"response_intent": "missing_grounding", "reason": "fixture"}, **result}
         self.calls: list[dict] = []
 
     def run(self, *, text: str, context: dict) -> dict:
@@ -123,7 +123,7 @@ class RecordingGroundedFinalizer:
             "response_text": self.response_text,
             "confidence": 0.95,
             "reason": "ready_grounding",
-            "llm_trace": [{"role": "direct_llm", "step": "final_response"}],
+            "llm_trace": [{"entry_kind": "model_call", "role": "direct_llm", "step": "final_response", "attempts": 1}],
         }
 
 
@@ -160,13 +160,8 @@ def test_agent_tool_loop_routes_social_reply_without_legacy_kb_dependencies(tmp_
     loop = RecordingAgentLoop(
         {
             "kb_result": {},
-            "final_result": {
-                "route": "social_reply",
-                "response_text": "Пожалуйста!",
-                "confidence": 1.0,
-                "reason": "social_reply",
-            },
-            "trace": {"actions": ["final_response"]},
+            "finalization_requested": {"response_intent": "social_reply", "reason": "social_reply"},
+            "trace": {"actions": []},
             "llm_trace": [{"entry_kind": "model_call", "usage": {"total_tokens": 17}, "attempts": 2}],
             "tool_observations": [],
         }
@@ -190,9 +185,9 @@ def test_agent_tool_loop_routes_social_reply_without_legacy_kb_dependencies(tmp_
     assert result["outcome"]["outcome_payload"]["response_text"] == "Здравствуйте! Пожалуйста!"
     assert loop.calls[0]["text"] == "Спасибо"
     assert result["audit"]["agent_actions"] == ["final_response"]
-    assert result["audit"]["logical_llm_call_count"] == 1
-    assert result["audit"]["provider_attempt_count"] == 2
-    assert finalizer.calls == []
+    assert result["audit"]["logical_llm_call_count"] == 2
+    assert result["audit"]["provider_attempt_count"] == 3
+    assert len(finalizer.calls) == 1
 
 
 def test_agent_tool_loop_audits_actual_wiki_lookup_status(tmp_path: Path) -> None:
@@ -245,6 +240,7 @@ def test_agent_tool_loop_never_passes_nonready_extraction_to_finalizer(tmp_path:
         "grounding_status": "not_found",
         "answer_basis": "",
         "grounded_facts": [],
+        "source_refs": [],
     }
 
 

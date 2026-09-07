@@ -23,7 +23,7 @@ There are two finalization modes:
 
 Only `grounding_status=ready` may cross into the finalizer as `kb_grounded` evidence. A non-ready extraction can contain internal coverage, source, or availability observations; it is not customer evidence and its `answer_basis` and `grounded_facts` are replaced with an empty packet before finalization. The finalizer then owns a useful clarification or an honest `cannot_answer` using only separately allowlisted customer-safe policy evidence, if present. This is not a classifier, domain keyword branch, or KB answer source.
 
-The mode and response intent are application-owned control values. They are not derived by exposing planner output to the final model.
+The mode is derived from structurally validated evidence availability. Response intent is the validated decision of the existing selector model, not an application-side semantic classifier. Only its enum value crosses the writer boundary; selector reasons, traces and drafts do not.
 
 ## Finalization input allowlist
 
@@ -81,7 +81,7 @@ No domain-specific question handler, keyword branch, canned FAQ shortcut, or mec
 
 ## Structural output validation (stage 1)
 
-`app/services/final_response_validation.py` owns the shared application-side schema, independent of provider-native JSON Schema support. All three `DirectLLMService` final-output paths (`begin_turn`, `continue_after_tool`, `respond`) use it. Routing repeats the same validation before policy and after formatting with the actual channel; this small routing change is necessary for channel-specific limits and textless technical outcomes, not a redesign of tool selection or audit telemetry.
+`app/services/final_response_validation.py` owns the shared application-side schema, independent of provider-native JSON Schema support. In stage 3, `respond` is the only customer-output model boundary. `begin_turn` and `continue_after_tool` validate selector decisions separately: registered native requests or `action=finalize` without customer text. Routing accepts only technical failures from the selector, never precomputed customer replies. Routing repeats the same validation before policy and after formatting with the actual channel; this small routing change is necessary for channel-specific limits and textless technical outcomes, not a redesign of tool selection or audit telemetry.
 
 - Top level must be an object. Model routes are exact `answer|social_reply|cannot_answer|out_of_scope|clarification_requested`; whitespace/case variants and unknown routes are invalid, not semantic refusals.
 - `response_text` must be a non-empty string after existing formatting cleanup. Objects/lists/numbers are never converted to customer text. Existing internal-envelope guards remain.
@@ -94,6 +94,12 @@ No domain-specific question handler, keyword branch, canned FAQ shortcut, or mec
 `tests/test_final_response_validation.py` exercises malformed output at each model boundary, nullable confidence, policy idempotence, and the actual Telegram gateway/queue and VK durable-turn gateway through real routing with injected model/tool clients and recording senders. Rejected results create neither assistant messages nor outbound sends. Telegram recovery owns raw transport events; current VK recovery owns `VkTurn` rows, so their retry assertions intentionally target different tables.
 
 Stage 1 does **not** change prompts, Wiki, tool ordering, grounding semantics, retry/backoff, models, or production. Schema confidence remains nullable, but the old routing audit confidence/counter projections are a separate stage-2 limitation. Semantic replay, unified tool-loop work and production release remain separately gated; these deterministic tests do not prove live-model factual correctness.
+
+## Bounded collection before finalization (stage 3)
+
+The selector may execute zero, one or two sequential native tool requests, with Wiki/calendar each used at most once. It retains linked native messages and accumulated observations, then returns a validated finalization intent. Both tool orders share the same writer; ready calendar facts do not overwrite Wiki evidence or relabel Wiki status. Technical tool failure takes precedence over a request to finalize, and `finalizer_invoked=false` means no final-model input exists for that turn.
+
+This candidate preserves the approved `respond` prompt and its factual/Russian-language constraints. Changes to the extraction/coverage schema belong to a later stage. Real-provider acceptance must match effective production configuration; no release or semantic-quality proof follows from unit success alone.
 
 ## Terminal paths outside normal finalization
 

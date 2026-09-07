@@ -32,6 +32,8 @@ class JSONClient:
 
     def generate(self, **kwargs):
         self.calls.append(kwargs)
+        if kwargs.get("tools"):
+            return json.dumps({"action": "finalize", "response_intent": "answer", "reason": "selection_complete"})
         return self.raw
 
 
@@ -40,16 +42,22 @@ def reply(**changes):
 
 
 def call_boundary(value, boundary):
+    # These are three paths into the one writer, not three text-generating
+    # selectors. Keep every malformed/nullable final JSON case on each path.
     direct = DirectLLMService(client=JSONClient(value), prompt_service=PromptService())
-    if boundary == "respond":
-        return direct.respond("Вопрос", {"grounding_status": "ready", "grounded_facts": ["Факт"]})
+    observations = []
     if boundary == "begin_turn":
-        return direct.begin_turn(text="Реплика", context={})["result"]
-    return direct.continue_after_tool(
-        text="Реплика", context={}, tool_name="calendar_lookup", tool_call_id="synthetic-call",
-        tool_request={"date_expression": "2026-01-01", "requested_calendar_fact": "weekday"},
-        observation={"status": "ready", "summary": "Календарный факт"},
-    )["result"]
+        selection = direct.begin_turn(text="Реплика", context={})
+        assert selection["kind"] == "finalization_requested"
+    elif boundary == "continue_after_tool":
+        observation = {"tool": "calendar_lookup", "status": "ready", "summary": "Календарный факт"}
+        selection = direct.continue_after_tool(
+            text="Реплика", context={}, tool_name="calendar_lookup", tool_call_id="synthetic-call",
+            tool_request={"date_expression": "2026-01-01", "requested_calendar_fact": "weekday"}, observation=observation,
+        )
+        assert selection["kind"] == "finalization_requested"
+        observations = [observation]
+    return direct.respond("Вопрос", {"grounding_status": "ready", "grounded_facts": ["Факт"]}, tool_observations=observations)
 
 
 INVALID = [
@@ -112,6 +120,7 @@ class ReadyWikiTurn:
     """Only tool acquisition is fake; real routing calls the real finalizer."""
     def run(self, **kwargs):
         return {
+            "finalization_requested": {"response_intent": "answer", "reason": "selection_complete"},
             "kb_result": {"grounding_status": "ready", "grounded_facts": ["Факт"], "source_refs": []},
             "tool_observations": [], "trace": {"actions": []}, "llm_trace": [],
         }

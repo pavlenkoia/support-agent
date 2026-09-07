@@ -56,3 +56,7 @@ migration and HTTP TestClient/probe JSON roundtrip, plus Viewer test-session
 exclusion checks (not a new trace UI). Models and transports
 are injected; production and customers are not touched. Stage 3 (multi-tool loop)
 and later stages are explicitly outside this change.
+
+## Stage 3 compatibility
+
+`respond` is now the only customer-output boundary. Selector calls use `customer_turn` and `tool_result_selection`; their actual projected inputs remain in `model_calls`, while `finalization_input` belongs to the common writer. If collection fails before the writer, it is explicitly `not_invoked`. Native tool action correlation uses the recorded native decision ID, not positions in a trace that may include Wiki navigation/extraction calls. The `stage2-c5` envelope, byte limits, privacy allowlists and existing delivery correlation remain unchanged.

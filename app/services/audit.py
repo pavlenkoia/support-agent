@@ -8,7 +8,7 @@ from uuid import uuid4
 TRACE_PACKET_VERSION = "stage2-c5"
 TRACE_PACKET_MAX_BYTES = 16384
 INPUT_MAX_BYTES = 8192
-MODEL_STEPS = {"customer_turn", "tool_result_finalization", "final_response", "navigation", "coverage_review", "grounded_extraction"}
+MODEL_STEPS = {"customer_turn", "tool_result_selection", "tool_result_finalization", "final_response", "navigation", "coverage_review", "grounded_extraction"}
 
 
 def json_bytes(value: object) -> bytes:
@@ -41,7 +41,7 @@ def model_calls(trace: list[dict]) -> list[dict]:
 
 
 def clean_llm_trace(trace: list[dict]) -> list[dict]:
-    allowed = {"entry_kind", "call_id", "role", "step", "provider", "model", "duration_ms", "attempts", "usage", "input_packet", "route", "customer_reply_emitted"}
+    allowed = {"entry_kind", "call_id", "native_tool_call_id", "role", "step", "provider", "model", "duration_ms", "attempts", "usage", "input_packet", "route", "customer_reply_emitted"}
     return [{key: value for key, value in item.items() if key in allowed} for item in trace]
 
 
@@ -61,7 +61,13 @@ def _ordered_actions(response_strategy: dict, calls: list[dict]) -> list[dict]:
         if request is not None:
             requests.remove(request)
         if action in {"wiki_lookup", "calendar_lookup"}:
-            candidates = [call for call in unused_calls if call.get("role") == "direct_llm" and call.get("step") == "customer_turn"]
+            native_id = request.get("tool_call_id") if request else None
+            selectors = [call for call in unused_calls if call.get("role") == "direct_llm" and call.get("step") in {"customer_turn", "tool_result_selection"}]
+            candidates = [call for call in selectors if native_id and call.get("native_tool_call_id") == native_id]
+            # Old packets did not carry native decision IDs. Only their single,
+            # unambiguous initial selector can be associated without guessing.
+            if not candidates and not any(call.get("native_tool_call_id") for call in selectors):
+                candidates = [call for call in selectors if call.get("step") == "customer_turn"]
             matched = candidates[0] if len(candidates) == 1 else None
         elif action == "final_response":
             candidates = [call for call in unused_calls if call.get("role") in {None, "direct_llm"} and call.get("step") in {"final_response", "tool_result_finalization", "customer_turn"}]

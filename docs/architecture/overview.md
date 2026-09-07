@@ -1,22 +1,25 @@
 # Support Agent Architecture Overview
 
-## Current production contract
+## Repository contract — stage 3 candidate
 
-Production runs with `ANSWER_ENGINE_MODE=agent_tool_loop`. It is one LLM-managed customer turn with an optional bounded Wiki tool, not a keyword router, a separate LLM classifier, or an application-forced retrieval path.
+The engine remains `ANSWER_ENGINE_MODE=agent_tool_loop`. This section describes the repository candidate, not a claim that it has been deployed. Production release is separately authorized and verified.
 
 ```text
 Telegram / VK inbound event
   → raw-event journal + channel queue + stale/override guards
   → RoutingService: case resolution + bounded dialogue context
-  → DirectLLMService native customer turn (`wiki_lookup` / `calendar_lookup`, tool_choice=auto)
-      ├─ pure social turn → direct non-factual response
-      └─ model-selected tool call
-           → runtime executes the typed request
-           → tool result is linked to the originating tool_call_id as role=tool
-           → same native conversation returns the customer JSON result
-  → PolicyService output boundary
+  → DirectLLMService selector (native tools, tool_choice=auto)
+      → 0–2 sequential tools, Wiki/calendar each at most once
+      → all assistant.tool_calls / role=tool pairs retain native IDs
+      → action=finalize + response_intent, no customer draft
+  → RoutingService allowlisted evidence + common respond exactly once
+  → shared output validator + PolicyService + channel limit
   → durable message persistence + transport delivery
 ```
+
+Technical selector/tool failures take a textless `retry_pending` path without invoking the writer. A semantic `not_found` result can proceed to finalization.
+
+The shared selector builder preserves the same approved action contract and schema across native continuations. Only unused tools remain advertised; after two executions no tools are advertised and the model still must return a valid finalize decision. No decision or native call is synthesized. The common writer system contract requires a JSON envelope; all existing evidence and natural-language constraints remain unchanged.
 
 ## Core boundaries
 
@@ -31,7 +34,7 @@ Telegram / VK inbound event
 
 ## Typed native tool contract
 
-`wiki_lookup` and `calendar_lookup` are typed native tools. The customer model selects one with `tool_choice=auto`; the runtime validates the exact name and JSON arguments, executes only that request, then continues the same OpenAI-compatible conversation with an `assistant.tool_calls` message followed by a linked `role=tool` result using the original `tool_call_id`. The model then returns the final customer JSON; the application does not substitute a second standalone finalizer prompt for the tool continuation.
+`wiki_lookup` and `calendar_lookup` are typed native tools. The selector chooses one with `tool_choice=auto`; the runtime validates the exact name, JSON arguments and nonempty native ID before execution. Each continuation retains all linked `assistant.tool_calls` → `role=tool` messages and observations. The selector may choose the other tool or finish collection with `action=finalize`, `response_intent` and a short internal `reason`; it must not create customer text. Both Wiki→calendar and calendar→Wiki are supported by the target contract. Repeat/third/unknown/parallel calls and invalid ID links fail closed before the forbidden action. One common `respond` call owns all normal customer text, including social and calendar-only replies.
 
 `wiki_lookup` requires:
 
@@ -45,7 +48,7 @@ Telegram / VK inbound event
 
 The OpenAI-compatible adapter dispatches only an exact registered function name with JSON arguments that validate against that tool schema; malformed names, malformed JSON, missing fields, and unknown tools fail closed as `retry_pending`. It never guesses a tool from a structural call object or rewrites an argument into a business decision. `parallel_tool_calls=false` bounds the customer action to one call. The runtime passes the model-selected request to catalog navigation, coverage review, and grounded extraction. For a contextual follow-up, `context_scope` preserves the last explicit customer-selected subject; it must not be widened to a neighboring variant unless the customer asks to compare or change it.
 
-`calendar_lookup` requires exactly `date_expression` and `requested_calendar_fact`. It supplies calendar facts only and never infers a business schedule. A ready tool result is customer evidence only through the linked native continuation.
+`calendar_lookup` requires exactly `date_expression` and `requested_calendar_fact`. It supplies calendar facts only and never infers a business schedule. A ready calendar observation is retained separately from Wiki business facts and passed to the common finalizer after collection.
 
 ## Main runtime components
 

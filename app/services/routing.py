@@ -114,65 +114,50 @@ class RoutingService:
         raw_kb_result = loop_result.get("kb_result")
         kb_result: dict[str, Any] = raw_kb_result if isinstance(raw_kb_result, dict) else {}
         raw_final_result = loop_result.get("final_result")
-        precomputed_final = raw_final_result if isinstance(raw_final_result, dict) else None
-        tool_observations = list(loop_result.get("tool_observations") or [])
-        calendar_ready = any(
-            isinstance(item, dict) and item.get("tool") == "calendar_lookup" and item.get("status") == "ready"
-            for item in tool_observations
+        finalization_requested = loop_result.get("finalization_requested")
+        tool_observations = [item for item in loop_result.get("tool_observations", []) if isinstance(item, dict)]
+        calendar_ready = any(item.get("tool") == "calendar_lookup" and item.get("status") == "ready" for item in tool_observations)
+        technical_statuses = {"llm_unavailable", "retry_pending", "unavailable"}
+        technical_kb_failure = kb_result.get("grounding_status") in technical_statuses or any(
+            item.get("status") in technical_statuses for item in tool_observations
         )
-        technical_kb_failure = kb_result.get("grounding_status") in {"llm_unavailable", "retry_pending"}
         grounded = kb_result.get("grounding_status") == "ready"
-        # `grounded_facts` is an internal extraction product.  It may explain
-        # why a direct answer was not established, so its presence is never
-        # evidence for a customer answer.  Only `ready` crosses the finalizer
-        # boundary with factual content.
         finalization_has_evidence = grounded or calendar_ready
         first_reply = not any(item.get("role") == "assistant" for item in context.get("recent_messages", []) if isinstance(item, dict))
-        if precomputed_final is not None:
-            final_result = precomputed_final
+        finalizer_invoked = False
+        technical_result = {"route": "retry_pending", "response_text": "", "confidence": None, "reason": "invalid_selector_output"}
+        if raw_final_result is not None:
+            # Selector boundaries may only propagate textless technical failures.
+            final_result = raw_final_result if isinstance(raw_final_result, dict) and raw_final_result.get("route") == "retry_pending" else technical_result
         elif technical_kb_failure:
-            final_result = {
-                "route": "retry_pending",
-                "response_text": "",
-                "confidence": 0.0,
-                "reason": "kb_technical_failure",
-                "llm_trace": [],
-            }
+            final_result = {**technical_result, "reason": "kb_technical_failure"}
+        elif not isinstance(finalization_requested, dict) or finalization_requested.get("response_intent") not in {"answer", "social_reply", "clarification", "missing_grounding"}:
+            final_result = technical_result
         else:
-            policy_evidence = [] if finalization_has_evidence else self.policy.no_answer_policy_evidence()
-            if policy_evidence:
-                tool_observations.extend(
-                    {"kind": "profile_no_answer_option", "summary": item["text"], "source_ref": item["source_ref"]}
-                    for item in policy_evidence
-                )
-            if grounded:
-                finalization_kb_result = kb_result
-            elif calendar_ready:
-                calendar_summaries = [
-                    str(item.get("summary") or "").strip()
-                    for item in tool_observations
-                    if isinstance(item, dict) and item.get("tool") == "calendar_lookup" and item.get("status") == "ready"
-                ]
-                calendar_facts = [summary for summary in calendar_summaries if summary]
-                finalization_kb_result = {
-                    "grounding_status": "ready",
-                    "answer_basis": calendar_facts[0] if calendar_facts else "",
-                    "grounded_facts": calendar_facts,
-                }
-            else:
-                finalization_kb_result = {
-                    "grounding_status": str(kb_result.get("grounding_status") or "not_found"),
-                    "answer_basis": "",
-                    "grounded_facts": [],
-                }
+            response_intent = finalization_requested["response_intent"]
+            policy_evidence = [] if finalization_has_evidence or response_intent == "social_reply" else self.policy.no_answer_policy_evidence()
+            finalization_observations = list(tool_observations)
+            finalization_observations.extend(
+                {"kind": "profile_no_answer_option", "summary": item["text"], "source_ref": item["source_ref"]}
+                for item in policy_evidence
+            )
+            # Keep calendar facts separate from business evidence, and exclude
+            # navigation results/raw pages before the common writer boundary.
+            finalization_kb_result = {
+                "grounding_status": str(kb_result.get("grounding_status") or "not_found"),
+                "answer_basis": kb_result.get("answer_basis", "") if grounded else "",
+                "grounded_facts": kb_result.get("grounded_facts", []) if grounded else [],
+                "source_refs": kb_result.get("source_refs", []) if grounded else [],
+            }
+            finalizer_invoked = True
             final_result = self.direct_llm.respond(
                 payload.text,
                 finalization_kb_result,
                 knowledge_mode="kb_grounded" if finalization_has_evidence or policy_evidence else "prompt_only",
                 conversation_context=context,
-                tool_observations=tool_observations,
+                tool_observations=finalization_observations,
                 first_reply_in_dialogue=first_reply,
-                response_intent="answer" if finalization_has_evidence else "missing_grounding",
+                response_intent=response_intent,
             )
         final_result = {**final_result, **validate_final_response(final_result, allow_technical=True)}
         if final_result["route"] != "retry_pending":
@@ -189,7 +174,7 @@ class RoutingService:
         response_text = final_result["response_text"]
         source_refs = [str(ref) for ref in kb_result.get("source_refs", []) if str(ref)] if grounded else []
         actions = list((loop_result.get("trace") or {}).get("actions") or [])
-        if precomputed_final is None and not technical_kb_failure:
+        if finalizer_invoked:
             actions.append("final_response")
         tool_observations = list(loop_result.get("tool_observations") or [])
         wiki_observations = [
@@ -230,7 +215,7 @@ class RoutingService:
             "tool_requests": list(loop_result.get("tool_requests") or []),
             "source_turn": {"channel": payload.channel, "external_message_id": payload.external_message_id, "external_event_id": payload.external_event_id},
             "wiki_used": wiki_used,
-            "finalizer_invoked": precomputed_final is not None or not technical_kb_failure,
+            "finalizer_invoked": finalizer_invoked,
             "llm_trace": llm_trace,
             "finalization_llm_trace": clean_llm_trace(finalization_llm_trace),
             **trace_metrics(llm_trace),

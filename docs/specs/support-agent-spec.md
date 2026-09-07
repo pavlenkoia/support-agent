@@ -17,8 +17,8 @@ It is not a ticket router and not an escalation-first bot.
 3. Substantive KB reasoning must pass through a dedicated KB agent that reads the compiled wiki selectively rather than treating lexical snippets as the final reasoning surface.
 4. The customer-facing support agent and the KB agent must use separate external prompt files.
 5. The agent must not fabricate facts when KB/tool evidence is missing.
-6. One customer-facing model turn receives the native optional `wiki_lookup` tool with the required JSON arguments `query`, `context_scope`, and `needed_fact`. The model chooses it through `tool_choice=auto`; the application validates the exact tool name and its typed arguments, then executes only that request. For a contextual follow-up, the model must preserve the selected subject in `context_scope`. A pure short social turn without a request or customer situation may return a ready non-factual reply. For every substantive turn, the system prompt requires `wiki_lookup` before customer facts, procedures, contacts, promises, domain clarification, `cannot_answer`, or `out_of_scope`; the application does not run a separate LLM classifier, semantic router, or forced retrieval path. Wiki is the only business-fact source. Literal no-send replays prove that substantive turns selected Wiki.
-7. A planner-approved `out_of_scope` is terminal only on the first customer turn. For a follow-up after an assistant reply, it must first attempt KB reading so a contextual post-service request cannot be discarded as unrelated.
+6. The existing customer model selects 0–2 sequential native tools by meaning; Wiki and calendar are each allowed at most once. A selector finalization decision contains no customer draft. One common writer handles Wiki, calendar, their combination and pure social replies. There is no separate classifier, keyword router or forced retrieval path. Wiki is the only business-fact source.
+7. Only the common writer chooses customer outcome routes. Selector intent and dialogue do not prove business facts; the application does not force a tool by classifying a follow-up.
 8. Every customer-visible terminal route passes through one output boundary: first replies begin with exactly one `Здравствуйте!`. The boundary normalizes formatting but never replaces a model-written customer reply with an application template; an invalid or missing final-model payload is `retry_pending` with empty customer text.
 9. If a substantive answer cannot be grounded, the final outcome must be `cannot_answer`. A successful LLM Wiki navigation that selects no pages is a not-found knowledge result, even when the model still lists information needs; it must reach the common finalizer with an empty evidence packet, not become `retry_pending`.
 10. If the first request is outside the domain, the final outcome must be `out_of_scope`.
@@ -32,22 +32,23 @@ It is not a ticket router and not an escalation-first bot.
 18. Channel-specific transport workers must reuse the same application runtime rather than creating a second support agent.
 19. VK transport-level manual-admin intervention must silence auto-replies for 1 hour from the last unmatched `message_reply` and terminally suppress unfinished earlier `message_new` transport events for that peer. A historical inbound event must not remain in `received` after an operator reply has intentionally taken over the conversation.
 20. Every accepted VK `message_new` must be durably stored as its own customer message before queueing. Queue coalescing may combine only the routing input; manual override or stale-generation suppression must never remove the original inbound messages from Viewer. VK Market attachments may enrich only the routing input: the agent receives a normalized attachment context with market title, description, price text, and stable card identifiers, while persisted Viewer/customer history retains the literal customer text. Immediately before a VK reply is journaled and sent, the worker must re-check both transport-level override and whether the combined generation's newest external message ID still equals the durable latest-inbound marker for that conversation. A newer persisted inbound suppresses the obsolete generation.
-21. Planner actions are capability-bound: `use_tool` is valid only for an explicitly advertised runtime capability. A request outside that set is rejected before tool execution as internal `planner_action_rejected`, never customer-facing `cannot_answer` by itself.
-22. A defensive runtime capability mismatch (`tool_unavailable`) must immediately advance to KB/finalization; neither it nor a rejected planner action may repeat `use_tool` or consume another bounded-loop iteration.
+21. Native selector actions are capability-bound. Unregistered names, invalid arguments and invalid native IDs are technical failures before tool execution, never customer-facing `cannot_answer` by themselves.
+22. Tool unavailability stops collection with a textless technical outcome; it does not advance to a customer answer or request the failing tool again in the same turn.
 23. The production simple runtime must never load the whole compiled corpus into the answering prompt. It must start from the compact OKF catalog and pass only selected full pages to the KB agent.
 24. `simple_llm_wiki` must require coverage review at its call boundary; a stale `KB_AGENT_SKIP_COVERAGE_REVIEW=true` setting must not weaken this production invariant.
 25. The first customer-visible response, including `cannot_answer`, must begin with exactly one `Здравствуйте!`.
 
 ## Decision loop
 
-Per inbound turn:
-1. run one customer-facing model turn with the native optional `wiki_lookup(query, context_scope, needed_fact)` or `calendar_lookup(date_expression, requested_calendar_fact)` tool
-2. if the model returns a final non-factual reply, deliver that model text through the common output boundary; no second finalizer/model call is made
-3. if the model calls a tool, validate the exact registered function name and typed JSON arguments, execute only that request, then resume the same OpenAI-compatible tool conversation with the original `tool_call_id` and a `role=tool` result; the resumed model returns the customer JSON
-4. force a KB read before accepting `out_of_scope` on a contextual follow-up
-5. never answer a substantive business question from the system prompt
-6. emit one of the allowed outcomes
-7. malformed function names, malformed JSON, missing required tool arguments, unknown tools, or parallel calls fail closed as `retry_pending`; application code never guesses a tool or rewrites semantic arguments.
+Per inbound turn (stage 3 repository candidate, not an implicit production release):
+1. The existing model boundary selects native `wiki_lookup(query, context_scope, needed_fact)` or `calendar_lookup(date_expression, requested_calendar_fact)`, or returns only `action=finalize`, a validated `response_intent`, and a short internal reason.
+2. Collection does not create a customer draft. Pure social turns can finalize without a tool.
+3. Validate each exact request and linked native ID before execution. Allow at most two sequential tool actions, each registered tool at most once; support both orders and either single-tool path.
+4. Preserve every native assistant/tool message pair and all observations across continuations. Do not fabricate missing IDs, reset evidence after calendar, or count provider retries as extra tool actions.
+5. On finalize, routing constructs an allowlisted evidence packet and invokes the existing common `respond` exactly once. Business facts remain Wiki-only; calendar observations stay separate. Navigation reasons, raw pages and audit metadata are not finalizer evidence.
+6. Invalid selector output, tool budget/schema/ID violations and unavailable tools produce textless `retry_pending` without finalization, assistant persistence or send. Successful `not_found` remains a semantic outcome for the writer.
+7. Validate/format the writer output through the shared output boundary and preserve the exact reason. Audit records whether the writer actually ran and associates tool actions with their native selector decisions.
+8. Acceptance requires isolated real-provider replay of both native orders on the same effective provider/model/retry configuration as production, in addition to bounded regression and full-suite tests. Stub success or HTTP availability alone is not acceptance. No production deploy is implied.
 
 ## Tool-aware reasoning
 

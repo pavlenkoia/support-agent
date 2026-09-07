@@ -1,6 +1,10 @@
 from __future__ import annotations
 
-from app.services.agent_tool_loop import CalendarLookupTool, UnifiedTurnService, WikiLookupTool
+from app.services.agent_tool_loop import (
+    CalendarLookupTool,
+    UnifiedTurnService,
+    WikiLookupTool,
+)
 from app.services.tool_runtime import ToolRuntimeService
 
 
@@ -32,13 +36,9 @@ def test_unified_turn_returns_social_customer_text_without_wiki_lookup() -> None
         def begin_turn(self, *, text: str, context: dict) -> dict:
             self.calls.append({"text": text, "context": context})
             return {
-                "kind": "final",
-                "result": {
-                    "route": "social_reply",
-                    "response_text": "Пожалуйста!",
-                    "confidence": 1.0,
-                    "reason": "social_reply",
-                },
+                "kind": "finalization_requested",
+                "response_intent": "social_reply",
+                "reason": "social_reply",
                 "llm_trace": [{"role": "direct_llm", "step": "customer_turn"}],
             }
 
@@ -50,15 +50,18 @@ def test_unified_turn_returns_social_customer_text_without_wiki_lookup() -> None
 
     assert model.calls == [{"text": "Спасибо", "context": {"recent_messages": []}}]
     assert wiki.calls == []
-    assert result["final_result"]["response_text"] == "Пожалуйста!"
-    assert result["trace"]["actions"] == ["final_response"]
+    assert result["finalization_requested"]["response_intent"] == "social_reply"
+    assert result["trace"]["actions"] == []
 
 
 def test_unified_turn_runs_wiki_after_model_requests_its_tool() -> None:
     class TurnModel:
         def begin_turn(self, *, text: str, context: dict) -> dict:
             _ = (text, context)
-            return {"kind": "wiki_lookup", "tool_request": {"query": "запись", "context_scope": "тандем", "needed_fact": "канал"}, "llm_trace": [{"role": "direct_llm", "step": "customer_turn"}]}
+            return {"kind": "wiki_lookup", "tool_call_id": "wiki-1", "tool_request": {"query": "запись", "context_scope": "тандем", "needed_fact": "канал"}, "llm_trace": [{"role": "direct_llm", "step": "customer_turn"}]}
+
+        def continue_after_tool(self, **kwargs) -> dict:
+            return {"kind": "finalization_requested", "response_intent": "answer", "reason": "wiki_ready", "llm_trace": []}
 
     wiki = RecordingWikiLookup()
     turn = UnifiedTurnService(model=TurnModel(), wiki_lookup=wiki, calendar_lookup=RecordingCalendarLookup())
@@ -79,9 +82,10 @@ def test_unified_turn_runs_calendar_after_model_requests_its_tool() -> None:
             _ = (text, context)
             self.calls += 1
             if self.calls == 2:
-                return {"kind": "final", "result": {"route": "answer", "response_text": "Понедельник.", "confidence": 1.0, "reason": "calendar"}, "llm_trace": []}
+                return {"kind": "finalization_requested", "response_intent": "answer", "reason": "calendar", "llm_trace": []}
             return {
                 "kind": "calendar_lookup",
+                "tool_call_id": "calendar-1",
                 "tool_request": {"date_expression": "сегодня", "requested_calendar_fact": "день недели"},
                 "llm_trace": [{"role": "direct_llm", "step": "customer_turn"}],
             }
@@ -105,10 +109,10 @@ def test_unified_turn_runs_calendar_after_model_requests_its_tool() -> None:
 
     assert calendar.calls == [{
         "text": "Офис сегодня работает?",
-        "context": {"calendar_reference_at": "2026-08-31T08:00:00+00:00"},
+        "context": {"calendar_reference_at": "2026-08-31T08:00:00+00:00", "tool_observations": []},
         "tool_request": {"date_expression": "сегодня", "requested_calendar_fact": "день недели"},
     }]
-    assert result["trace"]["actions"] == ["calendar_lookup", "final_response"]
+    assert result["trace"]["actions"] == ["calendar_lookup"]
     assert result["tool_observations"] == [{
         "tool": "calendar_lookup",
         "status": "ready",
@@ -127,12 +131,14 @@ def test_unified_turn_returns_final_response_after_calendar_observation() -> Non
             if len(self.contexts) == 1:
                 return {
                     "kind": "calendar_lookup",
+                "tool_call_id": "calendar-1",
                     "tool_request": {"date_expression": "послезавтра", "requested_calendar_fact": "день недели"},
                     "llm_trace": [],
                 }
             return {
-                "kind": "final",
-                "result": {"route": "answer", "response_text": "Среда.", "confidence": 1.0, "reason": "calendar_evidence"},
+                "kind": "finalization_requested",
+                "response_intent": "answer",
+                "reason": "calendar_evidence",
                 "llm_trace": [],
             }
 
@@ -153,8 +159,8 @@ def test_unified_turn_returns_final_response_after_calendar_observation() -> Non
         "summary": "Дата 2026-09-02 приходится на среда.",
         "structured": {"weekday_ru": "среда"},
     }]
-    assert result["final_result"]["response_text"] == "Среда."
-    assert result["trace"]["actions"] == ["calendar_lookup", "final_response"]
+    assert result["finalization_requested"]["response_intent"] == "answer"
+    assert result["trace"]["actions"] == ["calendar_lookup"]
 
 
 def test_calendar_lookup_tool_resolves_relative_date_against_message_context() -> None:
@@ -195,7 +201,7 @@ def test_unified_turn_keeps_wiki_llm_trace_for_operational_audit() -> None:
     class TurnModel:
         def begin_turn(self, *, text: str, context: dict) -> dict:
             _ = (text, context)
-            return {"kind": "wiki_lookup", "tool_request": {"query": "запись", "context_scope": "тандем", "needed_fact": "канал"}, "llm_trace": [{"role": "direct_llm", "step": "customer_turn"}]}
+            return {"kind": "wiki_lookup", "tool_call_id": "wiki-1", "tool_request": {"query": "запись", "context_scope": "тандем", "needed_fact": "канал"}, "llm_trace": [{"role": "direct_llm", "step": "customer_turn"}]}
 
     class RetryingWikiLookup:
         def lookup(self, *, text: str, context: dict, tool_request: dict[str, str]) -> dict:

@@ -4,9 +4,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from fastapi.testclient import TestClient
-from sqlalchemy import text
 
-from app.api.deps import get_routing_service
 from app.core.db import Base, make_session_factory
 from app.main import app
 from app.schemas.message import InboundMessage
@@ -14,7 +12,6 @@ from app.services.direct_llm import DirectLLMService
 from app.services.policy import PolicyService
 from app.services.routing import RoutingService
 from app.services.system_prompt import SystemPromptService
-from app.services.tool_runtime import ToolRuntimeService
 
 client = TestClient(app)
 
@@ -103,7 +100,12 @@ class FakeDirectLLMService:
 
     def begin_turn(self, *, text: str, context: dict) -> dict:
         self.calls.append({"method": "begin_turn", "text": text, "context": context})
-        return {"kind": "wiki_lookup", "tool_request": {"query": text, "context_scope": "current customer subject", "needed_fact": "confirmed answer"}, "llm_trace": []}
+        return {"kind": "wiki_lookup", "tool_call_id": "wiki-1", "tool_request": {"query": text, "context_scope": "current customer subject", "needed_fact": "confirmed answer"}, "llm_trace": []}
+
+    def continue_after_tool(self, *, text: str, context: dict, tool_name: str, **kwargs) -> dict:
+        if tool_name == "wiki_lookup" and any(token in text.lower() for token in ("июня", "25", "27")):
+            return {"kind": "calendar_lookup", "tool_call_id": "calendar-1", "tool_request": {"date_expression": "25 июня", "requested_calendar_fact": "день недели"}, "llm_trace": []}
+        return {"kind": "finalization_requested", "response_intent": "answer", "reason": "fixture_ready", "llm_trace": []}
 
     def respond(
         self,
@@ -119,7 +121,7 @@ class FakeDirectLLMService:
         _ = response_intent
         tool_observations = tool_observations or []
         kb_packet = kb_result if isinstance(kb_result, dict) else {"answer_context": kb_result}
-        answer_context = kb_packet.get("answer_context", [])
+        answer_context = [{"text": fact} for fact in kb_packet.get("grounded_facts", [])]
         self.calls.append(
             {
                 "method": "respond",
