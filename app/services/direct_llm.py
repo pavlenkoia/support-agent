@@ -573,7 +573,7 @@ class DirectLLMService:
             )
             self._record_llm_call("final_response", capture_model_input("respond", json.loads(user_prompt)))
             recorded_call = True
-            parsed: dict[str, Any] = json.loads(raw)
+            parsed: dict[str, Any] = self._parse_json_object(raw)
         except Exception as exc:
             if not recorded_call:
                 self._record_llm_call("final_response", capture_model_input("respond", json.loads(user_prompt)))

@@ -123,6 +123,27 @@ def test_begin_turn_parses_valid_tool_envelope_before_provider_trailing_junk() -
     assert result["kind"] == "wiki_lookup"
 
 
+def test_finalizer_accepts_valid_response_before_provider_trailing_junk() -> None:
+    client = ActionClient(
+        '{"route":"answer","response_text":"Да, можно.","confidence":0.9,"reason":"grounded"}```json\n{"debug":true}\n```'
+    )
+    service = DirectLLMService(client=client, prompt_service=PromptService())
+
+    result = service.respond(
+        "Можно ли участвовать?",
+        migrate_fixture({
+            "grounding_status": "ready",
+            "grounded_facts": ["Участие разрешено."],
+            "answer_basis": "Участие разрешено.",
+            "source_refs": ["compiled/concepts/example.md"],
+        }),
+        response_intent="answer",
+    )
+
+    assert result["route"] == "answer"
+    assert result["response_text"] == "Да, можно."
+
+
 def test_begin_turn_requests_social_finalization_without_customer_text() -> None:
     client = ActionClient('{"action":"finalize","response_intent":"social_reply","reason":"social"}')
     service = DirectLLMService(client=client, prompt_service=PromptService())
