@@ -109,6 +109,46 @@ def test_unified_turn_finalizes_complete_wiki_evidence_without_selector_continua
     }
 
 
+def test_unified_turn_finalizes_wiki_not_found_without_selector_continuation() -> None:
+    class NotFoundWikiLookup:
+        def lookup(self, *, text: str, context: dict, tool_request: dict[str, str]) -> dict:
+            _ = (text, context, tool_request)
+            return {"grounding_status": "not_found", "grounded_facts": [], "source_refs": []}
+
+    class TurnModel:
+        def __init__(self) -> None:
+            self.continuation_calls = 0
+
+        def begin_turn(self, *, text: str, context: dict) -> dict:
+            _ = (text, context)
+            return {
+                "kind": "wiki_lookup",
+                "tool_call_id": "wiki-video",
+                "tool_request": {
+                    "query": "где получить конкретное видео после прыжка",
+                    "context_scope": "видео после самостоятельного прыжка",
+                    "needed_fact": "подтверждённый способ получить запись",
+                },
+                "llm_trace": [],
+            }
+
+        def continue_after_tool(self, **kwargs) -> dict:
+            _ = kwargs
+            self.continuation_calls += 1
+            raise AssertionError("not_found must reach the common fallback boundary directly")
+
+    model = TurnModel()
+    turn = UnifiedTurnService(model=model, wiki_lookup=NotFoundWikiLookup(), calendar_lookup=RecordingCalendarLookup())
+
+    result = turn.run(text="Где получить нашу запись?", context={})
+
+    assert model.continuation_calls == 0
+    assert result["finalization_requested"] == {
+        "response_intent": "missing_grounding",
+        "reason": "wiki_not_found",
+    }
+
+
 def test_unified_turn_runs_calendar_after_model_requests_its_tool() -> None:
     class TurnModel:
         def __init__(self) -> None:

@@ -104,6 +104,17 @@ class UnifiedTurnService:
                 return failure(reason if isinstance(reason, str) and reason else "tool_unavailable")
             if status not in {"ready", "not_found"}:
                 return failure("tool_result_invalid")
+            if kind == "wiki_lookup" and status == "not_found":
+                # A successful Wiki miss contains no business evidence for a
+                # second selector pass to refine.  Hand it to the common
+                # finalization boundary, which applies the sourced fallback.
+                return {
+                    **packet(),
+                    "finalization_requested": {
+                        "response_intent": "missing_grounding",
+                        "reason": "wiki_not_found",
+                    },
+                }
             if kind == "wiki_lookup" and self._has_complete_answer_evidence(observation.get("answer_evidence")):
                 return {
                     **packet(),
