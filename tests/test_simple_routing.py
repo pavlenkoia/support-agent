@@ -167,7 +167,7 @@ def test_agent_tool_loop_routes_social_reply_without_legacy_kb_dependencies(tmp_
                 "reason": "social_reply",
             },
             "trace": {"actions": ["final_response"]},
-            "llm_trace": [{"usage": {"total_tokens": 17}, "attempts": 2}],
+            "llm_trace": [{"entry_kind": "model_call", "usage": {"total_tokens": 17}, "attempts": 2}],
             "tool_observations": [],
         }
     )

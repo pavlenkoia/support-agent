@@ -143,6 +143,46 @@ def test_begin_turn_returns_ready_social_text_without_a_second_finalizer_call() 
     assert result["llm_trace"][0]["step"] == "customer_turn"
 
 
+def test_malformed_json_only_records_one_provider_call() -> None:
+    class MalformedClient:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def generate(self, **kwargs: object) -> str:
+            self.calls += 1
+            _ = kwargs
+            return "{not-json"
+
+        def get_last_call_info(self) -> dict:
+            return {"provider": "test", "model": "test", "duration_ms": 11, "attempts": 1, "usage": {"prompt_tokens": 1}}
+
+    service = DirectLLMService(client=MalformedClient(), prompt_service=PromptService())
+
+    result = service.begin_turn(text="Содержательный вопрос", context={"recent_messages": []})
+
+    assert result["kind"] == "final"
+    assert result["result"]["route"] == "retry_pending"
+    assert len(result["llm_trace"]) == 1
+    assert result["llm_trace"][0]["entry_kind"] == "model_call"
+    assert result["llm_trace"][0]["input_packet"]["status"] == "complete"
+    assert [{k: v for k, v in item.items() if k not in {"entry_kind", "input_packet"}} for item in result["llm_trace"]] == [
+        {
+            "role": "direct_llm",
+            "step": "customer_turn",
+            "provider": "test",
+            "model": "test",
+            "duration_ms": 11,
+            "attempts": 1,
+            "api_key_index": None,
+            "used_failover": None,
+            "failover_count": None,
+            "failover_events": [],
+            "usage": {"prompt_tokens": 1, "completion_tokens": None, "total_tokens": None},
+            "error": None,
+        }
+    ]
+
+
 def test_finalizer_prompt_requires_natural_grammatical_russian() -> None:
     client = ActionClient('{"route":"answer","response_text":"Готовый ответ.","confidence":1,"reason":"ready"}')
     service = DirectLLMService(client=client, prompt_service=PromptService())

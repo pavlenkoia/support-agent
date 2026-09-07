@@ -48,7 +48,9 @@ class UnifiedTurnService:
                 "summary": str(calendar_result.get("summary") or ""),
                 "structured": calendar_result.get("structured") if isinstance(calendar_result.get("structured"), dict) else {},
             }
-            return self._continue_after_tool(text=text, context=context, observation=observation, action="calendar_lookup", tool_request=tool_request, tool_call_id=str(turn.get("tool_call_id") or "call_calendar"), llm_trace=llm_trace)
+            result = self._continue_after_tool(text=text, context=context, observation=observation, action="calendar_lookup", tool_request=tool_request, tool_call_id=str(turn.get("tool_call_id") or "call_calendar"), llm_trace=llm_trace)
+            result["tool_requests"] = [{"tool": kind, "tool_call_id": str(turn.get("tool_call_id") or "call_calendar"), "tool_request": dict(tool_request)}]
+            return result
         if kind == "wiki_lookup":
             tool_request = turn.get("tool_request")
             if not isinstance(tool_request, dict):
@@ -59,6 +61,7 @@ class UnifiedTurnService:
             return {
                 "kb_result": wiki_result,
                 "trace": {"actions": ["wiki_lookup"]},
+                "tool_requests": [{"tool": kind, "tool_call_id": turn.get("tool_call_id"), "tool_request": dict(tool_request)}],
                 "tool_observations": [{
                     "tool": "wiki_lookup",
                     "status": str(wiki_result.get("grounding_status") or "not_found"),

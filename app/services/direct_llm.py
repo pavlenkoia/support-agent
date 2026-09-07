@@ -8,6 +8,7 @@ from app.core.config import settings
 from app.integrations.llm.base import BaseLLMClient
 from app.integrations.llm.factory import get_llm_client
 from app.integrations.llm.openai_compatible import LLMRecoveryExhausted
+from app.services.audit import capture_model_input
 from app.services.final_response_validation import (
     clean_customer_text,
     validate_final_response,
@@ -42,15 +43,16 @@ class DirectLLMService:
     def _reset_llm_trace(self) -> None:
         self._active_llm_trace: list[dict[str, Any]] = []
 
-    def _record_llm_call(self, step: str) -> None:
+    def _record_llm_call(self, step: str, input_packet: dict) -> None:
         info = self.client.get_last_call_info() if hasattr(self.client, "get_last_call_info") else {}
-        if not info:
-            return
+        info = info or {}
         usage = info.get("usage") or {}
         self._active_llm_trace.append(
             {
+                "entry_kind": "model_call",
                 "role": "direct_llm",
                 "step": step,
+                "input_packet": input_packet,
                 "provider": info.get("provider"),
                 "model": info.get("model"),
                 "duration_ms": info.get("duration_ms"),
@@ -106,6 +108,7 @@ class DirectLLMService:
             },
             ensure_ascii=False,
         )
+        recorded_call = False
         try:
             raw = self.client.generate(
                 system_prompt=self.prompt_service.load_system_prompt(),
@@ -115,10 +118,12 @@ class DirectLLMService:
                 tool_choice="auto",
                 parallel_tool_calls=False,
             )
-            self._record_llm_call("customer_turn")
+            self._record_llm_call("customer_turn", capture_model_input("begin_turn", json.loads(user_prompt)))
+            recorded_call = True
             parsed = self._parse_json_object(raw)
         except Exception as exc:
-            self._record_llm_call("customer_turn")
+            if not recorded_call:
+                self._record_llm_call("customer_turn", capture_model_input("begin_turn", json.loads(user_prompt)))
             return {
                 "kind": "final",
                 "result": {
@@ -176,17 +181,20 @@ class DirectLLMService:
             {"role": "tool", "tool_call_id": tool_call_id, "content": json.dumps(observation, ensure_ascii=False)},
             {"role": "user", "content": "Сформируй итоговый JSON-объект строго с ключами route, response_text, confidence, reason. route=answer; response_text — готовый ответ клиенту только по полученному результату инструмента; confidence — число от 0 до 1; reason — короткая строка. Не вызывай инструмент повторно и не добавляй иных ключей."},
         ]
+        recorded_call = False
         try:
             raw = self.client.generate(
                 system_prompt=self.prompt_service.load_system_prompt(), user_prompt="", temperature=self.temperature,
                 response_format={"type": "json_object"}, messages=messages,
             )
-            self._record_llm_call("tool_result_finalization")
+            self._record_llm_call("tool_result_finalization", capture_model_input("continue_after_tool", {**json.loads(messages[1]["content"]), "tool_observation": json.loads(messages[3]["content"])}))
+            recorded_call = True
             normalized = self._normalize_prompt_reply(self._parse_json_object(raw))
-            self._active_llm_trace.append({"role": "direct_llm", "step": "tool_result_finalization_result", "route": normalized.get("route"), "reason": normalized.get("reason"), "raw": str(raw)[:500]})
+            self._active_llm_trace.append({"role": "direct_llm", "step": "tool_result_finalization_result", "route": normalized.get("route"), "reason": normalized.get("reason")})
             return {"kind": "final", "result": normalized, "llm_trace": list(self._active_llm_trace)}
         except Exception as exc:
-            self._record_llm_call("tool_result_finalization")
+            if not recorded_call:
+                self._record_llm_call("tool_result_finalization", capture_model_input("continue_after_tool", {**json.loads(messages[1]["content"]), "tool_observation": json.loads(messages[3]["content"])}))
             self._active_llm_trace.append({"role": "direct_llm", "step": "tool_result_finalization_failed", "error": type(exc).__name__})
             return self._invalid_begin_turn("tool_result_finalization_failed")
 
@@ -388,6 +396,7 @@ class DirectLLMService:
             ensure_ascii=False,
         )
 
+        recorded_call = False
         try:
             raw = self.client.generate(
                 system_prompt=system_prompt,
@@ -395,10 +404,12 @@ class DirectLLMService:
                 temperature=self.temperature,
                 response_format={"type": "json_object"},
             )
-            self._record_llm_call("final_response")
+            self._record_llm_call("final_response", capture_model_input("respond", json.loads(user_prompt)))
+            recorded_call = True
             parsed: dict[str, Any] = json.loads(raw)
         except Exception as exc:
-            self._record_llm_call("final_response")
+            if not recorded_call:
+                self._record_llm_call("final_response", capture_model_input("respond", json.loads(user_prompt)))
             self._active_llm_trace.append(
                 {
                     "role": "direct_llm",

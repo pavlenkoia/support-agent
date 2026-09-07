@@ -7,13 +7,19 @@ from sqlalchemy import select
 from app.core.config import settings
 from app.core.db import SessionLocal
 from app.models.case import SupportCase
+from app.models.workflow_event import WorkflowEvent
 from app.schemas.message import InboundMessage
 from app.services.agent_tool_loop import (
     CalendarLookupTool,
     UnifiedTurnService,
     WikiLookupTool,
 )
-from app.services.audit import build_audit_event
+from app.services.audit import (
+    build_audit_event,
+    clean_llm_trace,
+    text_sha256,
+    trace_metrics,
+)
 from app.services.case_resolution import reset_conversation_session, resolve_case
 from app.services.context_builder import build_context
 from app.services.direct_llm import DirectLLMService
@@ -183,6 +189,8 @@ class RoutingService:
         response_text = final_result["response_text"]
         source_refs = [str(ref) for ref in kb_result.get("source_refs", []) if str(ref)] if grounded else []
         actions = list((loop_result.get("trace") or {}).get("actions") or [])
+        if precomputed_final is None and not technical_kb_failure:
+            actions.append("final_response")
         tool_observations = list(loop_result.get("tool_observations") or [])
         wiki_observations = [
             item for item in tool_observations
@@ -191,7 +199,8 @@ class RoutingService:
         wiki_status = str(wiki_observations[-1].get("status") or "not_found") if wiki_observations else "not_started"
         wiki_used = bool(wiki_observations)
         llm_trace = [item for item in loop_result.get("llm_trace", []) if isinstance(item, dict)]
-        llm_trace.extend(item for item in final_result.get("llm_trace", []) if isinstance(item, dict))
+        finalization_llm_trace = [item for item in final_result.get("llm_trace", []) if isinstance(item, dict)]
+        llm_trace.extend(finalization_llm_trace)
         retrieval = {
             "kb_status": wiki_status,
             "kb_snippets": [],
@@ -202,28 +211,33 @@ class RoutingService:
             "reply": {"response_text": response_text},
             "reason": final_result["reason"],
             "route_reason": final_result["reason"],
-            "route_confidence": 1.0,
+            "route_confidence": final_result["confidence"],
             "answer_engine": "agent_tool_loop",
             "outcome_kind": outcome_kind,
             "source_refs": source_refs,
         }
         outcome = self.outcome.execute(route, case, context, retrieval, payload.text)
+        outcome["outcome_reason"] = final_result["reason"]
         support_case = session.scalar(select(SupportCase).where(SupportCase.id == case["case_id"]))
         if support_case is not None:
             support_case.status = case["case_status"]
             support_case.route_mode = route_name
+        llm_trace = clean_llm_trace(llm_trace)
         response_strategy = {
             "answer_engine": "agent_tool_loop",
             "agent_actions": actions,
             "tool_observations": tool_observations,
+            "tool_requests": list(loop_result.get("tool_requests") or []),
+            "source_turn": {"channel": payload.channel, "external_message_id": payload.external_message_id, "external_event_id": payload.external_event_id},
             "wiki_used": wiki_used,
+            "finalizer_invoked": precomputed_final is not None or not technical_kb_failure,
             "llm_trace": llm_trace,
-            "logical_llm_call_count": len(llm_trace),
-            "provider_attempt_count": sum(int(item.get("attempts") or 1) for item in llm_trace),
+            "finalization_llm_trace": clean_llm_trace(finalization_llm_trace),
+            **trace_metrics(llm_trace),
         }
         audit = build_audit_event(case, route, retrieval, outcome, {"turn_type": "agent_tool_loop"}, response_strategy)
         audit["agent_actions"] = actions
-        persist_workflow_event(session, case["case_id"], response_strategy, event_type="response_strategy_selected", actor="system:routing")
+        persist_workflow_event(session, case["case_id"], audit["response_strategy"], event_type="response_strategy_selected", actor="system:routing")
         persist_workflow_event(session, case["case_id"], audit, event_type="inbound_processed", actor="system:routing")
         session.commit()
         return {
@@ -247,5 +261,23 @@ class RoutingService:
             return
 
         with self.session_factory() as session:
-            persist_outbound_message(session, case_id, cleaned)
+            message = persist_outbound_message(session, case_id, cleaned)
+            digest = text_sha256(cleaned)
+            delivered = select(WorkflowEvent.payload["trace_id"].as_string()).where(
+                WorkflowEvent.case_id == case_id,
+                WorkflowEvent.event_type == "answer_delivery_recorded",
+                WorkflowEvent.payload["trace_id"].as_string().is_not(None),
+            )
+            candidates = session.scalars(select(WorkflowEvent).where(
+                WorkflowEvent.case_id == case_id,
+                WorkflowEvent.event_type == "inbound_processed",
+                WorkflowEvent.payload["trace_packet"]["result"]["text_sha256"].as_string() == digest,
+                WorkflowEvent.payload["trace_packet"]["trace_id"].as_string().not_in(delivered),
+            ).limit(2)).all()
+            trace_id = candidates[0].payload["trace_packet"]["trace_id"] if len(candidates) == 1 else None
+            persist_workflow_event(session, case_id, {
+                "trace_id": trace_id, "assistant_message_id": message.id,
+                "text_sha256": digest, "status": "assistant_recorded",
+                "correlation_status": "matched" if trace_id else ("ambiguous" if candidates else "unavailable"),
+            }, event_type="answer_delivery_recorded", actor="system:routing")
             session.commit()

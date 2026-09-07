@@ -35,16 +35,17 @@ class KBAgentService:
         )
         self.temperature = settings.kb_agent_temperature
         self.prompt_service = prompt_service or KBAgentPromptService()
+        self._reset_llm_trace()
 
     def _reset_llm_trace(self) -> None:
         self._active_llm_trace: list[dict[str, Any]] = []
 
     def _record_llm_call(self, step: str) -> None:
         info = self.client.get_last_call_info() if hasattr(self.client, 'get_last_call_info') else {}
-        if not info:
-            return
+        info = info or {}
         usage = info.get('usage') or {}
         self._active_llm_trace.append({
+            'entry_kind': 'model_call',
             'role': 'kb_agent',
             'step': step,
             'provider': info.get('provider'),
@@ -613,7 +614,7 @@ class KBAgentService:
             and parsed["cited_source_refs"]
         ):
             parsed["grounding_status"] = "ready"
-            parsed["reason"] = f"{str(parsed.get('reason') or 'grounding')}:coherent_cited_evidence"
+            parsed["reason"] = f"{parsed.get('reason') or 'grounding'!s}:coherent_cited_evidence"
         return parsed
 
     def _prepare_kb_context(self, kb_hits: list[dict]) -> tuple[list[dict], str]:

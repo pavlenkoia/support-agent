@@ -2,13 +2,11 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime
-from typing import Any, cast
 
 from app.integrations.llm.base import BaseLLMClient
 from app.services import direct_llm as direct_llm_module
 from app.services import tool_runtime as tool_runtime_module
 from app.services.direct_llm import DirectLLMService
-from app.services.policy import PolicyService
 from app.services.tool_runtime import ToolRuntimeService
 
 
@@ -265,7 +263,9 @@ def test_direct_llm_runtime_error_fails_closed_without_customer_reply(monkeypatc
     assert result["route"] == "retry_pending"
     assert result["response_text"] == ""
     assert result["reason"] == "final_response_error:RuntimeError"
-    assert result["llm_trace"][0]["step"] == "final_response_failed_closed"
+    assert result["llm_trace"][0]["entry_kind"] == "model_call"
+    assert result["llm_trace"][0]["attempts"] is None
+    assert result["llm_trace"][1]["step"] == "final_response_failed_closed"
 
 
 
