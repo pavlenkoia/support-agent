@@ -135,7 +135,7 @@ class RoutingService:
             final_result = technical_result
         else:
             response_intent = finalization_requested["response_intent"]
-            policy_evidence = [] if finalization_has_evidence or response_intent == "social_reply" else self.policy.no_answer_policy_evidence()
+            policy_evidence = [] if response_intent == "social_reply" else self.policy.no_answer_policy_evidence()
             finalization_observations = list(tool_observations)
             finalization_observations.extend(
                 {"kind": "profile_no_answer_option", "summary": item["text"], "source_ref": item["source_ref"]}
@@ -147,7 +147,8 @@ class RoutingService:
                 "grounding_status": str(kb_result.get("grounding_status") or "not_found"),
                 "answer_basis": kb_result.get("answer_basis", "") if grounded else "",
                 "grounded_facts": kb_result.get("grounded_facts", []) if grounded else [],
-                "source_refs": kb_result.get("source_refs", []) if grounded else [],
+                "source_refs": kb_result.get("source_refs", []),
+                "answer_evidence": kb_result.get("answer_evidence"),
             }
             finalizer_invoked = True
             final_result = self.direct_llm.respond(
@@ -159,9 +160,12 @@ class RoutingService:
                 first_reply_in_dialogue=first_reply,
                 response_intent=response_intent,
             )
+        fixed_fallback = final_result.get("response_origin") == "fixed_profile_fallback"
+        if fixed_fallback:
+            finalizer_invoked = False
         final_result = {**final_result, **validate_final_response(final_result, allow_technical=True)}
         if final_result["route"] != "retry_pending":
-            formatted = self.policy.finalize_simple_customer_text(
+            formatted = final_result["response_text"] if fixed_fallback else self.policy.finalize_simple_customer_text(
                 final_result["response_text"], first_reply_in_dialogue=first_reply,
             )
             final_result = {

@@ -1,4 +1,5 @@
 from __future__ import annotations
+from tests.evidence_fixtures import migrate_fixture
 
 import json
 
@@ -41,8 +42,8 @@ class Wiki:
         self.basis = basis
 
     def lookup(self, **kwargs):
-        return {'grounding_status':'ready','answer_basis':self.basis,'grounded_facts':['Факт с условием'],
-                'source_refs':['compiled/concepts/synthetic.md'], 'private_raw':'MUST_NOT_BE_CAPTURED'}
+        return migrate_fixture({'grounding_status':'ready','answer_basis':self.basis,'grounded_facts':['Факт с условием'],
+                'source_refs':['compiled/concepts/synthetic.md'], 'private_raw':'MUST_NOT_BE_CAPTURED'})
 
 
 class Calendar:
@@ -99,15 +100,31 @@ def test_packet_is_actual_finalization_input_not_reconstructed_kb(tmp_path, kind
     assert packet['result']['reason'] == 'exact-final-reason'
 
 
-def test_overflow_is_bounded_explicit_and_does_not_change_answer(tmp_path):
-    result, _, _, _ = run_trace(tmp_path, basis='Я'*50000)
+def test_overflow_is_bounded_explicit_and_does_not_change_answer(tmp_path, monkeypatch):
+    from app.services.answer_evidence import validate_answer_evidence
+    from app.services.audit import json_bytes
+
+    def large_valid_lookup(self, **kwargs):
+        value = migrate_fixture({'grounding_status': 'ready', 'answer_basis': self.basis,
+            'grounded_facts': ['Факт с условием. ' * 130],
+            'source_refs': ['compiled/concepts/synthetic.md']})
+        validate_answer_evidence(value['answer_evidence'])
+        assert len(json_bytes(value['answer_evidence'])) <= 16384
+        # Duplicated audit observation exceeds its own limit, not evidence's.
+        observation = {'tool': 'wiki_lookup', 'status': 'ready', 'source_refs': value['source_refs'],
+            'grounded_facts': value['grounded_facts'], 'answer_evidence': value['answer_evidence']}
+        assert len(json_bytes({'tool_observations': [observation]})) > 16384
+        return value
+
+    monkeypatch.setattr(Wiki, 'lookup', large_valid_lookup)
+    result, _, _, _ = run_trace(tmp_path, basis='Я'*5000)
     packet = result['audit']['trace_packet']
     assert len(json.dumps(packet,ensure_ascii=False).encode()) <= 16384
     assert packet['finalization_input']['status'] == 'overflow'
     assert packet['finalization_input']['sha256']
     assert packet['result']['reason'] == 'exact-final-reason'
     assert result['route']['route'] == 'answer'
-    assert 'Я'*50000 not in json.dumps(result['audit'],ensure_ascii=False)
+    assert 'Я'*5000 not in json.dumps(result['audit'],ensure_ascii=False)
 
 
 def test_ordered_actions_link_to_real_calls_with_intermediate_kb_steps(tmp_path):
@@ -245,7 +262,7 @@ def test_technical_wiki_failure_does_not_invent_finalization(tmp_path):
     assert len(model.calls)==1
     assert result["audit"]["trace_packet"]["finalization_input"]["status"]=="not_invoked"
     assert result["audit"]["trace_packet"]["result"]["delivery_status"]=="not_applicable"
-    assert result["route"]["reason"]=="tool_unavailable"
+    assert result["route"]["reason"]=="synthetic-failure"
 
 
 @pytest.mark.parametrize("kind,step", [("wiki_lookup","final_response"),("calendar_lookup","final_response")])

@@ -1,4 +1,5 @@
 from __future__ import annotations
+from tests.evidence_fixtures import migrate_fixture
 
 from app.services.agent_tool_loop import UnifiedTurnService
 from app.services.direct_llm import DirectLLMService
@@ -44,7 +45,7 @@ class RecordingWiki:
 
     def lookup(self, *, text: str, context: dict, tool_request: dict[str, str]) -> dict:
         self.calls.append({"text": text, "context": context, "tool_request": tool_request})
-        return {"grounding_status": "ready", "grounded_facts": ["Факт"], "answer_basis": "Факт"}
+        return migrate_fixture({"grounding_status": "ready", "grounded_facts": ["Факт"], "answer_basis": "Факт"})
 
 
 class RecordingCalendar:
@@ -130,12 +131,12 @@ def test_unified_turn_returns_finalization_requested_after_calendar_then_wiki() 
 
         def lookup(self, *, text: str, context: dict, tool_request: dict[str, str]) -> dict:
             self.calls.append({"text": text, "context": context, "tool_request": tool_request})
-            return {"grounding_status": "ready", "grounded_facts": ["Факт"], "answer_basis": "Факт", "source_refs": ["wiki/ref.md"]}
+            return migrate_fixture({"grounding_status": "ready", "grounded_facts": ["Факт"], "answer_basis": "Факт", "source_refs": ["wiki/ref.md"]})
 
     result = UnifiedTurnService(model=LoopModel(), wiki_lookup=Wiki(), calendar_lookup=RecordingCalendar()).run(text="Вопрос", context={"recent_messages": []})
 
     assert result["finalization_requested"]["response_intent"] == "answer"
-    assert result["kb_result"]["grounded_facts"] == ["Факт"]
+    assert [fact["text"] for fact in result["kb_result"]["grounded_facts"]] == ["Факт"]
     assert result["tool_observations"][0]["status"] == "ready"
     assert result["trace"]["actions"] == ["calendar_lookup", "wiki_lookup"]
 

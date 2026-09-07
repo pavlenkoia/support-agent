@@ -1,8 +1,11 @@
+from app.services.answer_evidence import empty_answer_evidence
+from tests.evidence_fixtures import migrate_fixture
 import json
 
 from app.integrations.llm.base import BaseLLMClient
 from app.services import direct_llm as direct_llm_module
 from app.services.direct_llm import DirectLLMService
+from tests.evidence_fixtures import typed_answer_evidence, typed_fact
 
 
 def test_ready_grounding_is_finalized_with_system_prompt_and_compact_evidence(monkeypatch) -> None:
@@ -31,7 +34,7 @@ def test_ready_grounding_is_finalized_with_system_prompt_and_compact_evidence(mo
 
     result = DirectLLMService(client=client).respond(
         "Если у меня нет очков, шлема, комбинезона и перчаток, прыгнуть можно?",
-        {
+        migrate_fixture({
             "kb_status": "found",
             "grounding_status": "ready",
             "answer_basis": "Да, прыгнуть можно.",
@@ -40,16 +43,16 @@ def test_ready_grounding_is_finalized_with_system_prompt_and_compact_evidence(mo
                 "Очки, шлем, комбинезон и перчатки не выдаются.",
                 "Их отсутствие само по себе не мешает прыжку.",
             ],
-        },
+        }),
     )
 
     assert client.calls == 1
     assert client.payload is not None
     assert client.payload["grounding_evidence"]["answer_basis"] == "Да, прыгнуть можно."
-    assert "Сначала дай прямой вывод, подтверждённый переданным evidence." in client.system_prompt
+    assert "В разрешённом фактическом ответе сначала дай прямой ответ, подтверждённый переданным evidence." in client.system_prompt
     assert "явно отрази его в первом предложении" in client.system_prompt
     assert "Сохраняй последнее явное ограничение" in client.system_prompt
-    assert "не утверждай, что других требований нет" in client.system_prompt
+    assert "Не делай исчерпывающий вывод при неполном evidence." in client.system_prompt
     assert result["route"] == "answer"
     assert result["response_text"] == "Да, прыгнуть можно. Отсутствие этой экипировки само по себе не мешает прыжку."
     assert result["reason"] == "finalized_from_grounding"
@@ -89,7 +92,7 @@ def test_clarification_finalizer_receives_generic_intent_without_kb_evidence(mon
     assert client.payload is not None
     assert client.payload["knowledge_mode"] == "prompt_only"
     assert client.payload["response_intent"] == "clarification"
-    assert client.payload["grounding_evidence"] == {"answer_basis": "", "facts": []}
+    assert client.payload["grounding_evidence"] == empty_answer_evidence(client.payload["user_message"])
 
 
 def test_finalizer_payload_is_allowlisted_and_excludes_internal_reasoning(monkeypatch) -> None:
@@ -114,7 +117,7 @@ def test_finalizer_payload_is_allowlisted_and_excludes_internal_reasoning(monkey
 
     DirectLLMService(client=client).respond(
         "Каким способом можно оплатить?",
-        {
+        migrate_fixture({
             "kb_status": "found",
             "grounding_status": "ready",
             "answer_basis": "Оплатить можно в офисе или в кассе аэродрома.",
@@ -124,7 +127,7 @@ def test_finalizer_payload_is_allowlisted_and_excludes_internal_reasoning(monkey
             ],
             "answer_context": [{"text": "RAW_SELECTED_KB_PAGE"}],
             "trace": {"navigation": {"reason": "KB_NAVIGATION_REASON"}},
-        },
+        }),
         knowledge_mode="kb_grounded",
         conversation_context={
             "recent_messages": [
@@ -160,7 +163,7 @@ def test_finalizer_payload_is_allowlisted_and_excludes_internal_reasoning(monkey
         {"role": "user", "content": "Каким способом можно оплатить?"},
     ]
     assert client.payload["tool_facts"] == [
-        {"kind": "calendar_weekday", "summary": "Дата приходится на понедельник."}
+        {"kind": "calendar_weekday", "summary": "Дата приходится на понедельник.", "source_ref": "tool:calendar_weekday", "structured": {}}
     ]
     assert "conversation_context" not in client.payload
     serialized = json.dumps(client.payload, ensure_ascii=False)
@@ -195,7 +198,7 @@ def test_finalizer_contract_excludes_internal_reasoning_from_customer_output(mon
     monkeypatch.setattr(direct_llm_module.settings, "direct_llm_provider", "mistral")
     result = DirectLLMService(client=client).respond(
         "Как оплатить?",
-        {"kb_status": "found", "grounding_status": "ready", "answer_basis": "Оплатить можно в офисе.", "grounded_facts": ["Оплатить можно в офисе."]},
+        migrate_fixture({"kb_status": "found", "grounding_status": "ready", "answer_basis": "Оплатить можно в офисе.", "grounded_facts": ["Оплатить можно в офисе."]}),
     )
 
     assert result["route"] == "answer"
@@ -225,7 +228,7 @@ def test_finalizer_treats_combined_customer_fragments_as_one_practical_request(m
     monkeypatch.setattr(direct_llm_module.settings, "direct_llm_provider", "mistral")
     result = DirectLLMService(client=client).respond(
         "Хотим записаться на тандем завтра. Подросток 15 лет.",
-        {
+        migrate_fixture({
             "grounding_status": "ready",
             "answer_basis": "15-летний клиент проходит оба возрастных порога; запись на тандем доступна через форму.",
             "grounded_facts": [
@@ -233,7 +236,7 @@ def test_finalizer_treats_combined_customer_fragments_as_one_practical_request(m
                 "До 18 лет требуется разрешение родителей и обычно присутствие одного из родителей.",
                 "Тандем-прыжок: форма https://vk.cc/cMwabq или телефон офиса.",
             ],
-        },
+        }),
         knowledge_mode="kb_grounded",
     )
 
@@ -277,7 +280,7 @@ def test_nonready_extraction_is_not_finalizer_evidence(monkeypatch) -> None:
     )
 
     assert client.payload is not None
-    assert client.payload["grounding_evidence"] == {"answer_basis": "", "facts": []}
+    assert client.payload["grounding_evidence"] == empty_answer_evidence(client.payload["user_message"])
     serialized = json.dumps(client.payload, ensure_ascii=False)
     assert "внутреннем источнике" not in serialized
     assert "https://example.test/prices" not in serialized
@@ -310,7 +313,7 @@ def test_case_594_finalization_contract_treats_ready_payment_evidence_as_confirm
 
     result = DirectLLMService(client=client).respond(
         "Здравствуйте, подскажите, каким способом оплата?",
-        {
+        migrate_fixture({
             "kb_status": "found",
             "grounding_status": "ready",
             "answer_basis": "Оплатить можно в офисе, на аэродроме или на сайте.",
@@ -319,7 +322,7 @@ def test_case_594_finalization_contract_treats_ready_payment_evidence_as_confirm
                 "Оплата по безналичному расчёту возможна в кассе аэродрома.",
                 "Подарочный сертификат можно купить онлайн на сайте https://dzkalachevo.ru.",
             ],
-        },
+        }),
         knowledge_mode="kb_grounded",
         conversation_context={"recent_messages": []},
         first_reply_in_dialogue=True,
@@ -328,7 +331,7 @@ def test_case_594_finalization_contract_treats_ready_payment_evidence_as_confirm
     assert result["route"] == "answer"
     assert client.system_prompt is not None
     assert "Контракт финализации runtime" in client.system_prompt
-    assert "сохрани этот ответ как фактическое ядро" in client.system_prompt
+    assert "сохрани прямой ответ как фактическое ядро" in client.system_prompt
     assert "Оплатить можно" in result["response_text"]
     assert "уточнят при записи" not in result["response_text"]
 

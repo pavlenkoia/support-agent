@@ -1,6 +1,6 @@
 # Support Agent Architecture Overview
 
-## Repository contract — stage 3 candidate
+## Repository contract — stage 4 candidate
 
 The engine remains `ANSWER_ENGINE_MODE=agent_tool_loop`. This section describes the repository candidate, not a claim that it has been deployed. Production release is separately authorized and verified.
 
@@ -10,16 +10,17 @@ Telegram / VK inbound event
   → RoutingService: case resolution + bounded dialogue context
   → DirectLLMService selector (native tools, tool_choice=auto)
       → 0–2 sequential tools, Wiki/calendar each at most once
-      → all assistant.tool_calls / role=tool pairs retain native IDs
+      → all assistant.tool_calls / role=tool pairs retain native IDs during execution
+      → after the second successful tool, one terminal selection projection is built from the checked native history
       → action=finalize + response_intent, no customer draft
-  → RoutingService allowlisted evidence + common respond exactly once
+  → RoutingService allowlisted evidence + structural allowed_routes + common respond exactly once
   → shared output validator + PolicyService + channel limit
   → durable message persistence + transport delivery
 ```
 
 Technical selector/tool failures take a textless `retry_pending` path without invoking the writer. A semantic `not_found` result can proceed to finalization.
 
-The shared selector builder preserves the same approved action contract and schema across native continuations. Only unused tools remain advertised; after two executions no tools are advertised and the model still must return a valid finalize decision. No decision or native call is synthesized. The common writer system contract requires a JSON envelope; all existing evidence and natural-language constraints remain unchanged.
+The shared selector builder preserves the same approved action contract and schema across native continuations. Only unused tools remain advertised; after two executions the terminal projection uses the verified native tool pairs and the model still must return a valid finalize decision. No decision or native call is synthesized. The common writer system contract uses a compact allowlisted evidence packet; allowed_routes restricts outcomes after collection; non-answerable facts/basis are excluded from writer input, sourced profile policy remains, and the writer creates natural fallback text. See the current final-answer contract for acquisition/coverage/outcome separation.
 
 ## Core boundaries
 
@@ -27,14 +28,14 @@ The shared selector builder preserves the same approved action contract and sche
 - **Wiki is the only business-fact source.** The system prompt is generic and contains no profile facts. For a substantive turn, the customer model must call `wiki_lookup` before returning customer facts, procedures, contacts, promises, or domain-specific clarification/out-of-scope text.
 - **Social exception is narrow.** A short pure social message without a request or continuation of a customer situation may return a non-factual `social_reply` without Wiki.
 - **Runtime tools are factual sources for their own domain only.** The date tool supplies calendar facts; it does not infer business schedules.
-- **Only ready grounding crosses the finalizer seam.** `grounding_status=ready` may provide `answer_basis` and grounded facts. `not_found` text, page-selection rationale, source availability, and other non-ready extraction text are operator telemetry, not customer evidence.
+- **Evidence acquisition and direct coverage are separate.** The stage-4 candidate validates `answer-evidence/v1` (up to 16384 bytes): literal question/scope, acquisition status, cited fact IDs/text/conditions/modality, coverage/missing/conflicts, candidate basis and separate calendar/policy facts. `ready` is not semantic proof; a typed `not_found` is not upgraded because related facts exist. Unavailable/invalid evidence blocks the writer. Raw extraction rationale and pages are excluded.
 - **Customer output is validated at the boundary.** The shared application validator requires an object, an exact supported route and non-empty string `response_text`; missing/null `confidence` stays unknown (`None`), otherwise only finite numbers in `[0, 1]` are valid. Invalid output is textless `retry_pending`, with reason distinct from outcome. After the idempotent greeting policy, Telegram's 4096-character / VK's 9000-character plain-text limits are checked: overflow is `output_too_long`, never a silent cut. Newlines and complete conditions survive; existing outer trim and `**`/`__` marker removal remain. See [the structural output contract](../specs/final-answer-contract.md#structural-output-validation-stage-1).
 - **Technical LLM/Wiki failure is fail-closed.** It creates `retry_pending` with empty customer text and is retried by the transport worker. It is never converted into a guessed domain answer.
 - **The first-reply greeting is deterministic.** `PolicyService.finalize_simple_customer_text()` adds exactly one `Здравствуйте!` to the first non-empty customer-visible reply. It adds none to later replies and does not duplicate a model-provided greeting.
 
 ## Typed native tool contract
 
-`wiki_lookup` and `calendar_lookup` are typed native tools. The selector chooses one with `tool_choice=auto`; the runtime validates the exact name, JSON arguments and nonempty native ID before execution. Each continuation retains all linked `assistant.tool_calls` → `role=tool` messages and observations. The selector may choose the other tool or finish collection with `action=finalize`, `response_intent` and a short internal `reason`; it must not create customer text. Both Wiki→calendar and calendar→Wiki are supported by the target contract. Repeat/third/unknown/parallel calls and invalid ID links fail closed before the forbidden action. One common `respond` call owns all normal customer text, including social and calendar-only replies.
+`wiki_lookup` and `calendar_lookup` are typed native tools. The selector chooses one with `tool_choice=auto`; the runtime validates the exact name, JSON arguments and nonempty native ID before execution. The first continuation retains native `assistant.tool_calls` → `role=tool` messages. After both tools complete, the same next selector call uses exactly system + user messages containing `selector-terminal/v1`, the original question/dialogue and two checked `tool_exchanges` (ID/name/arguments/observation). Native pairs remain internal execution records; both pairs must match the recorded requests/results before projection. Terminal JSON is parsed strictly without XML repair or a synthesized finalize. The selector may choose the other tool or finish collection with `action=finalize`, `response_intent` and a short internal `reason`; it must not create customer text. Both Wiki→calendar and calendar→Wiki are supported by the target contract. Repeat/third/unknown/parallel calls and invalid ID links fail closed before the forbidden action. One common `respond` call owns all normal customer text, including social and calendar-only replies.
 
 `wiki_lookup` requires:
 

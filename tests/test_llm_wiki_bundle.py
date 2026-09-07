@@ -1,4 +1,5 @@
 from __future__ import annotations
+from tests.evidence_fixtures import migrate_fixture
 
 import hashlib
 import json
@@ -194,7 +195,7 @@ def test_compiled_bundle_runs_llm_navigation_then_coverage_review_before_extract
                 "additional_source_refs": ["compiled/concepts/restrictions.md"],
                 "reason": "authored booking relation supplies restrictions",
             },
-            {
+            migrate_fixture({
                 "grounding_status": "ready",
                 "answer_basis": "Booking rules and weight rules are confirmed.",
                 "grounded_facts": ["Booking rules.", "Weight rules."],
@@ -204,7 +205,7 @@ def test_compiled_bundle_runs_llm_navigation_then_coverage_review_before_extract
                     "compiled/concepts/restrictions.md",
                 ],
                 "reason": "grounded_from_selected_pages",
-            },
+            }),
         ]
     )
 
@@ -236,14 +237,14 @@ def test_compiled_bundle_applies_coverage_skip_setting(tmp_path: Path) -> None:
                 "selected_source_refs": ["compiled/concepts/booking.md"],
                 "reason": "LLM navigation",
             },
-            {
+            migrate_fixture({
                 "grounding_status": "ready",
                 "answer_basis": "Booking rules are confirmed.",
                 "grounded_facts": ["Booking rules."],
                 "missing_information": [],
                 "cited_source_refs": ["compiled/concepts/booking.md"],
                 "reason": "grounded_from_selected_page",
-            },
+            }),
         ]
     )
     old_navigation = settings.kb_agent_deterministic_navigation

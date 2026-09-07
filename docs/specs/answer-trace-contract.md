@@ -60,3 +60,9 @@ and later stages are explicitly outside this change.
 ## Stage 3 compatibility
 
 `respond` is now the only customer-output boundary. Selector calls use `customer_turn` and `tool_result_selection`; their actual projected inputs remain in `model_calls`, while `finalization_input` belongs to the common writer. If collection fails before the writer, it is explicitly `not_invoked`. Native tool action correlation uses the recorded native decision ID, not positions in a trace that may include Wiki navigation/extraction calls. The `stage2-c5` envelope, byte limits, privacy allowlists and existing delivery correlation remain unchanged.
+
+## Stage 4 candidate terminal projection allowlist
+
+The terminal selector wire input is not writer evidence and not an audit-only placeholder. It contains the existing action rules/schema and factual `selector-terminal/v1` data, and actually replaces the exhausted-budget selector request. Only its factual projection is captured in audit: existing question/dialogue fields plus `protocol_version`, `selector_phase`, `tool_state`, `remaining_tool_calls`, and ordered `tool_exchanges` (`tool_call_id`, `name`, `arguments`, `observation`). Instructions (`task`, `rules`, `required_json_schema`) remain excluded from audit, as do raw HTTP, secrets, chain-of-thought and raw pages.
+
+The actual serialized packet is captured at `continue_after_tool`, step `tool_result_selection`; no calls or attempts are fabricated. Writer input remains a separate `respond` capture. Limits stay 8192 bytes per input capture and 16384 per trace/strategy capture. Overflow carries an explicit hash/size/status, not a silently truncated complete packet, and audit overflow alone does not change a successful answer. This is a candidate contract, not a production-release or semantic-acceptance claim.

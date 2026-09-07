@@ -21,7 +21,7 @@ There are two finalization modes:
 1. `prompt_only`: no business fact is required, for example for a social response or a genuinely necessary clarification. The common final model may use the role/style contract and dialogue, but may not state a business fact.
 2. `kb_grounded`: a business fact is required. The KB agent runs and only a compact grounded packet reaches the common final model.
 
-Only `grounding_status=ready` may cross into the finalizer as `kb_grounded` evidence. A non-ready extraction can contain internal coverage, source, or availability observations; it is not customer evidence and its `answer_basis` and `grounded_facts` are replaced with an empty packet before finalization. The finalizer then owns a useful clarification or an honest `cannot_answer` using only separately allowlisted customer-safe policy evidence, if present. This is not a classifier, domain keyword branch, or KB answer source.
+The stage-4 candidate supplies a structurally validated `answer-evidence/v1` packet. Acquisition status and direct semantic coverage are separate: neither `ready` nor cited, related facts guarantee an answer. A typed `not_found` packet can retain coverage and related cited facts without being promoted to `ready`; missing legacy evidence becomes an empty typed packet. Unavailable or invalid evidence blocks the writer. Raw extraction rationale is not evidence. The writer answers a directly covered request, or writes a natural profile-backed non-answer when essential information is absent. It must not substitute a partial or adjacent answer for that missing information.
 
 The mode is derived from structurally validated evidence availability. Response intent is the validated decision of the existing selector model, not an application-side semantic classifier. Only its enum value crosses the writer boundary; selector reasons, traces and drafts do not.
 
@@ -32,11 +32,11 @@ The finalization contract is appended at system-message priority after the activ
 The final model may receive only:
 
 - the full active `SYSTEM_PROMPT.md` as a generic behavior contract, followed in the same system message by the application-owned generic finalization contract;
-- `knowledge_mode` (`prompt_only` or `kb_grounded`);
+- `knowledge_mode` (`prompt_only` or `kb_grounded`), model-selected `response_intent` and application-computed `allowed_routes`;
 - the current customer question;
 - at most the last 10 valid current-case dialogue items as `{role, content}`, with roles restricted to `user|assistant`;
-- KB `answer_basis` and ordered `grounded_facts` when `knowledge_mode=kb_grounded`;
-- normalized customer-relevant tool observations containing only their public kind and summary.
+- typed `grounding_evidence`: schema version, literal question, context scope, acquisition status, facts with local IDs/text/source refs/conditions/modality, coverage (answered and missing parts, conflicts, unresolved constraints), candidate answer basis, calendar facts and sourced policy evidence;
+- allowlisted `tool_facts`: calendar kind/summary/source ref and exact structured calendar values, or a profile no-answer option with summary and source ref; no arbitrary tool payloads.
 
 The final model must not receive:
 
@@ -51,17 +51,22 @@ The application constructs a new allowlisted finalization packet. It must never 
 
 There is no legacy `answer(...)` bypass for KB-ready customer finalization. A configured finalizer must implement the common `respond(...)` contract; otherwise the runtime fails closed instead of sending broad context through an older path.
 
+## Approved fixed fallback exception
+
+The operator explicitly replaced model-written fallback for the current office policy with a fixed response: `Пожалуйста, позвоните в офис в рабочее время.` When validated output restrictions are exactly `['cannot_answer']` and the sourced `profile_no_answer_option` refers to `kb/entities/office-chelyabinsk.md`, `respond` returns that text without a model request. Routing preserves the literal text and does not record a generated final response. This exception supersedes the common-writer requirement for this branch only; technical unavailability remains textless `retry_pending`, and answerable requests retain model generation. It is not a global office fallback for other policy sources.
+
 ## Evidence semantics
 
 - `SYSTEM_PROMPT.md` is authoritative only for role, scope, safety, dialogue behavior, and style. It is not a source of business facts.
-- In `prompt_only`, empty KB evidence is expected and the final model may produce only non-factual social text or a necessary clarification.
-- In `kb_grounded`, `grounding_status=ready` means the supplied KB evidence has already passed the KB boundary. The final model must not re-decide whether that evidence exists.
-- `grounding_status=not_found` is a semantic no-direct-answer result. Its extraction text, source-selection outcome, and any explanation of unavailable or dynamic facts remain operational telemetry and never enter the finalizer packet.
-- `answer_basis` is the compact intended answer from the KB agent. `grounded_facts` define the supported factual scope and modality. The final model may rephrase them naturally but may not add, strengthen, contradict, or silently discard facts needed to answer the current question.
+- In `prompt_only`, empty KB evidence is expected and the final model may produce only non-factual social text, a necessary clarification or natural cannot_answer within allowed_routes.
+- In `kb_grounded`, structural validity establishes packet shape and source membership, not semantic truth or direct coverage. Coverage is supplied by the existing extraction model and judged against the actual current question by the common writer; no extra verifier is added.
+- `grounding_status=not_found` is a successful semantic no-direct-answer result, not technical unavailability. Typed coverage remains available; raw navigation/extraction rationale and pages are excluded. Absence of mention is not a negative business fact.
+- `answer_basis` is a candidate synthesis, not an independent fact source. Typed facts define supported scope, conditions and modality. The writer may rephrase them naturally but must not add, strengthen, contradict or discard material conditions.
 
 - If `answer_basis` and `grounded_facts` conflict, the final model must stay within the exact grounded facts and avoid the unsupported part of the basis.
 - Evidence is not mandatory prose. The final model selects only facts needed for the current question and must not mechanically concatenate all facts.
-- A ready grounded answer must not be downgraded to `clarification_requested` or `cannot_answer` merely because the final model prefers to re-open the decision.
+- Directly supported information must be answered without unnecessary refusal. Partial, none or conflicting coverage, or nonempty missing parts, conflicts or unresolved constraints, do not permit `answer`; they require a natural profile-backed fallback after collection. Clarification is for ambiguity the customer can resolve, not for a clear unknown question.
+- A sourced option to take an action does not establish that action's success or a particular result. The writer preserves this uncertainty, does not add intentions or conditions when restating the customer's request, and keeps internal sources and decision grounds in `reason`, not customer prose.
 
 ## Output contract
 
@@ -95,11 +100,11 @@ No domain-specific question handler, keyword branch, canned FAQ shortcut, or mec
 
 Stage 1 does **not** change prompts, Wiki, tool ordering, grounding semantics, retry/backoff, models, or production. Schema confidence remains nullable, but the old routing audit confidence/counter projections are a separate stage-2 limitation. Semantic replay, unified tool-loop work and production release remain separately gated; these deterministic tests do not prove live-model factual correctness.
 
-## Bounded collection before finalization (stage 3)
+## Bounded collection before finalization (stage 4 candidate)
 
 The selector may execute zero, one or two sequential native tool requests, with Wiki/calendar each used at most once. It retains linked native messages and accumulated observations, then returns a validated finalization intent. Both tool orders share the same writer; ready calendar facts do not overwrite Wiki evidence or relabel Wiki status. Technical tool failure takes precedence over a request to finalize, and `finalizer_invoked=false` means no final-model input exists for that turn.
 
-This candidate preserves the approved `respond` prompt and its factual/Russian-language constraints. Changes to the extraction/coverage schema belong to a later stage. Real-provider acceptance must match effective production configuration; no release or semantic-quality proof follows from unit success alone.
+The stage-4 candidate includes the separately approved extraction/writer evidence instructions and P1/P2/P3 selector completion changes. After the second successful tool it replaces native wire history with exactly system + user messages and a `selector-terminal/v1` packet containing checked ordered `tool_exchanges`; the intermediate continuation stays native. The same selector call chooses finalize and intent; the common writer remains the only customer-text owner. Strict terminal JSON parsing rejects XML and trailing content. No additional model call or fabricated decision is added. This candidate is not accepted or deployed; full tests, literal no-send replay and independent reviews on one frozen tree are required.
 
 ## Terminal paths outside normal finalization
 
@@ -119,9 +124,22 @@ Internal planner, KB, route, LLM, and tool traces remain available in `response_
 2. `planner_reason` and `planner_action` cannot appear anywhere in the serialized final-model user prompt.
 3. `prompt_only` performs zero retrieval and zero KB-agent calls and cannot emit a business fact.
 4. `kb_grounded` uses ready evidence and the common final model, without mechanical fact joining.
-5. A non-ready extraction with non-empty internal strings reaches the finalizer only as an empty evidence packet and cannot make the route `answer`.
+5. Legacy non-ready internal strings never become evidence. Typed acquisition/coverage is preserved without status promotion; unavailable or malformed evidence never invokes the writer. Related facts alone do not justify `answer`.
 6. Exact replay of case 594 answers the payment-method question from ready KB evidence instead of applying the “information not confirmed” fallback.
 7. A non-factual social or clarification regression can use `SYSTEM_PROMPT.md` without reading KB; a substantive factual request cannot.
-8. Targeted tests, the full suite, production image/hash checks, and literal internal production probes all pass before the change is reported complete.
+8. Candidate acceptance requires targeted/full Docker tests, isolated PostgreSQL/HTTP and both channel boundaries, three independent literal no-send runs per scenario, and independent reviews of the same frozen tree. Production changes or sends are not authorized by candidate acceptance.
 9. Exact isolated replay of a historical multi-message failure preserves the unanswered follow-ups in chronological order, sends the combined newline-delimited turn through the common finalizer, keeps the customer's latest explicit constraint active, and produces exactly one practical answer before listing relevant conditions.
 10. The finalizer treats combined customer fragments as one practical request and returns the customer result plus a confirmed next step without narrating evidence selection, internal sources, checks, contradictions, or reasoning.
+
+
+## Evidence → allowed outcome (current stage-4 candidate)
+
+`allowed_answer_routes` in `answer_evidence.py` is a pure structural function called only after model-selected collection ends. It does not select/finalize tools or interpret question keywords. `full` requires ready acquisition, facts and linked answered parts, with no missing/conflicting/unresolved data; inconsistent full is `evidence_coverage_inconsistent`. All referenced fact IDs must exist. False semantic full is still a model defect, not something this code can prove away.
+
+For executed Wiki, partial/none/conflicting or nonempty missing/conflicts/unresolved allow only cannot_answer. Ambiguous coverage without these blockers allows clarification_requested or cannot_answer; the model must distinguish real customer-resolvable ambiguity from absent knowledge. Full permits supported customer outcomes, still constrained by direct evidence. Calendar-only without Wiki remains answerable from executed calendar evidence. Calendar plus missing business evidence does not bypass Wiki restrictions. Pure social intent allows only social_reply and excludes policy evidence. A model answer cannot be relabelled to bypass this restriction. Outer acquisition status must match the typed packet; otherwise finalization fails with evidence_acquisition_mismatch.
+
+In a non-answerable factual writer input, facts, candidate basis, answered-part IDs, conflict fact IDs and calendar data are removed; no duplicate business facts or basis enter tool_facts. Original tool evidence is retained only in bounded audit. The original customer context and sourced profile_no_answer_option remain. This option is factual next-step information for the LLM, not canned customer wording; contacts/hours/actions absent from it must not be invented. Social replies receive no policy option.
+
+The existing single writer receives allowed_routes. A forbidden output is rejected with `final_response_route_not_allowed`, empty retry_pending, no assistant persistence or send. It is not relabelled as cannot_answer. Successful model-written cannot_answer is preserved subject only to existing formatting. Technical collection errors bypass the writer. Both Telegram and VK use this shared boundary. Audit captures the actual restricted writer input including allowed_routes, not a reconstructed original packet.
+
+HTTP attempts use configured per-attempt timeout without a deadline, otherwise min(configured_timeout, remaining_deadline). No division among future attempts. An exhausted deadline sends no HTTP and increments no attempt. Backoff stays within remaining budget; key selection, endpoints, model and retry counts are unchanged. Client metadata records actual attempt timeouts and error types without raw private payloads.

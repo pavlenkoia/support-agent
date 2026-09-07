@@ -126,6 +126,6 @@ def test_all_collection_paths_use_one_real_common_writer(tmp_path, order):
     assert [a["action"] for a in trace["ordered_actions"]] == [*order, "final_response"]
     assert trace["finalization_input"]["boundary"] == "respond"
     payload = json.loads(client.calls[-1]["user_prompt"])
-    assert payload["grounding_evidence"]["facts"] == (["Факт"] if "wiki_lookup" in order else [])
+    assert [fact["text"] for fact in payload["grounding_evidence"]["facts"]] == (["Факт"] if "wiki_lookup" in order else [])
     assert [f["kind"] for f in payload["tool_facts"]] == (["calendar_lookup"] if "calendar_lookup" in order else [])
     assert not {"tool_requests", "llm_trace", "planner_reason", "native_tool_messages"}.intersection(payload)

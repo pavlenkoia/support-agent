@@ -1,4 +1,5 @@
 from __future__ import annotations
+from tests.evidence_fixtures import migrate_fixture
 
 import inspect
 from pathlib import Path
@@ -189,13 +190,13 @@ class _ReplayKBAgent:
                 "source_refs": [item["source_ref"] for item in kb_hits],
                 "trace": {"extraction": {"reason": "missing_critical_fact"}},
             }
-        return {
+        return migrate_fixture({
             "grounding_status": "ready",
             "grounded_facts": ["Самостоятельный прыжок: 45–90 кг.", "Тандем: до 85 кг."],
             "answer_basis": "Весовые ограничения подтверждены страницей правил безопасности.",
             "source_refs": [item["source_ref"] for item in kb_hits],
             "trace": {"extraction": {"reason": "grounded_after_linked_page_load"}},
-        }
+        })
 
 
 class _ReplayDirectLLM:

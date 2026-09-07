@@ -1,5 +1,6 @@
 """Synthetic output faults through real model, routing and delivery boundaries."""
 from __future__ import annotations
+from tests.evidence_fixtures import migrate_fixture
 
 import json
 from datetime import UTC, datetime, timedelta
@@ -33,7 +34,7 @@ class JSONClient:
     def generate(self, **kwargs):
         self.calls.append(kwargs)
         if kwargs.get("tools"):
-            return json.dumps({"action": "finalize", "response_intent": "answer", "reason": "selection_complete"})
+            return json.dumps({"action": "finalize", "response_intent": "social_reply", "reason": "selection_complete"})
         return self.raw
 
 
@@ -57,7 +58,7 @@ def call_boundary(value, boundary):
         )
         assert selection["kind"] == "finalization_requested"
         observations = [observation]
-    return direct.respond("Вопрос", {"grounding_status": "ready", "grounded_facts": ["Факт"]}, tool_observations=observations)
+    return direct.respond("Вопрос", migrate_fixture({"grounding_status": "ready", "grounded_facts": ["Факт"]}), tool_observations=observations)
 
 
 INVALID = [
@@ -121,7 +122,7 @@ class ReadyWikiTurn:
     def run(self, **kwargs):
         return {
             "finalization_requested": {"response_intent": "answer", "reason": "selection_complete"},
-            "kb_result": {"grounding_status": "ready", "grounded_facts": ["Факт"], "source_refs": []},
+            "kb_result": migrate_fixture({"grounding_status": "ready", "grounded_facts": ["Факт"], "source_refs": []}),
             "tool_observations": [], "trace": {"actions": []}, "llm_trace": [],
         }
 

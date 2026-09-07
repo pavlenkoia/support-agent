@@ -1,3 +1,4 @@
+from tests.evidence_fixtures import migrate_fixture
 import json
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -372,7 +373,7 @@ def test_direct_llm_leaves_first_reply_greeting_to_output_boundary(tmp_path: Pat
 
     result = service.respond(
         "Сколько стоит прыжок в тандеме?",
-        {"kb_status": "found", "grounding_status": "ready", "answer_context": []},
+        migrate_fixture({"kb_status": "found", "grounding_status": "ready", "grounded_facts": ["Все актуальные цены доступны по ссылке https://vk.cc/cYzS5j."], "answer_context": []}),
         first_reply_in_dialogue=True,
     )
 
@@ -398,7 +399,7 @@ def test_direct_llm_does_not_duplicate_recognised_model_greeting_on_first_reply(
 
     result = service.respond(
         "Сколько стоит прыжок в тандеме?",
-        {"kb_status": "found", "grounding_status": "ready", "answer_context": []},
+        migrate_fixture({"kb_status": "found", "grounding_status": "ready", "grounded_facts": ["Все актуальные цены доступны по ссылке https://vk.cc/cYzS5j."], "answer_context": []}),
         first_reply_in_dialogue=True,
     )
 
@@ -424,12 +425,12 @@ def test_direct_llm_keeps_model_answer_without_forced_greeting_in_any_dialogue_t
 
     first = service.respond(
         "Сколько стоит прыжок в тандеме?",
-        {"kb_status": "found", "grounding_status": "ready", "answer_context": []},
+        migrate_fixture({"kb_status": "found", "grounding_status": "ready", "grounded_facts": ["Все актуальные цены доступны по ссылке https://vk.cc/cYzS5j."], "answer_context": []}),
         first_reply_in_dialogue=True,
     )
     followup = service.respond(
         "А можно подарить сертификат?",
-        {"kb_status": "found", "grounding_status": "ready", "answer_context": []},
+        migrate_fixture({"kb_status": "found", "grounding_status": "ready", "grounded_facts": ["Все актуальные цены доступны по ссылке https://vk.cc/cYzS5j."], "answer_context": []}),
         conversation_context={"recent_messages": [{"role": "assistant", "content": first["response_text"]}]},
         first_reply_in_dialogue=False,
     )

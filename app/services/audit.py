@@ -29,7 +29,7 @@ def bounded_capture(data: dict, *, max_bytes: int = INPUT_MAX_BYTES) -> dict:
 
 def capture_model_input(boundary: str, data: dict) -> dict:
     # Only actual factual/context inputs; prompts, HTTP envelopes and reasoning are excluded.
-    allowed = {"user_message", "first_reply_in_dialogue", "conversation", "tool_observations", "knowledge_mode", "response_intent", "grounding_evidence", "tool_facts", "tool_observation"}
+    allowed = {"user_message", "first_reply_in_dialogue", "conversation", "tool_observations", "knowledge_mode", "response_intent", "allowed_routes", "grounding_evidence", "tool_facts", "tool_observation", "protocol_version", "selector_phase", "tool_exchanges", "tool_state", "remaining_tool_calls"}
     return {"boundary": boundary, **bounded_capture({k: v for k, v in data.items() if k in allowed})}
 
 

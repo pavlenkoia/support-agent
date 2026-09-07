@@ -428,12 +428,13 @@ def test_openai_compatible_client_stops_transient_retries_when_retry_deadline_is
     else:
         raise AssertionError("expected retry deadline failure")
 
-    assert calls["count"] == 1
+    assert calls["count"] == 0
+    assert client.get_last_call_info()["attempts"] == 0
     assert client.get_last_call_info()["error"] == "retry_deadline_exceeded"
 
 
-def test_openai_compatible_client_reserves_time_for_retry_after_a_timed_out_attempt(monkeypatch) -> None:
-    """A request timeout must not consume the entire retry deadline by itself."""
+def test_openai_compatible_client_retries_with_remaining_budget_after_full_attempt(monkeypatch) -> None:
+    """The configured attempt timeout is not divided by future attempts."""
     calls = {"count": 0}
     clock = {"value": 0.0}
     request_timeouts: list[float] = []
@@ -458,12 +459,12 @@ def test_openai_compatible_client_reserves_time_for_retry_after_a_timed_out_atte
         timeout_seconds=45,
         max_retries=1,
         retry_backoff_seconds=0.0,
-        retry_deadline_seconds=45.0,
+        retry_deadline_seconds=90.0,
     )
 
     assert client.generate(system_prompt="sys", user_prompt="usr") == "ok-after-timeout"
     assert calls["count"] == 2
-    assert request_timeouts[0] < 45.0
+    assert request_timeouts == [45.0, 45.0]
     assert client.get_last_call_info()["attempts"] == 2
 
 

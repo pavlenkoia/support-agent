@@ -43,11 +43,12 @@ def test_real_selector_preserves_both_tools_and_native_history(order):
     assert middle['tool_state'] == {order[0]: 'ready', order[1]: 'not_started'}
     assert middle['remaining_tool_calls'] == 1
     assert terminal['remaining_tool_calls'] == 0
+    assert [m['role'] for m in messages] == ['system', 'user']
+    assert [item['name'] for item in terminal['tool_exchanges']] == list(order)
+    assert [item['tool_call_id'] for item in terminal['tool_exchanges']] == ['id-0', 'id-1']
     schema = json.loads(messages[-1]['content'])['required_json_schema']
     assert schema['action'] == 'finalize'
     assert set(schema) == {'action', 'response_intent', 'reason'}
-    assert [m['tool_call_id'] for m in messages if m['role'] == 'tool'] == ['id-0', 'id-1']
-    assert [m['tool_calls'][0]['id'] for m in messages if m['role'] == 'assistant'] == ['id-0', 'id-1']
     assert [t['native_tool_call_id'] for t in result['llm_trace'][:2]] == ['id-0', 'id-1']
 
 
@@ -113,7 +114,7 @@ def test_invalid_prior_native_function_fails_closed_before_provider(bad_function
 def test_writer_requires_json_at_system_priority_without_weakening_evidence():
     prompt = DirectLLMService._build_finalization_system_prompt("Нейтральный профиль.", knowledge_mode="kb_grounded")
     assert "Возвращай только JSON-объект по required_json_schema из входного пакета. Клиентский текст помещай только в response_text, не вне JSON." in prompt
-    assert "Это единственные источники фактических утверждений для текущего хода." in prompt
+    assert "Это единственные источники фактических утверждений для текущего хода, но статус успешного получения и наличие ссылок не доказывают прямого покрытия вопроса." in prompt
     assert "Перефразируй его естественно, не выходя за точный смысл и модальность переданного evidence." in prompt
 
 

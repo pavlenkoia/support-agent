@@ -1,4 +1,6 @@
 from __future__ import annotations
+from app.services.answer_evidence import empty_answer_evidence
+from tests.evidence_fixtures import migrate_fixture
 
 import json
 from datetime import UTC, datetime
@@ -22,7 +24,7 @@ class FrozenDateTime(datetime):
 
 
 
-def test_prompt_only_finalizer_uses_system_prompt_without_grounding_evidence(monkeypatch) -> None:
+def test_prompt_only_finalizer_preserves_social_text_without_grounding_evidence(monkeypatch) -> None:
     class PromptOnlyClient(BaseLLMClient):
         def __init__(self) -> None:
             self.payload: dict | None = None
@@ -31,8 +33,8 @@ def test_prompt_only_finalizer_uses_system_prompt_without_grounding_evidence(mon
             self.payload = json.loads(kwargs["user_prompt"])
             return json.dumps(
                 {
-                    "route": "answer",
-                    "response_text": "Сертификат можно использовать только в Челябинске.",
+                    "route": "social_reply",
+                    "response_text": "Спасибо за обращение!",
                     "confidence": 1.0,
                     "reason": "prompt_only_finalized",
                 }
@@ -41,7 +43,7 @@ def test_prompt_only_finalizer_uses_system_prompt_without_grounding_evidence(mon
     client = PromptOnlyClient()
     monkeypatch.setattr(direct_llm_module.settings, "direct_llm_provider", "mistral")
     result = DirectLLMService(client=client).respond(
-        "Можно использовать сертификат в другом городе?",
+        "Спасибо!",
         {
             "kb_status": "not_started",
             "grounding_status": "not_required",
@@ -49,15 +51,16 @@ def test_prompt_only_finalizer_uses_system_prompt_without_grounding_evidence(mon
             "grounded_facts": [],
         },
         knowledge_mode="prompt_only",
+        response_intent="social_reply",
         conversation_context={"recent_messages": []},
     )
 
     assert client.payload is not None
     assert client.payload["knowledge_mode"] == "prompt_only"
-    assert client.payload["grounding_evidence"] == {"answer_basis": "", "facts": []}
+    assert client.payload["grounding_evidence"] == empty_answer_evidence(client.payload["user_message"])
     assert "planner_action" not in json.dumps(client.payload, ensure_ascii=False)
     assert "planner_reason" not in json.dumps(client.payload, ensure_ascii=False)
-    assert result["response_text"] == "Сертификат можно использовать только в Челябинске."
+    assert result["response_text"] == "Спасибо за обращение!"
 
 
 def test_tool_runtime_resolves_relative_dates_from_runtime_context(monkeypatch) -> None:
@@ -137,7 +140,7 @@ def test_ready_grounding_does_not_trigger_application_side_answer_override(monke
     monkeypatch.setattr(direct_llm_module.settings, "direct_llm_provider", "mistral")
     result = DirectLLMService(client=ClarifyingClient()).respond(
         "Можно записаться на следующую неделю?",
-        {
+        migrate_fixture({
             "kb_status": "found",
             "grounding_status": "ready",
             "answer_basis": "Прыжки обычно проходят по выходным и зависят от погоды и анонсов. Записаться можно по телефону 214-30-30: добавочный 1 для самостоятельного прыжка и добавочный 2 для тандема.",
@@ -146,7 +149,7 @@ def test_ready_grounding_does_not_trigger_application_side_answer_override(monke
                 "Проведение зависит от погоды и анонсов.",
                 "Записаться можно по телефону 214-30-30: добавочный 1 для самостоятельного прыжка и добавочный 2 для тандема.",
             ],
-        },
+        }),
         conversation_context={"recent_messages": [{"role": "user", "content": "Можно записаться на следующую неделю?"}]},
     )
 
@@ -162,12 +165,12 @@ def test_ready_grounding_is_finalized_by_customer_facing_model(monkeypatch) -> N
     monkeypatch.setattr(direct_llm_module.settings, "direct_llm_provider", "mistral")
     result = DirectLLMService(client=ContextAwareClient()).respond(
         "Дозвониться не могу (",
-        {
+        migrate_fixture({
             "kb_status": "found",
             "grounding_status": "ready",
             "answer_basis": "Офис работает по будням с 09:00 до 17:00. Перед визитом рекомендовано звонить.",
             "grounded_facts": ["Офис работает по будням с 09:00 до 17:00."],
-        },
+        }),
         conversation_context={"recent_messages": [
             {"role": "user", "content": "А сегодня офис работает?"},
             {"role": "assistant", "content": "Сегодня офис уже не работает."},
@@ -199,7 +202,7 @@ def test_ready_grounding_sends_answer_basis_and_facts_without_internal_trace_to_
     service = DirectLLMService(client=client)
     result = service.respond(
         "Можно ли завтра прыгнуть с парашютом?",
-        {
+        migrate_fixture({
             "kb_status": "found",
             "grounding_status": "ready",
             "answer_basis": "В этот день прыжки не проводятся.",
@@ -212,7 +215,7 @@ def test_ready_grounding_sends_answer_basis_and_facts_without_internal_trace_to_
                 "navigation": {"reason": "Внутреннее обоснование выбора страницы."},
                 "review": {"reason": "Внутренняя проверка покрытия."},
             },
-        },
+        }),
         conversation_context={
             "recent_messages": [
                 {"role": "user", "content": "А в субботу можно?"},
@@ -228,7 +231,7 @@ def test_ready_grounding_sends_answer_basis_and_facts_without_internal_trace_to_
     assert client.system_prompt is not None
     evidence = client.payload["grounding_evidence"]
     assert evidence["answer_basis"] == "В этот день прыжки не проводятся."
-    assert evidence["facts"] == [
+    assert [fact["text"] for fact in evidence["facts"]] == [
         "Прыжки обычно проходят по выходным.",
         "Дата 2026-08-04 — вторник, будний день.",
     ]
@@ -238,14 +241,16 @@ def test_ready_grounding_sends_answer_basis_and_facts_without_internal_trace_to_
 
 
 def test_direct_llm_runtime_error_fails_closed_without_customer_reply(monkeypatch) -> None:
+    calls = []
     class BrokenClient:
         def generate(self, **kwargs):
+            calls.append(kwargs)
             raise RuntimeError("IncompleteRead")
 
     monkeypatch.setattr(direct_llm_module.settings, "direct_llm_provider", "mistral")
     result = DirectLLMService(client=BrokenClient()).respond(
         "Можно ли записаться на самостоятельный прыжок?",
-        {
+        migrate_fixture({
             "kb_status": "found",
             "grounding_status": "ready",
             "answer_context": [
@@ -257,7 +262,7 @@ def test_direct_llm_runtime_error_fails_closed_without_customer_reply(monkeypatc
                     "source_ref": "contacts.md",
                 }
             ],
-        },
+        }),
     )
 
     assert result["route"] == "retry_pending"
@@ -266,6 +271,7 @@ def test_direct_llm_runtime_error_fails_closed_without_customer_reply(monkeypatc
     assert result["llm_trace"][0]["entry_kind"] == "model_call"
     assert result["llm_trace"][0]["attempts"] is None
     assert result["llm_trace"][1]["step"] == "final_response_failed_closed"
+    assert len(calls) == 1
 
 
 
@@ -278,7 +284,7 @@ def test_direct_llm_runtime_error_does_not_emit_kb_answer_basis_verbatim(monkeyp
     monkeypatch.setattr(direct_llm_module.settings, "direct_llm_provider", "mistral")
     result = DirectLLMService(client=BrokenClient()).respond(
         "Добрый день, можно ли записаться на самостоятельный прыжок",
-        {
+        migrate_fixture({
             "kb_status": "found",
             "grounding_status": "ready",
             "answer_context": [
@@ -296,7 +302,7 @@ def test_direct_llm_runtime_error_does_not_emit_kb_answer_basis_verbatim(monkeyp
                 "Обычно запись проходит в пятницу после 12:00 на субботу и в субботу после 12:00 на воскресенье.",
             ],
             "answer_basis": "На самостоятельный прыжок можно записаться по телефону +7 (351) 214-30-30, добавочный 1.",
-        },
+        }),
     )
 
     assert result["route"] == "retry_pending"

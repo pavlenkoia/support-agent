@@ -86,12 +86,22 @@ class UnifiedTurnService:
                 status = value.get("grounding_status")
                 observation = {"tool": kind, "status": status, "source_refs": self._source_refs(value),
                                "grounded_facts": value.get("grounded_facts", []) if status == "ready" else []}
+                if value.get("answer_evidence") is not None:
+                    from app.services.answer_evidence import EvidenceValidationError, validate_answer_evidence
+                    try:
+                        observation["answer_evidence"] = validate_answer_evidence(
+                            value["answer_evidence"], selected_source_refs=value.get("source_refs", []),
+                        )
+                    except EvidenceValidationError as exc:
+                        observations.append({"tool": kind, "status": "unavailable", "reason": str(exc)})
+                        return failure(str(exc))
             else:
                 status = value.get("status")
                 observation = {"tool": kind, "status": status, "summary": value.get("summary", ""), "structured": value.get("structured", {})}
             observations.append(observation)
             if status in {"unavailable", "llm_unavailable", "retry_pending"}:
-                return failure("tool_unavailable")
+                reason = value.get("reason")
+                return failure(reason if isinstance(reason, str) and reason else "tool_unavailable")
             if status not in {"ready", "not_found"}:
                 return failure("tool_result_invalid")
             history.extend([
@@ -149,6 +159,7 @@ class WikiLookupTool:
         query = tool_request["query"]
         scoped_context = dict(context)
         scoped_context["tool_request"] = dict(tool_request)
+        scoped_context["user_question"] = text
         retrieval = self.retrieval.retrieve(
             query,
             self.knowledge_backend,

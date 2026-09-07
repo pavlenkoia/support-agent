@@ -1,4 +1,5 @@
 from __future__ import annotations
+from tests.evidence_fixtures import migrate_fixture
 
 from app.services.agent_tool_loop import (
     CalendarLookupTool,
@@ -20,12 +21,12 @@ class RecordingWikiLookup:
 
     def lookup(self, *, text: str, context: dict, tool_request: dict[str, str]) -> dict:
         self.calls.append({"text": text, "context": context, "tool_request": tool_request})
-        return {
+        return migrate_fixture({
             "grounding_status": "ready",
             "grounded_facts": ["Запись на тандем доступна через форму."],
             "answer_basis": "Предложить форму записи на тандем.",
             "source_refs": ["compiled/concepts/booking.md"],
-        }
+        })
 
 
 def test_unified_turn_returns_social_customer_text_without_wiki_lookup() -> None:
@@ -261,6 +262,6 @@ def test_wiki_lookup_tool_preserves_existing_catalog_reader_contract() -> None:
     assert reader.calls == [{
         "text": "запись на самостоятельный прыжок",
         "hits": [{"source_ref": "index/catalog.json"}],
-        "conversation_context": {"recent_messages": [], "tool_request": {"query": "запись на самостоятельный прыжок", "context_scope": "самостоятельный прыжок", "needed_fact": "канал записи"}},
+        "conversation_context": {"user_question": "Как записаться?", "recent_messages": [], "tool_request": {"query": "запись на самостоятельный прыжок", "context_scope": "самостоятельный прыжок", "needed_fact": "канал записи"}},
         "require_coverage_review": True,
     }]

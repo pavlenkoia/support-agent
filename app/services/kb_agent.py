@@ -9,6 +9,12 @@ from app.core.config import settings
 from app.integrations.llm.base import BaseLLMClient
 from app.integrations.llm.factory import get_llm_client
 from app.integrations.llm.openai_compatible import LLMRecoveryExhausted
+from app.services.answer_evidence import (
+    EvidenceValidationError,
+    build_answer_evidence,
+    empty_answer_evidence,
+    validate_answer_evidence,
+)
 from app.services.system_prompt import KBAgentPromptService
 
 MAX_CATALOG_SELECTION = 3
@@ -196,6 +202,7 @@ class KBAgentService:
     ) -> dict[str, Any]:
         self._reset_llm_trace()
         if not kb_hits:
+            empty = empty_answer_evidence(text)
             return {
                 "kb_status": "not_found",
                 "kb_mode": "empty",
@@ -204,7 +211,8 @@ class KBAgentService:
                 "grounded_facts": [],
                 "answer_basis": "",
                 "source_refs": [],
-                "trace": {"reason": "no_kb_hits"},
+                "answer_evidence": empty,
+                "trace": {"reason": "no_kb_hits", "answer_evidence": empty},
             }
 
         kb_context, kb_mode = self._prepare_kb_context(kb_hits)
@@ -298,7 +306,8 @@ class KBAgentService:
             answer_mode=answer_mode,
             conversation_context=conversation_context,
         )
-        source_refs = extraction.get("cited_source_refs") or self._extract_source_refs(answer_context)
+        source_refs = extraction.get("cited_source_refs", [])
+        answer_evidence = extraction.get("answer_evidence") or empty_answer_evidence(text, context_scope=self._tool_request(conversation_context).get("context_scope", ""), acquisition_status=extraction.get("grounding_status", "not_found"))
         return {
             "kb_status": "found",
             "kb_mode": answer_mode,
@@ -308,6 +317,8 @@ class KBAgentService:
             "answer_basis": str(extraction.get("answer_basis") or "").strip(),
             "missing_information": extraction.get("missing_information", []),
             "source_refs": source_refs,
+            "answer_evidence": answer_evidence,
+            "reason": extraction.get("reason", ""),
             "trace": trace | {"extraction": extraction, "llm_trace": list(self._active_llm_trace)},
         }
 
@@ -336,6 +347,7 @@ class KBAgentService:
             "answer_basis": "",
             "missing_information": [],
             "source_refs": [],
+            "answer_evidence": empty_answer_evidence("", acquisition_status="unavailable"),
             "reason": "llm_recovery_exhausted:LLMRecoveryExhausted" if recovery_exhausted else reason,
             "trace": trace
             | {
@@ -493,6 +505,9 @@ class KBAgentService:
         answer_mode: str,
         conversation_context: dict | None = None,
     ) -> dict[str, Any]:
+        tool_request = self._tool_request(conversation_context)
+        original_question = str((conversation_context or {}).get("user_question") or text)
+        empty = empty_answer_evidence(original_question, context_scope=tool_request.get("context_scope", ""))
         if not answer_context:
             return {
                 "grounding_status": "not_found",
@@ -500,40 +515,85 @@ class KBAgentService:
                 "grounded_facts": [],
                 "missing_information": [],
                 "cited_source_refs": [],
+                "answer_evidence": empty,
                 "reason": "empty_answer_context",
             }
         if settings.kb_agent_provider == "stub" and not self._client_injected:
-            return self._fallback_grounded_facts(answer_context, reason="stub_grounding")
+            return self._fallback_grounded_facts(answer_context, reason="stub_grounding", user_question=original_question, context_scope=tool_request.get("context_scope", ""))
 
         system_prompt = self.prompt_service.load_system_prompt()
         minimal_schema = settings.kb_agent_minimal_extraction_schema
         required_json_schema = {
             "grounding_status": "ready|not_found",
-            "needs_customer_clarification": "boolean: true only when the customer can clarify the request; false when the needed fact is absent from the selected pages",
-            "answer_basis": "short factual synthesis for the support agent, not a customer reply",
-            "grounded_facts": ["bullet-sized verified facts"],
-            "cited_source_refs": ["source_ref strings used"],
-            "reason": "short string",
+            "needs_customer_clarification": "boolean: true только для неоднозначности, которую может устранить клиент; отсутствие знания — false",
+            "answer_basis": "Кандидатная краткая сводка только приведённых фактов, не самостоятельный источник знания и не клиентский ответ",
+            "grounded_facts": [
+                {
+                    "id": "Уникальный локальный ID факта",
+                    "text": "Подтверждённое утверждение без усиления смысла",
+                    "source_refs": [
+                        "Точные source_ref выбранных страниц, подтверждающих этот факт"
+                    ],
+                    "conditions": [
+                        "Условия из источника; пустой список, если они не указаны"
+                    ],
+                    "modality": "Формулировка модальности из источника или null, если она не указана"
+                }
+            ],
+            "coverage": {
+                "status": "full|partial|none|ambiguous|conflicting",
+                "answered_parts": [
+                    {
+                        "question_part": "Часть текущего вопроса с прямым подтверждённым ответом",
+                        "fact_ids": [
+                            "ID фактов, прямо отвечающих на эту часть"
+                        ]
+                    }
+                ],
+                "missing_parts": [
+                    "Части вопроса без прямого ответа"
+                ],
+                "conflicts": [
+                    {
+                        "fact_ids": [
+                            "ID конфликтующих фактов"
+                        ],
+                        "description": "Неразрешённое противоречие без собственного разрешения"
+                    }
+                ],
+                "unresolved_constraints": [
+                    "Выбранные клиентом ограничения, применимость которых не подтверждена"
+                ]
+            },
+            "cited_source_refs": [
+                "Точные source_ref, использованные в фактах"
+            ],
+            "reason": "Краткое объяснение результата"
         }
         if not minimal_schema:
-            required_json_schema["missing_information"] = ["facts that remain unknown"]
+            required_json_schema["missing_information"] = ["Факты, которые остаются неизвестными"]
         rules = [
-            "Tool request is a binding scope contract selected by the customer-turn model, not advisory context.",
-            "Extract facts only for tool_request.needed_fact within tool_request.context_scope. A fact about another variant or a parent category is out of scope unless the customer explicitly asks to compare or change the selected scope.",
-            "When the selected wiki page also contains excluded alternatives, omit those facts entirely from grounded_facts and answer_basis.",
+            "tool_request задаёт цель поиска, но не является источником фактов или полномочием изменить предмет вопроса. При расхождении с исходным user_message и явным контекстом клиента сохраняй исходный предмет и ограничения клиента.",
+            "Извлекай факты для ответа на исходный вопрос клиента. Используй tool_request.needed_fact и tool_request.context_scope только в той части, которая соответствует этому вопросу. Не добавляй сведения о другом варианте или более широкой категории, если клиент явно не просит сравнение или смену предмета.",
+            "Если выбранная страница содержит исключённые альтернативы, полностью исключи их факты из grounded_facts и answer_basis.",
             "Не дополняй выводы догадками и не отвечай в клиентском стиле.",
+            "Каждый факт оформляй отдельным объектом с уникальным локальным id, текстом, точными source_refs, условиями и модальностью из источника. Не дополняй отсутствующие условия и модальность; не указывай страницу, которая не подтверждает этот факт.",
+            "В coverage связывай прямо отвеченные части исходного вопроса с ID фактов, подтверждающих именно запрошенное отношение, а не отдельные слова или общую тему. Если ни одна часть фактического запроса не имеет прямого ответа, укажи status=none и пустой answered_parts. Если прямой ответ есть только на часть запроса, укажи status=partial и перечисли остальные части в missing_parts. Ставь status=full только при прямом покрытии всего фактического запроса с его существенными условиями. Конфликты и неоднозначность отражай предусмотренными схемой состояниями без собственного разрешения.",
+            "Отсутствие упоминания — отсутствие знания, а не отрицательный факт. Подтверждённое отрицание допустимо только когда оно прямо содержится в источнике.",
+            "answer_basis — кандидатная сводка фактов, а не отдельное доказательство. Не добавляй в неё утверждения или отношения, которых нет в фактах. Конфликты не разрешай догадкой.",
+            "Сохраняй существенные условия и точную модальность. При частичном покрытии сохрани подтверждённые факты для учёта evidence, но не объявляй весь запрос отвеченным и не достраивай неизвестное. full допустим только при ready, непустых фактах и answered_parts, пустых missing_parts, unresolved_constraints и conflicts. ambiguous означает неоднозначность запроса, которую действительно может устранить клиент; отсутствие знания не является такой неоднозначностью.",
             "Явное общее правило из страницы можно считать подтверждённым для частного случая только когда его формулировка прямо охватывает все или остальные категории; процитируй это правило как факт и укажи страницу.",
             "answer_basis должен быть короткой служебной опорой для финального support-agent ответа.",
-            "Resolve short or elliptical follow-ups using only the explicit conversation_context and tool_request; recover the subject from the recent dialogue, but preserve tool_request.context_scope as the sole subject of this extraction.",
-            "For a scoped follow-up, extract every relevant requirement only for tool_request.context_scope. Do not add facts for neighboring, alternative, earlier, broader, or later subjects.",
-            "The most recent explicit customer constraint or preference is encoded in tool_request.context_scope. It is mandatory: excluded alternatives must not appear in grounded_facts or answer_basis unless the current user explicitly asks to compare or changes that constraint.",
-            "If a selected page explicitly provides an authoritative source for a requested changing value, that source is direct sufficient evidence: return grounding_status=ready, include the exact source in answer_basis and grounded_facts, and do not classify it as not_found.",
-            "A nonempty grounded_facts list with cited selected pages is evidence, not a reason to return not_found.",
+            "Разрешай короткие и неполные продолжения по явному контексту диалога клиента. Сохраняй выбранный клиентом предмет; не восстанавливай его из неподтверждённых предположений tool_request.",
+            "Для продолжения с выбранным клиентом предметом извлекай относящиеся к нему требования. Не добавляй факты о соседних, альтернативных, прежних, более широких или последующих предметах.",
+            "Последнее явное ограничение или предпочтение устанавливай по сообщению и диалогу клиента, а не по предположению в tool_request.context_scope. Исключённые альтернативы не должны появляться в grounded_facts или answer_basis, если клиент прямо не просит сравнение или не меняет ограничение.",
+            "Если страница прямо указывает авторитетный источник запрошенного изменяющегося значения, сохрани этот точный источник как факт. Отдельно укажи, какую часть вопроса он прямо покрывает; не выдумывай само значение, которого нет в выбранных страницах.",
+            "Наличие тематически связанных фактов и ссылок само по себе не доказывает прямого покрытия вопроса. ready означает успешное получение данных; прямое покрытие отражается отдельно в coverage. Если прямого знания нет, допускается not_found при наличии связанных фактов.",
         ]
         if minimal_schema:
             rules.extend(
                 [
-                    "Верни минимальный JSON: grounding_status, needs_customer_clarification, answer_basis, grounded_facts, cited_source_refs, reason.",
+                    "Верни JSON: grounding_status, needs_customer_clarification, answer_basis, grounded_facts, coverage, cited_source_refs, reason.",
                     "needs_customer_clarification=true ставь только если вопрос клиента неоднозначен и уточнение клиента может исправить это; отсутствие факта в wiki не является уточнением клиента.",
                     "Не добавляй missing_information, если можно безопасно ответить без него.",
                 ]
@@ -541,81 +601,64 @@ class KBAgentService:
         else:
             rules.append("Если данных не хватает, явно перечисли чего не хватает в missing_information и укажи needs_customer_clarification=true только если это может уточнить сам клиент; отсутствие бизнес-факта в wiki — false.")
 
-        user_prompt = json.dumps(
-            {
-                "task": "Extract grounded facts from the selected wiki pages for the support agent.",
-                "required_json_schema": required_json_schema,
-                "user_message": text,
-                "tool_request": self._tool_request(conversation_context),
-                "conversation_context": conversation_context or {},
-                "kb_mode": answer_mode,
-                "rules": rules,
-                "selected_full_pages": answer_context,
-            },
-            ensure_ascii=False,
-        )
+        user_prompt = json.dumps({
+            "task": "Проверь прямое покрытие исходного user_message с учётом явно заданного клиентом контекста выбранными страницами. Для каждой фактической части запроса установи, подтверждают ли страницы именно запрошенное утверждение или отношение с его существенными ограничениями. Совпадение темы не является ответом. Извлеки подтверждённые сведения без новых связей между ними и отдельно заполни coverage. Поисковая формулировка tool_request не доказывает фактов и не заменяет вопрос клиента.",
+            "required_json_schema": required_json_schema,
+            "user_message": original_question,
+            "tool_request": tool_request,
+            "conversation_context": conversation_context or {},
+            "kb_mode": answer_mode,
+            "rules": rules,
+            "selected_full_pages": answer_context,
+        }, ensure_ascii=False)
         try:
-            raw = self.client.generate(
-                system_prompt=system_prompt,
-                user_prompt=user_prompt,
-                temperature=self.temperature,
-                response_format={"type": "json_object"},
-            )
+            raw = self.client.generate(system_prompt=system_prompt, user_prompt=user_prompt, temperature=self.temperature, response_format={"type": "json_object"})
             parsed = self._parse_json_response(raw)
             self._record_llm_call('grounded_extraction')
         except LLMRecoveryExhausted as exc:
             self._record_llm_call('grounded_extraction')
-            return {
-                "grounding_status": "llm_unavailable",
-                "answer_basis": "",
-                "grounded_facts": [],
-                "missing_information": [],
-                "cited_source_refs": [],
-                "reason": f"llm_recovery_exhausted:{type(exc).__name__}",
-            }
+            packet = empty_answer_evidence(original_question, context_scope=tool_request.get("context_scope", ""), acquisition_status="unavailable")
+            reason = f"llm_recovery_exhausted:{type(exc).__name__}"
+            return {"grounding_status": "llm_unavailable", "answer_basis": "", "grounded_facts": [], "missing_information": [], "cited_source_refs": [], "answer_evidence": packet, "reason": reason}
         except Exception as exc:
             self._record_llm_call('grounded_extraction')
-            return {
-                "grounding_status": "retry_pending",
-                "answer_basis": "",
-                "grounded_facts": [],
-                "missing_information": [],
-                "cited_source_refs": [],
-                "reason": f"grounding_error:{type(exc).__name__}",
-            }
+            packet = empty_answer_evidence(original_question, context_scope=tool_request.get("context_scope", ""), acquisition_status="unavailable")
+            reason = f"grounding_error:{type(exc).__name__}"
+            return {"grounding_status": "retry_pending", "answer_basis": "", "grounded_facts": [], "missing_information": [], "cited_source_refs": [], "answer_evidence": packet, "reason": reason}
 
-        if not parsed.get("cited_source_refs"):
-            parsed["cited_source_refs"] = self._extract_source_refs(answer_context)
-        selected_refs = set(self._extract_source_refs(answer_context))
-        cited_refs = [
-            str(ref).strip()
-            for ref in parsed.get("cited_source_refs", [])
-            if str(ref).strip() in selected_refs
-        ]
-        parsed["cited_source_refs"] = cited_refs
-        if not isinstance(parsed.get("missing_information"), list):
-            parsed["missing_information"] = []
-        if not isinstance(parsed.get("answer_basis"), str):
-            parsed["answer_basis"] = str(parsed.get("answer_basis") or "").strip()
-        if not isinstance(parsed.get("needs_customer_clarification"), bool):
-            parsed["needs_customer_clarification"] = False
-        grounded_facts = parsed.get("grounded_facts") or []
-        if isinstance(grounded_facts, list):
-            parsed["grounded_facts"] = [str(item).strip() for item in grounded_facts if str(item).strip()][:MAX_GROUNDED_FACTS]
-        else:
-            parsed["grounded_facts"] = []
-        # A model may mistakenly label its own cited extraction as not_found.
-        # Preserve the fail-closed boundary unless it supplied nonempty facts
-        # anchored to selected pages; that combination is a coherent ready
-        # evidence packet, not a business-topic inference by application code.
-        if (
-            parsed.get("grounding_status") == "not_found"
-            and parsed["grounded_facts"]
-            and parsed["cited_source_refs"]
-        ):
-            parsed["grounding_status"] = "ready"
-            parsed["reason"] = f"{parsed.get('reason') or 'grounding'!s}:coherent_cited_evidence"
-        return parsed
+        selected_refs = self._extract_source_refs(answer_context)
+        try:
+            required = {"grounding_status", "needs_customer_clarification", "answer_basis",
+                        "grounded_facts", "coverage", "cited_source_refs", "reason"}
+            if not isinstance(parsed, dict) or not required.issubset(parsed):
+                raise EvidenceValidationError("evidence_fields_missing")
+            if type(parsed["needs_customer_clarification"]) is not bool or not isinstance(parsed["reason"], str):
+                raise EvidenceValidationError("evidence_field_type_invalid")
+            refs = parsed["cited_source_refs"]
+            if not isinstance(refs, list) or any(not isinstance(ref, str) or ref not in selected_refs for ref in refs):
+                raise EvidenceValidationError("evidence_source_ref_invalid")
+            missing = parsed.get("missing_information", [])
+            if not isinstance(missing, list) or any(not isinstance(part, str) for part in missing):
+                raise EvidenceValidationError("evidence_field_type_invalid")
+            answer_evidence = build_answer_evidence({
+                "schema_version": "answer-evidence/v1", "user_question": original_question,
+                "context_scope": tool_request.get("context_scope", ""),
+                "acquisition_status": parsed["grounding_status"], "facts": parsed["grounded_facts"],
+                "coverage": parsed["coverage"], "answer_basis": parsed["answer_basis"],
+                "calendar_facts": [], "policy_evidence": [],
+            }, selected_source_refs=selected_refs)
+            if any(ref not in refs for fact in answer_evidence["facts"] for ref in fact["source_refs"]):
+                raise EvidenceValidationError("evidence_citation_missing")
+        except EvidenceValidationError as exc:
+            packet = empty_answer_evidence(original_question, context_scope=tool_request.get("context_scope", ""), acquisition_status="unavailable")
+            return {"grounding_status": "unavailable", "answer_basis": "", "grounded_facts": [],
+                    "missing_information": [], "cited_source_refs": [], "needs_customer_clarification": False,
+                    "answer_evidence": packet, "reason": str(exc)}
+        return {"grounding_status": parsed["grounding_status"], "answer_basis": answer_evidence["answer_basis"],
+                "grounded_facts": answer_evidence["facts"], "coverage": answer_evidence["coverage"],
+                "missing_information": missing, "cited_source_refs": list(refs),
+                "needs_customer_clarification": parsed["needs_customer_clarification"],
+                "answer_evidence": answer_evidence, "reason": parsed["reason"]}
 
     def _prepare_kb_context(self, kb_hits: list[dict]) -> tuple[list[dict], str]:
         kb_mode = "retrieved_snippets"
@@ -712,27 +755,36 @@ class KBAgentService:
             )
         return loaded
 
-    def _fallback_grounded_facts(self, answer_context: list[dict], *, reason: str) -> dict[str, Any]:
-        facts: list[str] = []
+    def _fallback_grounded_facts(self, answer_context: list[dict], *, reason: str, user_question: str = "", context_scope: str = "") -> dict[str, Any]:
+        facts: list[dict[str, Any]] = []
         for item in answer_context:
-            text = str(item.get("text") or "").strip()
-            if not text:
+            body = str(item.get("text") or "").strip()
+            if not body:
                 continue
-            for sentence in SENTENCE_SPLIT_RE.split(text.replace("\n", " ")):
+            source_ref = str(item.get("source_ref") or "")
+            for index, sentence in enumerate(SENTENCE_SPLIT_RE.split(body.replace("\n", " ")), start=1):
                 cleaned = sentence.strip()
-                if cleaned and cleaned not in facts:
-                    facts.append(cleaned)
+                if cleaned and cleaned not in [fact["text"] for fact in facts]:
+                    facts.append({"id": f"f{len(facts)+1}", "text": cleaned, "source_refs": [source_ref] if source_ref else [], "conditions": [], "modality": None})
                 if len(facts) >= MAX_GROUNDED_FACTS:
                     break
             if len(facts) >= MAX_GROUNDED_FACTS:
                 break
+        answer_basis = " ".join(fact["text"] for fact in facts[:3]).strip()
+        evidence = empty_answer_evidence(user_question or "", context_scope=context_scope, acquisition_status="ready" if facts else "not_found")
+        evidence["facts"] = facts
+        evidence["coverage"]["status"] = "full" if facts else "none"
+        evidence["answer_basis"] = answer_basis
+        evidence["source_refs"] = self._extract_source_refs(answer_context)
+        evidence["reason"] = reason
         return {
             "grounding_status": "ready" if facts else "not_found",
             "needs_customer_clarification": False,
-            "answer_basis": " ".join(facts[:3]).strip(),
-            "grounded_facts": facts[:MAX_GROUNDED_FACTS],
+            "answer_basis": answer_basis,
+            "grounded_facts": facts,
             "missing_information": [],
             "cited_source_refs": self._extract_source_refs(answer_context),
+            "answer_evidence": evidence,
             "reason": reason,
         }
 

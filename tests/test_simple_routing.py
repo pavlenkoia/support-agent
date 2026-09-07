@@ -240,7 +240,8 @@ def test_agent_tool_loop_never_passes_nonready_extraction_to_finalizer(tmp_path:
         "grounding_status": "not_found",
         "answer_basis": "",
         "grounded_facts": [],
-        "source_refs": [],
+        "source_refs": ["compiled/concepts/booking.md"],
+        "answer_evidence": None,
     }
 
 

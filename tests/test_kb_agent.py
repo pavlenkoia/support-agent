@@ -1,9 +1,11 @@
+from tests.evidence_fixtures import migrate_fixture
 import json
 from pathlib import Path
 
 from app.core.config import settings
 from app.integrations.llm.base import BaseLLMClient
 from app.services.kb_agent import KBAgentService
+from tests.evidence_fixtures import typed_answer_evidence, typed_extraction_result, typed_fact
 
 
 class SequentialClient(BaseLLMClient):
@@ -53,7 +55,7 @@ def test_kb_agent_marks_transport_failure_retry_pending_without_reusing_unrelate
     )
 
     assert result["grounding_status"] == "retry_pending"
-    assert result["grounded_facts"] == []
+    assert [fact["text"] for fact in result["grounded_facts"]] == []
     assert result["answer_basis"] == ""
     assert result["trace"]["extraction"]["reason"] == "grounding_error:RuntimeError"
 
@@ -147,7 +149,7 @@ def test_kb_agent_navigates_reviews_and_extracts_grounded_facts_from_selected_pa
                 "additional_source_refs": [],
                 "reason": "Этих страниц достаточно",
             },
-            {
+            migrate_fixture({
                 "grounding_status": "ready",
                 "answer_basis": "Полет на Ан-2 лучше согласовать заранее; доступны кабина и салон.",
                 "grounded_facts": [
@@ -157,7 +159,7 @@ def test_kb_agent_navigates_reviews_and_extracts_grounded_facts_from_selected_pa
                 "missing_information": [],
                 "cited_source_refs": [str(booking), str(flights)],
                 "reason": "selected_pages_grounded",
-            },
+            }),
         ]
     )
     service = KBAgentService(client=client)
@@ -198,7 +200,9 @@ def test_kb_agent_navigates_reviews_and_extracts_grounded_facts_from_selected_pa
     assert len(result["answer_context"]) == 2
     assert "согласовать заранее" in result["answer_context"][0]["text"]
     assert "кабина Ан-2" in result["answer_context"][1]["text"]
-    assert result["grounded_facts"][0] == "Полет лучше согласовать заранее."
+    assert result["grounded_facts"][0]["text"] == "Полет лучше согласовать заранее."
+    assert result["grounded_facts"][0]["source_refs"] == [str(booking), str(flights)]
+    assert result["grounded_facts"][0]["conditions"] == []
     assert len(client.calls) == 3
 
     plan_payload = json.loads(client.calls[0]["user_prompt"])
@@ -207,7 +211,7 @@ def test_kb_agent_navigates_reviews_and_extracts_grounded_facts_from_selected_pa
     assert review_payload["task"] == "Coverage review after selective full-page reading."
     assert "Проверь покрытие каждой самостоятельной практической части текущего сообщения; если выбранные страницы отвечают только на часть запроса, запроси страницы для остальных частей." in review_payload["rules"]
     extract_payload = json.loads(client.calls[2]["user_prompt"])
-    assert extract_payload["task"] == "Extract grounded facts from the selected wiki pages for the support agent."
+    assert extract_payload["task"] == "Проверь прямое покрытие исходного user_message с учётом явно заданного клиентом контекста выбранными страницами. Для каждой фактической части запроса установи, подтверждают ли страницы именно запрошенное утверждение или отношение с его существенными ограничениями. Совпадение темы не является ответом. Извлеки подтверждённые сведения без новых связей между ними и отдельно заполни coverage. Поисковая формулировка tool_request не доказывает фактов и не заменяет вопрос клиента."
     assert len(extract_payload["selected_full_pages"]) == 2
 
 
@@ -233,7 +237,7 @@ def test_kb_agent_can_request_one_more_page_after_coverage_review(tmp_path: Path
                 "additional_source_refs": [str(office)],
                 "reason": "Нужна страница офиса",
             },
-            {
+            migrate_fixture({
                 "grounding_status": "ready",
                 "answer_basis": "Полет лучше согласовать заранее; доступны кабина и салон; оплатить можно в офисе по будням.",
                 "grounded_facts": [
@@ -244,7 +248,7 @@ def test_kb_agent_can_request_one_more_page_after_coverage_review(tmp_path: Path
                 "missing_information": [],
                 "cited_source_refs": [str(booking), str(flights), str(office)],
                 "reason": "selected_pages_grounded",
-            },
+            }),
         ]
     )
     service = KBAgentService(client=client)
@@ -271,7 +275,7 @@ def test_kb_agent_recovers_json_object_from_markdown_fence(tmp_path: Path) -> No
         [
             f"```json\n{{\"user_intent\":\"расписание\",\"information_needs\":[\"когда проходят прыжки\"],\"selected_source_refs\":[\"{booking}\"],\"reason\":\"fenced json\"}}\n```",
             "```json\n{\"coverage_status\":\"enough\",\"missing_facts\":[],\"additional_source_refs\":[],\"reason\":\"fenced json\"}\n```",
-            f"```json\n{{\"grounding_status\":\"ready\",\"answer_basis\":\"Прыжки обычно по выходным.\",\"grounded_facts\":[\"Прыжки обычно по выходным.\"],\"missing_information\":[],\"cited_source_refs\":[\"{booking}\"],\"reason\":\"fenced json\"}}\n```",
+            "```json\n" + json.dumps(migrate_fixture({"grounding_status": "ready", "answer_basis": "Прыжки обычно по выходным.", "grounded_facts": ["Прыжки обычно по выходным."], "missing_information": [], "cited_source_refs": [str(booking)], "reason": "fenced json"}), ensure_ascii=False) + "\n```",
         ]
     )
     service = KBAgentService(client=client)
@@ -283,7 +287,7 @@ def test_kb_agent_recovers_json_object_from_markdown_fence(tmp_path: Path) -> No
     result = service.read("Когда обычно проходят прыжки?", kb_hits)
 
     assert result["grounding_status"] == "ready"
-    assert result["grounded_facts"] == ["Прыжки обычно по выходным."]
+    assert [fact["text"] for fact in result["grounded_facts"]] == ["Прыжки обычно по выходным."]
     assert result["trace"]["navigation"]["reason"] == "fenced json"
 
 
@@ -299,14 +303,14 @@ def test_kb_agent_can_skip_coverage_review_via_settings(tmp_path: Path) -> None:
                 "selected_source_refs": [str(booking)],
                 "reason": "picked booking page",
             },
-            {
+            migrate_fixture({
                 "grounding_status": "ready",
                 "answer_basis": "Прыжки обычно по выходным.",
                 "grounded_facts": ["Прыжки обычно по выходным."],
                 "missing_information": [],
                 "cited_source_refs": [str(booking)],
                 "reason": "selected_pages_grounded",
-            },
+            }),
         ]
     )
     service = KBAgentService(client=client)
@@ -344,14 +348,14 @@ def test_kb_agent_required_coverage_review_overrides_skip_setting(tmp_path: Path
                 "additional_source_refs": [],
                 "reason": "coverage_checked",
             },
-            {
+            migrate_fixture({
                 "grounding_status": "ready",
                 "answer_basis": "Прыжки обычно по выходным.",
                 "grounded_facts": ["Прыжки обычно по выходным."],
                 "missing_information": [],
                 "cited_source_refs": [str(booking)],
                 "reason": "selected_pages_grounded",
-            },
+            }),
         ]
     )
     service = KBAgentService(client=client)
@@ -388,7 +392,7 @@ def test_kb_agent_can_use_deterministic_navigation_with_followup_context(tmp_pat
 
     client = SequentialClient(
         [
-            {
+            migrate_fixture({
                 "grounding_status": "ready",
                 "answer_basis": "Прыжки обычно по выходным; для групп около 20 человек возможна договоренность на другой день.",
                 "grounded_facts": [
@@ -398,7 +402,7 @@ def test_kb_agent_can_use_deterministic_navigation_with_followup_context(tmp_pat
                 "missing_information": [],
                 "cited_source_refs": [str(booking)],
                 "reason": "selected_pages_grounded",
-            },
+            }),
         ]
     )
     service = KBAgentService(client=client)
@@ -428,8 +432,8 @@ def test_kb_agent_can_use_deterministic_navigation_with_followup_context(tmp_pat
     assert result["source_refs"] == [str(booking)]
     assert result["trace"]["navigation"]["reason"].startswith("deterministic_navigation:")
     extraction_prompt = json.loads(client.calls[-1]["user_prompt"])
-    assert any("Resolve short or elliptical follow-ups" in rule for rule in extraction_prompt["rules"])
-    assert any("For a scoped follow-up" in rule for rule in extraction_prompt["rules"])
+    assert any("Разрешай короткие и неполные продолжения" in rule for rule in extraction_prompt["rules"])
+    assert any("Разрешай короткие и неполные продолжения по явному контексту диалога клиента. Сохраняй выбранный клиентом предмет; не восстанавливай его из неподтверждённых предположений tool_request." in rule for rule in extraction_prompt["rules"])
     assert any("tool_request.context_scope" in rule for rule in extraction_prompt["rules"])
     assert result["trace"]["selected_source_refs"] == [str(booking)]
     assert len(client.calls) == 1
@@ -441,13 +445,13 @@ def test_kb_agent_minimal_extraction_schema_allows_missing_missing_information(t
 
     client = SequentialClient(
         [
-            {
+            migrate_fixture({
                 "grounding_status": "ready",
                 "answer_basis": "Прыжки обычно по выходным.",
                 "grounded_facts": ["Прыжки обычно по выходным."],
                 "cited_source_refs": [str(booking)],
                 "reason": "minimal_schema",
-            },
+            }),
         ]
     )
     service = KBAgentService(client=client)
@@ -474,4 +478,4 @@ def test_kb_agent_minimal_extraction_schema_allows_missing_missing_information(t
     assert "needs_customer_clarification" in payload["required_json_schema"]
     assert result["missing_information"] == []
     assert result["needs_customer_clarification"] is False
-    assert result["grounded_facts"] == ["Прыжки обычно по выходным."]
+    assert [fact["text"] for fact in result["grounded_facts"]] == ["Прыжки обычно по выходным."]
