@@ -74,6 +74,41 @@ def test_unified_turn_runs_wiki_after_model_requests_its_tool() -> None:
     assert result["trace"]["actions"] == ["wiki_lookup"]
 
 
+def test_unified_turn_finalizes_complete_wiki_evidence_without_selector_continuation() -> None:
+    class TurnModel:
+        def __init__(self) -> None:
+            self.continuation_calls = 0
+
+        def begin_turn(self, *, text: str, context: dict) -> dict:
+            _ = (text, context)
+            return {
+                "kind": "wiki_lookup",
+                "tool_call_id": "wiki-minor-tandem",
+                "tool_request": {
+                    "query": "тандем 17 лет разрешение родителей",
+                    "context_scope": "ограничения для тандем-прыжка",
+                    "needed_fact": "минимальный возраст и условия для несовершеннолетнего",
+                },
+                "llm_trace": [],
+            }
+
+        def continue_after_tool(self, **kwargs) -> dict:
+            _ = kwargs
+            self.continuation_calls += 1
+            raise AssertionError("complete validated wiki evidence must go directly to the finalizer")
+
+    model = TurnModel()
+    turn = UnifiedTurnService(model=model, wiki_lookup=RecordingWikiLookup(), calendar_lookup=RecordingCalendarLookup())
+
+    result = turn.run(text="Мне 17 лет, можно в тандем?", context={})
+
+    assert model.continuation_calls == 0
+    assert result["finalization_requested"] == {
+        "response_intent": "answer",
+        "reason": "complete_wiki_evidence",
+    }
+
+
 def test_unified_turn_runs_calendar_after_model_requests_its_tool() -> None:
     class TurnModel:
         def __init__(self) -> None:

@@ -104,6 +104,14 @@ class UnifiedTurnService:
                 return failure(reason if isinstance(reason, str) and reason else "tool_unavailable")
             if status not in {"ready", "not_found"}:
                 return failure("tool_result_invalid")
+            if kind == "wiki_lookup" and self._has_complete_answer_evidence(observation.get("answer_evidence")):
+                return {
+                    **packet(),
+                    "finalization_requested": {
+                        "response_intent": "answer",
+                        "reason": "complete_wiki_evidence",
+                    },
+                }
             history.extend([
                 {"role": "assistant", "tool_calls": [{"id": ident, "type": "function", "function": {"name": kind, "arguments": json.dumps(request, ensure_ascii=False)}}]},
                 {"role": "tool", "tool_call_id": ident, "content": json.dumps(observation, ensure_ascii=False)},
@@ -115,6 +123,27 @@ class UnifiedTurnService:
             else:
                 current = self.model.begin_turn(text=text, context=continuation_context)
         return failure("tool_budget_exceeded")
+
+    @staticmethod
+    def _has_complete_answer_evidence(evidence: Any) -> bool:
+        """A validated full Wiki packet can proceed straight to answer generation.
+
+        A second selector pass adds no evidence and can only turn an already
+        grounded answer into a transport failure. Calendar-dependent turns are
+        unaffected because they must already have supplied complete coverage.
+        """
+        if not isinstance(evidence, dict):
+            return False
+        coverage = evidence.get("coverage")
+        return (
+            evidence.get("acquisition_status") == "ready"
+            and isinstance(coverage, dict)
+            and coverage.get("status") == "full"
+            and bool(evidence.get("facts"))
+            and not coverage.get("missing_parts")
+            and not coverage.get("conflicts")
+            and not coverage.get("unresolved_constraints")
+        )
 
     @staticmethod
     def _invalid_tool_request(llm_trace: list[dict]) -> dict[str, Any]:
