@@ -1,8 +1,8 @@
 # Support Agent Architecture Overview
 
-## Repository contract — stage 4 candidate
+## Repository contract — deployed minimal stabilization
 
-The engine remains `ANSWER_ENGINE_MODE=agent_tool_loop`. This section describes the repository candidate, not a claim that it has been deployed. Production release is separately authorized and verified.
+The engine runs as `ANSWER_ENGINE_MODE=agent_tool_loop`. Production release `862d1f60da956cfd1e2587c5f441e683987f7d61` stabilizes the two verified one-Wiki-result paths: complete validated evidence reaches the common finalizer directly; a successful Wiki `not_found` reaches the sourced fixed fallback directly. Multi-tool/calendar ordering remains a separately unaccepted scope and is not release evidence for this stabilization.
 
 ```text
 Telegram / VK inbound event
@@ -20,7 +20,7 @@ Telegram / VK inbound event
 
 Technical selector/tool failures take a textless `retry_pending` path without invoking the writer. A semantic `not_found` result can proceed to finalization.
 
-The shared selector builder preserves the same approved action contract and schema across native continuations. Only unused tools remain advertised; after two executions the terminal projection uses the verified native tool pairs and the model still must return a valid finalize decision. No decision or native call is synthesized. The common writer system contract uses a compact allowlisted evidence packet; allowed_routes restricts outcomes after collection; non-answerable facts/basis are excluded from writer input, sourced profile policy remains, and the writer creates natural fallback text. See the current final-answer contract for acquisition/coverage/outcome separation.
+The common writer system contract uses a compact allowlisted evidence packet; allowed_routes restrict outcomes after collection; non-answerable facts/basis are excluded from writer input. For the current office policy, an exact sourced fallback is emitted without a writer call when `allowed_routes=['cannot_answer']`; this is the only fixed-text exception. The verified direct-fact path has no post-Wiki selector call, so a complete packet cannot be lost in a second provider protocol exchange.
 
 ## Core boundaries
 

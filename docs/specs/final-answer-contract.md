@@ -100,11 +100,11 @@ No domain-specific question handler, keyword branch, canned FAQ shortcut, or mec
 
 Stage 1 does **not** change prompts, Wiki, tool ordering, grounding semantics, retry/backoff, models, or production. Schema confidence remains nullable, but the old routing audit confidence/counter projections are a separate stage-2 limitation. Semantic replay, unified tool-loop work and production release remain separately gated; these deterministic tests do not prove live-model factual correctness.
 
-## Bounded collection before finalization (stage 4 candidate)
+## Deployed one-Wiki-result stabilization
 
-The selector may execute zero, one or two sequential native tool requests, with Wiki/calendar each used at most once. It retains linked native messages and accumulated observations, then returns a validated finalization intent. Both tool orders share the same writer; ready calendar facts do not overwrite Wiki evidence or relabel Wiki status. Technical tool failure takes precedence over a request to finalize, and `finalizer_invoked=false` means no final-model input exists for that turn.
+Production release `862d1f60da956cfd1e2587c5f441e683987f7d61` verifies two bounded outcomes: after a successful `wiki_lookup`, complete validated `answer-evidence/v1` bypasses a second selector call and invokes the common writer with `response_intent=answer`; a successful `not_found` bypasses that selector call with `response_intent=missing_grounding`, so the sourced fixed office fallback is returned without a writer request. This avoids treating provider-native continuation formatting as a prerequisite for a fact already fully covered or for a confirmed lack of direct Wiki knowledge.
 
-The stage-4 candidate includes the separately approved extraction/writer evidence instructions and P1/P2/P3 selector completion changes. After the second successful tool it replaces native wire history with exactly system + user messages and a `selector-terminal/v1` packet containing checked ordered `tool_exchanges`; the intermediate continuation stays native. The same selector call chooses finalize and intent; the common writer remains the only customer-text owner. Strict terminal JSON parsing rejects XML and trailing content. No additional model call or fabricated decision is added. This candidate is not accepted or deployed; full tests, literal no-send replay and independent reviews on one frozen tree are required.
+The broader stage-4 candidate protocol—native continuation, terminal selection after two tools, and calendar/Wiki ordering—remains unaccepted. It requires its own frozen-candidate tests and literal no-send replay before it can be claimed as deployed behavior.
 
 ## Terminal paths outside normal finalization
 
@@ -132,7 +132,7 @@ Internal planner, KB, route, LLM, and tool traces remain available in `response_
 10. The finalizer treats combined customer fragments as one practical request and returns the customer result plus a confirmed next step without narrating evidence selection, internal sources, checks, contradictions, or reasoning.
 
 
-## Evidence → allowed outcome (current stage-4 candidate)
+## Evidence → allowed outcome
 
 `allowed_answer_routes` in `answer_evidence.py` is a pure structural function called only after model-selected collection ends. It does not select/finalize tools or interpret question keywords. `full` requires ready acquisition, facts and linked answered parts, with no missing/conflicting/unresolved data; inconsistent full is `evidence_coverage_inconsistent`. All referenced fact IDs must exist. False semantic full is still a model defect, not something this code can prove away.
 
