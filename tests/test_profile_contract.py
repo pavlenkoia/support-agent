@@ -142,11 +142,9 @@ def test_removed_prompt_facts_are_preserved_in_canonical_wiki() -> None:
         ],
         "kb/concepts/restrictions-and-safety.md": [
             "Самостоятельный прыжок доступен с 14 лет",
-            "Для тандем-прыжка возрастное условие у 15-летнего клиента выполнено",
+            "Для тандем-прыжка минимальный возраст — 14 лет",
             "До 18 лет требуется разрешение родителей",
-            "возраст с 12 лет",
-            "другой — с 14 лет",
-            "точный возрастной допуск к тандему уточняют по телефону",
+            "По меньшему возрасту нужно уточнить вопрос по телефону офиса.",
             "Для прыжка нужен паспорт",
             "Самостоятельный прыжок: вес 45–90 кг",
             "Тандем: вес до 85 кг",
@@ -178,6 +176,17 @@ def test_removed_prompt_facts_are_preserved_in_canonical_wiki() -> None:
                 missing.append(f"{relative_path}: {fact}")
 
     assert missing == []
+
+
+def test_tandem_age_concept_uses_verified_source_and_has_no_stale_conflict() -> None:
+    page = SOURCE / "kb" / "concepts" / "restrictions-and-safety.md"
+    text = page.read_text(encoding="utf-8")
+
+    assert "raw/documents/age-restrictions-governor-2026-09-07.md" in text
+    assert "Для тандем-прыжка минимальный возраст — 14 лет." in text
+    assert "возраст с 12 лет" not in text
+    assert "не снимает противоречие источников" not in text
+    assert "точный возрастной допуск к тандему уточняют по телефону" not in text
 
 
 def test_profile_source_rejects_business_url_in_system_prompt(tmp_path: Path) -> None:

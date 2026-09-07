@@ -1,14 +1,13 @@
 ---
 title: Restrictions and Safety
 created: 2026-06-29
-updated: 2026-08-17
+updated: 2026-09-07
 type: concept
 tags: [restrictions, safety, tandem, solo-jump, flights]
-sources: [raw/documents/general-info-source.md, raw/documents/faq-main-source.md, raw/documents/faq-short-source.md]
-confidence: medium
-contested: true
-contradictions:
-  - "Один FAQ указывает для тандема возраст с 12 лет с уточнением ограничений по телефону; другой фрагмент источника указывает возраст с 14 лет."
+sources: [raw/documents/general-info-source.md, raw/documents/faq-main-source.md, raw/documents/faq-short-source.md, raw/documents/age-restrictions-governor-2026-09-07.md]
+confidence: high
+contested: false
+contradictions: []
 ---
 
 # Restrictions and Safety
@@ -18,10 +17,9 @@ contradictions:
 
 ## Возраст и документы
 - Самостоятельный прыжок доступен с 14 лет.
-- Для тандем-прыжка возрастное условие у 15-летнего клиента выполнено: 15 не меньше ни 12, ни 14. Это частный вывод для этого возраста; он не определяет минимальный возраст и не снимает противоречие источников.
+- Для тандем-прыжка минимальный возраст — 14 лет.
 - До 18 лет требуется разрешение родителей и обычно присутствие одного из родителей.
-- Для тандема один фрагмент материалов указывает возраст с 12 лет с уточнением ограничений по телефону, другой — с 14 лет.
-- Из-за противоречия точный возрастной допуск к тандему уточняют по телефону без обещания допуска.
+- По меньшему возрасту нужно уточнить вопрос по телефону офиса.
 - Для прыжка нужен паспорт. Водительское удостоверение и военный билет не указаны как его замена.
 
 ## Вес и здоровье
