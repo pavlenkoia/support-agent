@@ -79,6 +79,22 @@ A normal final answer must:
 
 No domain-specific question handler, keyword branch, canned FAQ shortcut, or mechanical fact renderer is part of the normal path.
 
+## Structural output validation (stage 1)
+
+`app/services/final_response_validation.py` owns the shared application-side schema, independent of provider-native JSON Schema support. All three `DirectLLMService` final-output paths (`begin_turn`, `continue_after_tool`, `respond`) use it. Routing repeats the same validation before policy and after formatting with the actual channel; this small routing change is necessary for channel-specific limits and textless technical outcomes, not a redesign of tool selection or audit telemetry.
+
+- Top level must be an object. Model routes are exact `answer|social_reply|cannot_answer|out_of_scope|clarification_requested`; whitespace/case variants and unknown routes are invalid, not semantic refusals.
+- `response_text` must be a non-empty string after existing formatting cleanup. Objects/lists/numbers are never converted to customer text. Existing internal-envelope guards remain.
+- Missing or null `confidence` is valid unknown (`None`). Otherwise only finite JSON numbers in `[0, 1]` are accepted. Booleans, strings, NaN/Infinity and out-of-range values (including very large integers) are invalid. Confidence does not prove factual truth.
+- Schema violations become `retry_pending`, `reason=invalid_finalizer_output`, empty text. Application-produced technical results are also always textless. The exact reason is preserved separately from `outcome_kind`; provider/parse failures remain technical, not business refusals.
+- Formatting removes outer whitespace and the existing `**`/`__` emphasis markers only. It never collapses internal newlines or slices at 1000 characters. Greeting policy remains idempotent and runs only for customer outcomes.
+- Length is checked **after greeting/formatting**, using Unicode character count: [Telegram `sendMessage`](https://core.telegram.org/bots/api#sendmessage) allows 1–4096 characters after entity parsing; our adapter sends plain text without `parse_mode`, and its formatter is identity. [VK `messages.send`](https://dev.vk.com/ru/method/messages.send) documents maximum `message` length 9000; our adapter passes text directly. Limits were checked against these official documents, not by sending live boundary-test messages.
+- Exact-limit replies pass whole, including trailing conditions. A reply exceeding its channel limit becomes textless `retry_pending` with `reason=output_too_long`. No automatic rewrite, splitting or multipart sending is added. Channels without an active external adapter (such as internal probes) have no imposed transport limit.
+
+`tests/test_final_response_validation.py` exercises malformed output at each model boundary, nullable confidence, policy idempotence, and the actual Telegram gateway/queue and VK durable-turn gateway through real routing with injected model/tool clients and recording senders. Rejected results create neither assistant messages nor outbound sends. Telegram recovery owns raw transport events; current VK recovery owns `VkTurn` rows, so their retry assertions intentionally target different tables.
+
+Stage 1 does **not** change prompts, Wiki, tool ordering, grounding semantics, retry/backoff, models, or production. Schema confidence remains nullable, but the old routing audit confidence/counter projections are a separate stage-2 limitation. Semantic replay, unified tool-loop work and production release remain separately gated; these deterministic tests do not prove live-model factual correctness.
+
 ## Terminal paths outside normal finalization
 
 - `social_reply` skips KB work but still reaches the common finalizer with a `social_reply` intent. The finalizer writes the short non-factual text; an invalid or failed finalization is `retry_pending` with empty customer text.

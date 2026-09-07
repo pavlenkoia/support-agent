@@ -8,6 +8,10 @@ from app.core.config import settings
 from app.integrations.llm.base import BaseLLMClient
 from app.integrations.llm.factory import get_llm_client
 from app.integrations.llm.openai_compatible import LLMRecoveryExhausted
+from app.services.final_response_validation import (
+    clean_customer_text,
+    validate_final_response,
+)
 from app.services.system_prompt import SystemPromptService
 
 MAX_CATALOG_SELECTION = 3
@@ -126,7 +130,7 @@ class DirectLLMService:
                 "llm_trace": list(self._active_llm_trace),
             }
         if not isinstance(parsed, dict):
-            return self._invalid_begin_turn("customer_turn_not_object")
+            return self._invalid_begin_turn("invalid_finalizer_output")
         native_calls = parsed.get("_native_tool_calls")
         if isinstance(native_calls, list):
             tool_call = self._native_registered_tool_call(native_calls, registered_tools={"wiki_lookup", "calendar_lookup"})
@@ -141,17 +145,15 @@ class DirectLLMService:
                 return {"kind": tool_name, "tool_request": tool_request, "llm_trace": list(self._active_llm_trace)}
             return self._invalid_begin_turn(f"{tool_name}_arguments_invalid")
         normalized = self._normalize_prompt_reply(parsed)
-        if normalized["route"] not in {"social_reply", "cannot_answer", "out_of_scope", "clarification_requested"}:
+        if normalized["route"] not in {"retry_pending", "social_reply", "cannot_answer", "out_of_scope", "clarification_requested"}:
             return self._invalid_begin_turn("customer_turn_requires_tool")
         return {"kind": "final", "result": normalized, "llm_trace": list(self._active_llm_trace)}
 
     @staticmethod
-    def _parse_json_object(raw: str) -> dict[str, Any]:
+    def _parse_json_object(raw: str) -> Any:
         """Parse the first JSON object when a compatible provider appends junk."""
         candidate = str(raw or "").lstrip()
         value, _ = json.JSONDecoder().raw_decode(candidate)
-        if not isinstance(value, dict):
-            raise ValueError("customer_turn_not_object")
         return value
 
     def continue_after_tool(
@@ -419,31 +421,11 @@ class DirectLLMService:
         normalized["llm_trace"] = list(self._active_llm_trace)
         return normalized
 
-    def _normalize_prompt_reply(self, parsed: dict[str, Any]) -> dict:
-        route = str(parsed.get("route") or "cannot_answer").strip()
-        if route not in {"answer", "social_reply", "cannot_answer", "out_of_scope", "clarification_requested"}:
-            route = "cannot_answer"
-
-        response_text = self._sanitize_customer_text(str(parsed.get("response_text") or ""))
-        if not response_text or self._contains_internal_envelope(response_text):
-            return {
-                "route": "retry_pending",
-                "response_text": "",
-                "confidence": 0.0,
-                "reason": "invalid_finalizer_output",
-            }
-
-        return {
-            "route": route,
-            "response_text": response_text,
-            "confidence": float(parsed.get("confidence", 0.0)),
-            "reason": str(parsed.get("reason") or "prompt_runtime"),
-        }
+    def _normalize_prompt_reply(self, parsed: object) -> dict:
+        return validate_final_response(parsed)
 
     def _sanitize_customer_text(self, text: str) -> str:
-        cleaned = re.sub(r"\s+", " ", text).strip()
-        cleaned = cleaned.replace("**", "").replace("__", "")
-        return cleaned[:1000]
+        return clean_customer_text(text)
 
     @staticmethod
     def _prepend_standard_greeting_if_missing(text: str, *, first_reply_in_dialogue: bool) -> str:

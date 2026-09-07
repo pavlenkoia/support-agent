@@ -8,11 +8,16 @@ from app.core.config import settings
 from app.core.db import SessionLocal
 from app.models.case import SupportCase
 from app.schemas.message import InboundMessage
-from app.services.agent_tool_loop import CalendarLookupTool, UnifiedTurnService, WikiLookupTool
+from app.services.agent_tool_loop import (
+    CalendarLookupTool,
+    UnifiedTurnService,
+    WikiLookupTool,
+)
 from app.services.audit import build_audit_event
 from app.services.case_resolution import reset_conversation_session, resolve_case
 from app.services.context_builder import build_context
 from app.services.direct_llm import DirectLLMService
+from app.services.final_response_validation import validate_final_response
 from app.services.kb_agent import KBAgentService
 from app.services.outcome import OutcomeService
 from app.services.persistence import (
@@ -163,16 +168,19 @@ class RoutingService:
                 first_reply_in_dialogue=first_reply,
                 response_intent="answer" if finalization_has_evidence else "missing_grounding",
             )
-        final_route = str(final_result.get("route") or "cannot_answer")
+        final_result = {**final_result, **validate_final_response(final_result, allow_technical=True)}
+        if final_result["route"] != "retry_pending":
+            formatted = self.policy.finalize_simple_customer_text(
+                final_result["response_text"], first_reply_in_dialogue=first_reply,
+            )
+            final_result = {
+                **final_result,
+                **validate_final_response({**final_result, "response_text": formatted}, channel=payload.channel),
+            }
+        final_route = final_result["route"]
         route_name = "answer" if final_route == "social_reply" else final_route
         outcome_kind = final_route
-        if route_name == "retry_pending":
-            response_text = ""
-        else:
-            response_text = self.policy.finalize_simple_customer_text(
-                str(final_result.get("response_text") or ""),
-                first_reply_in_dialogue=first_reply,
-            )
+        response_text = final_result["response_text"]
         source_refs = [str(ref) for ref in kb_result.get("source_refs", []) if str(ref)] if grounded else []
         actions = list((loop_result.get("trace") or {}).get("actions") or [])
         tool_observations = list(loop_result.get("tool_observations") or [])
@@ -192,8 +200,8 @@ class RoutingService:
         route = {
             "route": route_name,
             "reply": {"response_text": response_text},
-            "reason": outcome_kind,
-            "route_reason": outcome_kind,
+            "reason": final_result["reason"],
+            "route_reason": final_result["reason"],
             "route_confidence": 1.0,
             "answer_engine": "agent_tool_loop",
             "outcome_kind": outcome_kind,

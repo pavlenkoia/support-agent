@@ -7,6 +7,7 @@ from typing import Any
 import yaml
 
 from app.core.config import settings
+from app.services.final_response_validation import clean_customer_text
 
 
 class PolicyService:
@@ -39,18 +40,13 @@ class PolicyService:
         return [{"source_ref": source_ref, "text": text}] if source_ref and text else []
 
     def finalize_customer_text(self, text: str, *, first_reply_in_dialogue: bool) -> str:
-        """Apply one customer-facing boundary to every terminal route."""
-        cleaned = re.sub(r"\s+", " ", str(text or "")).strip().replace("**", "").replace("__", "")
+        """Preserve content; routing validates channel length after greeting."""
+        cleaned = clean_customer_text(text)
         if not cleaned:
             return ""
         if first_reply_in_dialogue and not self._GREETING_PATTERN.search(cleaned):
             cleaned = f"Здравствуйте! {cleaned}"
-        return cleaned[:1000]
+        return cleaned
 
     def finalize_simple_customer_text(self, text: str, *, first_reply_in_dialogue: bool) -> str:
-        cleaned = re.sub(r"\s+", " ", str(text or "")).strip().replace("**", "").replace("__", "")
-        if not cleaned:
-            return ""
-        if first_reply_in_dialogue and not self._GREETING_PATTERN.search(cleaned):
-            cleaned = f"Здравствуйте! {cleaned}"
-        return cleaned[:1000]
+        return self.finalize_customer_text(text, first_reply_in_dialogue=first_reply_in_dialogue)
