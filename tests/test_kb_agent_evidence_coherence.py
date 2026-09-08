@@ -26,6 +26,22 @@ def test_kb_agent_compacts_surplus_facts_to_direct_coverage() -> None:
     assert [fact["id"] for fact in compacted] == ["f2", "f9"]
 
 
+def test_kb_agent_discards_surplus_facts_without_direct_coverage() -> None:
+    facts = [
+        typed_fact(f"f{index}", f"Связанный факт {index}.", ["kb/certificates.md"])
+        for index in range(1, 10)
+    ]
+    coverage = {
+        "status": "none",
+        "answered_parts": [],
+        "missing_parts": ["прямой ответ"],
+        "conflicts": [],
+        "unresolved_constraints": [],
+    }
+
+    assert KBAgentService._compact_facts_to_coverage(facts, coverage) == []
+
+
 def test_kb_agent_returns_typed_grounded_facts_and_answer_evidence() -> None:
     service = KBAgentService(client=None)
 
