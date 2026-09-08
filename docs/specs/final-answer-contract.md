@@ -65,6 +65,7 @@ The operator explicitly replaced model-written fallback for the current office p
 
 - If `answer_basis` and `grounded_facts` conflict, the final model must stay within the exact grounded facts and avoid the unsupported part of the basis.
 - Evidence is not mandatory prose. The final model selects only facts needed for the current question and must not mechanically concatenate all facts.
+- The typed evidence packet permits at most eight facts. Extraction is instructed to return the minimum direct set, and the runtime removes surplus facts only when they are not referenced by `coverage.answered_parts`. If the coverage mapping itself needs more than eight fact IDs, the packet remains invalid and fails closed; the runtime does not choose facts by topic, text similarity, or a domain-specific rule.
 - Directly supported information must be answered without unnecessary refusal. Partial, none or conflicting coverage, or nonempty missing parts, conflicts or unresolved constraints, do not permit `answer`; they require a natural profile-backed fallback after collection. Clarification is for ambiguity the customer can resolve, not for a clear unknown question.
 - A sourced option to take an action does not establish that action's success or a particular result. The writer preserves this uncertainty, does not add intentions or conditions when restating the customer's request, and keeps internal sources and decision grounds in `reason`, not customer prose.
 
@@ -102,7 +103,7 @@ Stage 1 does **not** change prompts, Wiki, tool ordering, grounding semantics, r
 
 ## Deployed one-Wiki-result stabilization
 
-Production release `862d1f60da956cfd1e2587c5f441e683987f7d61` verifies two bounded outcomes: after a successful `wiki_lookup`, complete validated `answer-evidence/v1` bypasses a second selector call and invokes the common writer with `response_intent=answer`; a successful `not_found` bypasses that selector call with `response_intent=missing_grounding`, so the sourced fixed office fallback is returned without a writer request. This avoids treating provider-native continuation formatting as a prerequisite for a fact already fully covered or for a confirmed lack of direct Wiki knowledge.
+Production release `aaa9b51219b00875764bf497f40f8ca280c3ae95` preserves two bounded outcomes: after a successful `wiki_lookup`, complete validated `answer-evidence/v1` bypasses a second selector call and invokes the common writer with `response_intent=answer`; a successful `not_found` bypasses that selector call with `response_intent=missing_grounding`, so the sourced fixed office fallback is returned without a writer request. The release also fixes the evidence-budget boundary: an extraction with more than eight facts no longer discards a directly covered answer when coverage references a smaller subset. This avoids treating provider-native continuation formatting or incidental surplus facts as a prerequisite for a fact already fully covered or for a confirmed lack of direct Wiki knowledge.
 
 The broader stage-4 candidate protocol—native continuation, terminal selection after two tools, and calendar/Wiki ordering—remains unaccepted. It requires its own frozen-candidate tests and literal no-send replay before it can be claimed as deployed behavior.
 
