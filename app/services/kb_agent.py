@@ -497,6 +497,31 @@ class KBAgentService:
                 "reason": f"coverage_review_error:{type(exc).__name__}",
             }
 
+    @staticmethod
+    def _compact_facts_to_coverage(facts: object, coverage: object) -> object:
+        """Drop surplus extraction facts that do not support an answered part.
+
+        The evidence budget is a transport boundary, not a reason to discard a
+        directly covered answer.  Never choose facts by topic or text: retain
+        only IDs explicitly cited by the extraction model's coverage mapping.
+        If that mapping itself needs more than the budget, validation still
+        fails closed.
+        """
+        if not isinstance(facts, list) or len(facts) <= MAX_GROUNDED_FACTS or not isinstance(coverage, dict):
+            return facts
+        answered_parts = coverage.get("answered_parts")
+        if not isinstance(answered_parts, list):
+            return facts
+        required_ids: set[str] = set()
+        for part in answered_parts:
+            if not isinstance(part, dict) or not isinstance(part.get("fact_ids"), list):
+                return facts
+            if any(not isinstance(fact_id, str) for fact_id in part["fact_ids"]):
+                return facts
+            required_ids.update(part["fact_ids"])
+        compacted = [fact for fact in facts if isinstance(fact, dict) and fact.get("id") in required_ids]
+        return compacted if required_ids and len(compacted) <= MAX_GROUNDED_FACTS else facts
+
     def _extract_grounded_facts(
         self,
         text: str,
@@ -643,7 +668,8 @@ class KBAgentService:
             answer_evidence = build_answer_evidence({
                 "schema_version": "answer-evidence/v1", "user_question": original_question,
                 "context_scope": tool_request.get("context_scope", ""),
-                "acquisition_status": parsed["grounding_status"], "facts": parsed["grounded_facts"],
+                "acquisition_status": parsed["grounding_status"],
+                "facts": self._compact_facts_to_coverage(parsed["grounded_facts"], parsed["coverage"]),
                 "coverage": parsed["coverage"], "answer_basis": parsed["answer_basis"],
                 "calendar_facts": [], "policy_evidence": [],
             }, selected_source_refs=selected_refs)
