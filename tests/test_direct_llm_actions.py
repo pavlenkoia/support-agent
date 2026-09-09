@@ -188,6 +188,26 @@ def test_selector_normalizes_standard_openai_tool_calls_envelope() -> None:
     assert result["tool_call_id"] == "call-1"
 
 
+def test_selector_normalizes_legacy_provider_single_tool_map_list() -> None:
+    service = DirectLLMService(client=ActionClient("{}"), prompt_service=PromptService())
+    service._active_llm_trace = [{}]
+
+    result = service._selector_decision([{
+        "wiki_lookup": {
+            "query": "требования для прыжка с парашютом",
+            "context_scope": "хочу прыгнуть с парашютом",
+            "needed_fact": "что необходимо для первого прыжка",
+        },
+    }])
+
+    assert result["kind"] == "wiki_lookup"
+    assert result["tool_request"] == {
+        "query": "требования для прыжка с парашютом",
+        "context_scope": "хочу прыгнуть с парашютом",
+        "needed_fact": "что необходимо для первого прыжка",
+    }
+    assert result["tool_call_id"] == "compat-tool-call-1"
+
 
 def test_begin_turn_prompt_requests_action_finalize_without_client_text() -> None:
     client = ActionClient('{"action":"finalize","response_intent":"social_reply","reason":"social"}')

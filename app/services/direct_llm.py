@@ -165,7 +165,27 @@ class DirectLLMService:
             ensure_ascii=False,
         )
 
+    @staticmethod
+    def _normalize_selector_input(parsed: object) -> object:
+        """Translate known provider tool-map lists into the native call envelope."""
+        if not isinstance(parsed, list) or len(parsed) != 1 or not isinstance(parsed[0], dict):
+            return parsed
+        legacy_call = parsed[0]
+        if len(legacy_call) != 1:
+            return parsed
+        name, arguments = next(iter(legacy_call.items()))
+        if name not in {"wiki_lookup", "calendar_lookup"} or not isinstance(arguments, dict):
+            return parsed
+        return {
+            "_native_tool_calls": [{
+                "id": "compat-tool-call-1",
+                "type": "function",
+                "function": {"name": name, "arguments": arguments},
+            }],
+        }
+
     def _selector_decision(self, parsed: object) -> dict[str, Any]:
+        parsed = self._normalize_selector_input(parsed)
         if not isinstance(parsed, dict):
             return self._invalid_begin_turn("invalid_selector_output")
         raw_calls = parsed.get("_native_tool_calls")
