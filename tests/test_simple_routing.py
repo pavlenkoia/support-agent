@@ -190,26 +190,6 @@ def test_agent_tool_loop_routes_social_reply_without_legacy_kb_dependencies(tmp_
     assert len(finalizer.calls) == 1
 
 
-def test_agent_tool_loop_sends_direct_social_reply_without_second_finalizer_call(tmp_path: Path) -> None:
-    session_factory = make_session_factory(f"sqlite+pysqlite:///{tmp_path / 'direct-social.db'}")
-    Base.metadata.create_all(bind=session_factory.kw["bind"])
-    loop = RecordingAgentLoop({
-        "kb_result": {},
-        "final_result": {"route": "social_reply", "response_text": "Привет! Чем могу помочь?", "confidence": 0.9, "reason": "pure_social"},
-        "trace": {"actions": []},
-        "llm_trace": [{"entry_kind": "model_call", "usage": {"total_tokens": 17}, "attempts": 1}],
-        "tool_observations": [],
-    })
-    finalizer = ForbiddenLegacyDependency()
-    routing = RoutingService(session_factory=session_factory, answer_engine_mode="agent_tool_loop", turn_service=loop, direct_llm=finalizer)
-
-    result = routing.handle_inbound(InboundMessage(channel="internal_test", external_user_id="igor", external_chat_id="igor", text="Привет"))
-
-    assert result["outcome"]["outcome_payload"]["response_text"] == "Здравствуйте! Чем могу помочь?"
-    assert result["audit"]["agent_actions"] == []
-    assert result["audit"]["logical_llm_call_count"] == 1
-
-
 def test_agent_tool_loop_audits_actual_wiki_lookup_status(tmp_path: Path) -> None:
     session_factory = make_session_factory(f"sqlite+pysqlite:///{tmp_path / 'agent-loop-kb-status.db'}")
     Base.metadata.create_all(bind=session_factory.kw["bind"])

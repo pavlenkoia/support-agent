@@ -155,17 +155,6 @@ def test_begin_turn_requests_social_finalization_without_customer_text() -> None
     assert result["llm_trace"][0]["step"] == "customer_turn"
 
 
-def test_begin_turn_returns_a_tool_free_social_reply_directly() -> None:
-    client = ActionClient('{"route":"social_reply","response_text":"Привет! Чем могу помочь?","confidence":0.9,"reason":"pure_social"}')
-    service = DirectLLMService(client=client, prompt_service=PromptService())
-
-    result = service.begin_turn(text="Привет", context={"recent_messages": []})
-
-    assert result["kind"] == "direct_response"
-    assert result["result"]["route"] == "social_reply"
-    assert result["result"]["response_text"] == "Привет! Чем могу помочь?"
-
-
 
 def test_begin_turn_prompt_requests_action_finalize_without_client_text() -> None:
     client = ActionClient('{"action":"finalize","response_intent":"social_reply","reason":"social"}')

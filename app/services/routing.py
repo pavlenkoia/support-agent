@@ -127,7 +127,8 @@ class RoutingService:
         finalizer_invoked = False
         technical_result = {"route": "retry_pending", "response_text": "", "confidence": None, "reason": "invalid_selector_output"}
         if raw_final_result is not None:
-            final_result = raw_final_result if isinstance(raw_final_result, dict) and raw_final_result.get("route") in {"retry_pending", "social_reply"} else technical_result
+            # Selector boundaries may only propagate textless technical failures.
+            final_result = raw_final_result if isinstance(raw_final_result, dict) and raw_final_result.get("route") == "retry_pending" else technical_result
         elif technical_kb_failure:
             final_result = {**technical_result, "reason": "kb_technical_failure"}
         elif not isinstance(finalization_requested, dict) or finalization_requested.get("response_intent") not in {"answer", "social_reply", "clarification", "missing_grounding"}:
