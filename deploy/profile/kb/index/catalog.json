@@ -20,7 +20,30 @@
       "updated": "2026-09-01"
     },
     {
-      "description": "- Самостоятельный прыжок: телефон `+7 (351) 214-30-30`, добавочный 1. Запись обычно открывается в пятницу после 12:00 на субботу и в субботу после 12:00 на воскресенье. - Тандем-прыжок: форма `https://vk.cc/cMwabq` или телефон `+7 (351) 214-30-30`, добавочный 2. - После заполнения формы на тандем клиента добавляют в чат Telegram или MAX и сообщают время.",
+      "description": "Як-52 записывают у пилота; прогулочный АН-2 покупают в офисе, кассе аэродрома или на сайте. Расписание полётов на выходные публикуют в закреплённом посте.",
+      "linked_source_refs": [
+        "compiled/concepts/flight-services.md",
+        "compiled/concepts/booking-and-schedule.md"
+      ],
+      "provenance": [
+        "raw/documents/general-info-source.md",
+        "raw/documents/faq-main-source.md",
+        "raw/documents/faq-short-source.md",
+        "raw/documents/legacy-approved-policy-source.md",
+        "raw/documents/operator-case-vk-994-flight-schedule.md",
+        "raw/documents/flight-announcements-governor-2026-09-09.md"
+      ],
+      "source_ref": "compiled/concepts/booking-flight-services.md",
+      "tags": [
+        "booking",
+        "flights"
+      ],
+      "title": "Booking Flight Services",
+      "type": "concept",
+      "updated": "2026-09-09"
+    },
+    {
+      "description": "Запись на самостоятельный прыжок открывается по телефону; обычное окно записи на выходные начинается после 12:00 в пятницу и субботу.",
       "linked_source_refs": [
         "compiled/concepts/booking-and-schedule.md",
         "compiled/concepts/ordinary-jump-schedule.md"
@@ -29,22 +52,39 @@
         "raw/documents/faq-main-source.md",
         "raw/documents/faq-short-source.md",
         "raw/documents/general-info-source.md",
+        "raw/documents/legacy-approved-policy-source.md"
+      ],
+      "source_ref": "compiled/concepts/booking-solo-jump.md",
+      "tags": [
+        "booking",
+        "solo-jump"
+      ],
+      "title": "Booking a Self-Directed Jump",
+      "type": "concept",
+      "updated": "2026-09-09"
+    },
+    {
+      "description": "Тандем-прыжок записывается через форму или телефон; после формы клиента добавляют в Telegram или MAX чат и сообщают время. Наличие мест уточняют при записи.",
+      "linked_source_refs": [
+        "compiled/concepts/booking-and-schedule.md",
+        "compiled/concepts/skydiving-services.md"
+      ],
+      "provenance": [
+        "raw/documents/faq-main-source.md",
+        "raw/documents/faq-short-source.md",
+        "raw/documents/general-info-source.md",
         "raw/documents/legacy-approved-policy-source.md",
         "raw/documents/operator-case-vk-291545750-chat.md",
-        "raw/documents/booking-email-chat-governor-2026-09-09.md",
-        "raw/documents/operator-case-vk-994-flight-schedule.md",
-        "raw/documents/flight-announcements-governor-2026-09-09.md"
+        "raw/documents/booking-email-chat-governor-2026-09-09.md"
       ],
-      "source_ref": "compiled/concepts/booking-channels.md",
+      "source_ref": "compiled/concepts/booking-tandem-jump.md",
       "tags": [
         "booking",
         "tandem",
-        "solo-jump",
-        "flights",
-        "vk",
-        "chat"
+        "chat",
+        "vk"
       ],
-      "title": "Booking Channels",
+      "title": "Booking a Tandem Jump",
       "type": "concept",
       "updated": "2026-09-09"
     },
