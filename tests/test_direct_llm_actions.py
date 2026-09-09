@@ -188,6 +188,30 @@ def test_selector_normalizes_standard_openai_tool_calls_envelope() -> None:
     assert result["tool_call_id"] == "call-1"
 
 
+def test_selector_coalesces_provider_parallel_wiki_calls_with_same_scope() -> None:
+    service = DirectLLMService(client=ActionClient("{}"), prompt_service=PromptService())
+    service._active_llm_trace = [{}]
+
+    result = service._selector_decision({"_native_tool_calls": [
+        {"id": "price", "type": "function", "function": {"name": "wiki_lookup", "arguments": json.dumps({
+            "query": "стоимость прыжка с инструктором и видеосъёмкой",
+            "context_scope": "прыжок с инструктором",
+            "needed_fact": "цена и доплата за видео",
+        })}},
+        {"id": "process", "type": "function", "function": {"name": "wiki_lookup", "arguments": json.dumps({
+            "query": "как проходит прыжок с инструктором",
+            "context_scope": "прыжок с инструктором",
+            "needed_fact": "этапы прыжка",
+        })}},
+    ]})
+
+    assert result["kind"] == "wiki_lookup"
+    assert result["tool_call_id"] == "price"
+    assert "стоимость прыжка с инструктором" in result["tool_request"]["query"]
+    assert "как проходит прыжок с инструктором" in result["tool_request"]["query"]
+    assert service._active_llm_trace[-1]["provider_protocol_normalization"] == "coalesced_parallel_wiki_calls"
+
+
 def test_selector_normalizes_legacy_provider_single_tool_map_list() -> None:
     service = DirectLLMService(client=ActionClient("{}"), prompt_service=PromptService())
     service._active_llm_trace = [{}]

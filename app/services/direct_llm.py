@@ -184,8 +184,65 @@ class DirectLLMService:
             }],
         }
 
+    @staticmethod
+    def _coalesce_parallel_wiki_calls(parsed: object) -> object:
+        """Preserve a provider's duplicate Wiki requests as one composite lookup.
+
+        Some OpenAI-compatible providers can return two `wiki_lookup` calls even
+        when `parallel_tool_calls=False` was requested.  The runtime has one
+        Wiki lookup budget per turn.  Coalesce only calls with the same explicit
+        context scope; mixed tools, invalid arguments, or differing scopes keep
+        the normal fail-closed protocol path.
+        """
+        if not isinstance(parsed, dict):
+            return parsed
+        key = "_native_tool_calls" if "_native_tool_calls" in parsed else "tool_calls"
+        calls = parsed.get(key)
+        if not isinstance(calls, list) or len(calls) < 2:
+            return parsed
+
+        requests: list[dict[str, str]] = []
+        first_call: dict[str, Any] | None = None
+        for call in calls:
+            if not isinstance(call, dict) or not isinstance(call.get("id"), str) or not call["id"].strip():
+                return parsed
+            function = call.get("function")
+            if not isinstance(function, dict) or function.get("name") != "wiki_lookup":
+                return parsed
+            raw_arguments = function.get("arguments")
+            try:
+                arguments = json.loads(raw_arguments) if isinstance(raw_arguments, str) else raw_arguments
+            except (TypeError, ValueError):
+                return parsed
+            if not isinstance(arguments, dict) or set(arguments) != {"query", "context_scope", "needed_fact"}:
+                return parsed
+            if not all(isinstance(arguments[name], str) and arguments[name].strip() for name in arguments):
+                return parsed
+            requests.append(arguments)
+            if first_call is None:
+                first_call = call
+
+        if len({request["context_scope"] for request in requests}) != 1 or first_call is None:
+            return parsed
+        merged = {
+            "query": "\n\n".join(f"Запрос {index + 1}: {request['query']}" for index, request in enumerate(requests)),
+            "context_scope": requests[0]["context_scope"],
+            "needed_fact": "\n\n".join(f"Нужно установить {index + 1}: {request['needed_fact']}" for index, request in enumerate(requests)),
+        }
+        normalized = dict(parsed)
+        normalized[key] = [{
+            "id": first_call["id"],
+            "type": first_call.get("type", "function"),
+            "function": {"name": "wiki_lookup", "arguments": json.dumps(merged, ensure_ascii=False)},
+        }]
+        return normalized
+
     def _selector_decision(self, parsed: object) -> dict[str, Any]:
         parsed = self._normalize_selector_input(parsed)
+        normalized = self._coalesce_parallel_wiki_calls(parsed)
+        if normalized is not parsed and self._active_llm_trace:
+            self._active_llm_trace[-1]["provider_protocol_normalization"] = "coalesced_parallel_wiki_calls"
+        parsed = normalized
         if not isinstance(parsed, dict):
             return self._invalid_begin_turn("invalid_selector_output")
         raw_calls = parsed.get("_native_tool_calls")
