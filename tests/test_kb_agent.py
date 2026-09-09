@@ -465,9 +465,9 @@ def test_kb_agent_can_use_deterministic_navigation_with_followup_context(tmp_pat
     assert result["source_refs"] == [str(booking)]
     assert result["trace"]["navigation"]["reason"].startswith("deterministic_navigation:")
     extraction_prompt = json.loads(client.calls[-1]["user_prompt"])
-    assert any("Разрешай короткие и неполные продолжения" in rule for rule in extraction_prompt["rules"])
-    assert any("Разрешай короткие и неполные продолжения по явному контексту диалога клиента. Сохраняй выбранный клиентом предмет; не восстанавливай его из неподтверждённых предположений tool_request." in rule for rule in extraction_prompt["rules"])
-    assert any("tool_request.context_scope" in rule for rule in extraction_prompt["rules"])
+    scope_rule = next(rule for rule in extraction_prompt["rules"] if "tool_request.context_scope" in rule)
+    assert "последний явно выбранный клиентом предмет" in scope_rule
+    assert "Исключённые альтернативы" in scope_rule
     assert result["trace"]["selected_source_refs"] == [str(booking)]
     assert len(client.calls) == 1
 
