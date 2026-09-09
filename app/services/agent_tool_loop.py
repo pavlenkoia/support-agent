@@ -47,6 +47,11 @@ class UnifiedTurnService:
                 return failure("invalid_selector_output")
             trace.extend(item for item in current.get("llm_trace", []) if isinstance(item, dict))
             kind = current.get("kind")
+            if kind == "direct_response":
+                result = current.get("result")
+                if isinstance(result, dict) and result.get("route") == "social_reply":
+                    return {**packet(), "final_result": result}
+                return failure("invalid_direct_response")
             if kind == "finalization_requested":
                 if current.get("response_intent") not in {"answer", "social_reply", "clarification", "missing_grounding"}:
                     return failure("invalid_selector_output")
