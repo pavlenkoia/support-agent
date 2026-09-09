@@ -181,6 +181,13 @@ class DirectLLMService:
         direct = validate_final_response(parsed)
         if direct["route"] == "social_reply":
             return {"kind": "direct_response", "result": direct, "llm_trace": list(self._active_llm_trace)}
+        if direct["route"] in {"answer", "clarification_requested", "cannot_answer", "out_of_scope"}:
+            return {
+                "kind": "finalization_requested",
+                "response_intent": direct["route"],
+                "reason": "direct_non_social_response_requires_finalization",
+                "llm_trace": list(self._active_llm_trace),
+            }
         if set(parsed) != {"action", "response_intent", "reason"} or parsed.get("action") != "finalize" or not isinstance(parsed.get("response_intent"), str) or parsed["response_intent"] not in {"answer", "social_reply", "clarification", "missing_grounding"} or not isinstance(parsed.get("reason"), str):
             return self._invalid_begin_turn("invalid_selector_output")
         return {"kind": "finalization_requested", "response_intent": parsed["response_intent"], "reason": parsed["reason"], "llm_trace": list(self._active_llm_trace)}
