@@ -1,4 +1,6 @@
 from __future__ import annotations
+
+import json
 from tests.evidence_fixtures import migrate_fixture
 
 from app.services import direct_llm as direct_llm_module
@@ -164,6 +166,26 @@ def test_begin_turn_returns_a_tool_free_social_reply_directly() -> None:
     assert result["kind"] == "direct_response"
     assert result["result"]["route"] == "social_reply"
     assert result["result"]["response_text"] == "Привет! Чем могу помочь?"
+
+
+def test_selector_normalizes_standard_openai_tool_calls_envelope() -> None:
+    service = DirectLLMService(client=ActionClient("{}"), prompt_service=PromptService())
+    service._active_llm_trace = [{}]
+
+    result = service._selector_decision({
+        "tool_calls": [{
+            "id": "call-1",
+            "type": "function",
+            "function": {"name": "wiki_lookup", "arguments": json.dumps({
+                "query": "условия прыжка",
+                "context_scope": "прыжок с парашютом",
+                "needed_fact": "что нужно для прыжка",
+            })},
+        }],
+    })
+
+    assert result["kind"] == "wiki_lookup"
+    assert result["tool_call_id"] == "call-1"
 
 
 

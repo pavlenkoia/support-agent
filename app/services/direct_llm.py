@@ -168,8 +168,13 @@ class DirectLLMService:
     def _selector_decision(self, parsed: object) -> dict[str, Any]:
         if not isinstance(parsed, dict):
             return self._invalid_begin_turn("invalid_selector_output")
-        if "_native_tool_calls" in parsed:
-            calls = parsed["_native_tool_calls"]
+        raw_calls = parsed.get("_native_tool_calls")
+        if raw_calls is None:
+            raw_calls = parsed.get("tool_calls")
+        if raw_calls is None and isinstance(parsed.get("function_call"), dict):
+            raw_calls = [{"id": "legacy-function-call-1", "type": "function", "function": parsed["function_call"]}]
+        if raw_calls is not None:
+            calls = raw_calls
             if not isinstance(calls, list) or len(calls) != 1 or any(k in parsed for k in {"action", "route", "response_text", "confidence"}):
                 return self._invalid_begin_turn("native_tool_request_invalid")
             call = self._native_registered_tool_call(calls, registered_tools={"wiki_lookup", "calendar_lookup"})
