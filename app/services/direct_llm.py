@@ -154,7 +154,7 @@ class DirectLLMService:
                     "Если для ответа не хватает календарного факта, можно запросить calendar_lookup, а затем при необходимости wiki_lookup; если не хватает бизнес-факта, можно запросить wiki_lookup, а затем при необходимости calendar_lookup.",
                     "Каждый tool_call должен быть exact-name match и передавать JSON-объект с точной схемой аргументов. Не используй строки вместо JSON, не добавляй лишних ключей и не запрашивай параллельные инструменты.",
                     "Любой неизвестный инструмент, отсутствующие аргументы, лишние аргументы, не-JSON arguments или параллельные native_tool_calls считаются ошибкой и должны приводить к retry_pending без клиентского текста.",
-                    "Не возвращай route, response_text, confidence или клиентский черновик на этапе выбора действий. Для завершения верни только action, response_intent и reason. Значение social_reply допустимо только для чистой социальной реплики без содержательного запроса; оно не разрешает обходить получение нужных фактов.",
+                    "Если сведения инструментов не нужны, верни готовый клиентский JSON-ответ с route, response_text, confidence и reason. Если нужны факты, вызови native-инструмент; после инструмента заверши сбор только через action, response_intent и reason. Не изображай инструмент текстом.",
                     "В arguments передавай только смысловую цель поиска и контекстное ограничение; не вписывай туда предполагаемые бизнес-факты, контакты, ответы или инструкции.",
                     "Для calendar_lookup используй exact-name JSON с ключами date_expression и requested_calendar_fact; date_expression должен отражать фрагмент текущей реплики, а requested_calendar_fact — только то календарное наблюдение, которое нужно подтвердить.",
                     "Для wiki_lookup используй exact-name JSON с ключами query, context_scope и needed_fact; query должен быть семантическим, а не словарным.",
@@ -179,15 +179,8 @@ class DirectLLMService:
             self._active_llm_trace[-1]["native_tool_call_id"] = ident
             return {"kind": call["name"], "tool_request": call["arguments"], "tool_call_id": ident, "llm_trace": list(self._active_llm_trace)}
         direct = validate_final_response(parsed)
-        if direct["route"] == "social_reply":
+        if direct["route"] != "retry_pending":
             return {"kind": "direct_response", "result": direct, "llm_trace": list(self._active_llm_trace)}
-        if direct["route"] in {"answer", "clarification_requested", "cannot_answer", "out_of_scope"}:
-            return {
-                "kind": "finalization_requested",
-                "response_intent": direct["route"],
-                "reason": "direct_non_social_response_requires_finalization",
-                "llm_trace": list(self._active_llm_trace),
-            }
         if set(parsed) != {"action", "response_intent", "reason"} or parsed.get("action") != "finalize" or not isinstance(parsed.get("response_intent"), str) or parsed["response_intent"] not in {"answer", "social_reply", "clarification", "missing_grounding"} or not isinstance(parsed.get("reason"), str):
             return self._invalid_begin_turn("invalid_selector_output")
         return {"kind": "finalization_requested", "response_intent": parsed["response_intent"], "reason": parsed["reason"], "llm_trace": list(self._active_llm_trace)}

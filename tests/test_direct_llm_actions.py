@@ -176,7 +176,7 @@ def test_begin_turn_prompt_requests_action_finalize_without_client_text() -> Non
     prompt = str(client.calls[0]["user_prompt"])
     assert '"action": "finalize"' in prompt
     assert '"response_intent": "answer|social_reply|clarification|missing_grounding"' in prompt
-    assert "Не возвращай route, response_text, confidence или клиентский черновик на этапе выбора действий." in prompt
+    assert "Если сведения инструментов не нужны, верни готовый клиентский JSON-ответ" in prompt
     assert "Поля `action=finalize`" not in prompt
 
 def test_continue_after_tool_prompt_requests_action_finalize_without_client_text() -> None:
