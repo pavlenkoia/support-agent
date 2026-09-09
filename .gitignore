@@ -18,6 +18,8 @@ deploy/env/app.env
 logs/
 postgres_data/
 deploy/runtime-profile*/
+!deploy/profile/
+!deploy/profile/**
 
 # Tooling artifacts
 .codex/
@@ -29,6 +31,8 @@ viewer-web/dist/
 kb/
 !deploy/profile-source/kb/
 !deploy/profile-source/kb/**
+!deploy/profile/kb/
+!deploy/profile/kb/**
 
 # Editors / OS
 .DS_Store

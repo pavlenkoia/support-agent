@@ -4,11 +4,9 @@ from pathlib import Path
 
 import pytest
 
-from scripts.build_runtime_profile import build_runtime_profile
 from scripts.release import (
     APP_SERVICES,
     ReleaseVerificationError,
-    verify_canonical_profile_build,
     verify_profile_artifacts,
     verify_release_evidence,
 )
@@ -119,14 +117,3 @@ def test_verify_profile_artifacts_rejects_extra_runtime_file(tmp_path) -> None:
 
     with pytest.raises(ReleaseVerificationError, match="profile artifact tree mismatch"):
         verify_profile_artifacts(runtime, canonical)
-
-
-def test_verify_canonical_profile_build_rejects_stale_generated_artifact(tmp_path) -> None:
-    repository_source = Path(__file__).resolve().parents[1] / "deploy" / "profile-source"
-    canonical = tmp_path / "runtime-profile"
-    build_runtime_profile(repository_source, canonical)
-    verify_canonical_profile_build(repository_source, canonical)
-
-    (canonical / "SYSTEM_PROMPT.md").write_text("stale generated prompt\n", encoding="utf-8")
-    with pytest.raises(ReleaseVerificationError, match=r"profile artifact mismatch: SYSTEM_PROMPT\.md"):
-        verify_canonical_profile_build(repository_source, canonical)

@@ -1,0 +1,107 @@
+{
+  "bundle_version": 1,
+  "catalog_path": "index/catalog.json",
+  "page_count": 12,
+  "page_identities": [
+    "compiled/concepts/booking-and-schedule.md",
+    "compiled/concepts/booking-channels.md",
+    "compiled/concepts/certificates.md",
+    "compiled/concepts/equipment-and-rental.md",
+    "compiled/concepts/flight-services.md",
+    "compiled/concepts/ordinary-jump-schedule.md",
+    "compiled/concepts/payment-methods.md",
+    "compiled/concepts/pricing-and-addons.md",
+    "compiled/concepts/restrictions-and-safety.md",
+    "compiled/concepts/skydiving-services.md",
+    "compiled/entities/kalachevo-airfield.md",
+    "compiled/entities/office-chelyabinsk.md"
+  ],
+  "raw_file_count": 17,
+  "raw_resources": [
+    {
+      "content_sha256": "fdee8a931aedf4473a8dc12f219b7ad0e9133295e499cc35b42edc1059bf6c8e",
+      "declared_source_sha256": "",
+      "source_ref": "raw/documents/age-restrictions-governor-2026-09-07.md"
+    },
+    {
+      "content_sha256": "edf522de0f991a779f3e1d6f17f98c1284ed0405b573f334efe1153c4338f4c0",
+      "declared_source_sha256": "",
+      "source_ref": "raw/documents/booking-email-chat-governor-2026-09-09.md"
+    },
+    {
+      "content_sha256": "f0b4f8e3804ad1d5b7d835a49bd41b0324ebfbc79675c99461a8af188c807e97",
+      "declared_source_sha256": "",
+      "source_ref": "raw/documents/case-905-payment-cash.md"
+    },
+    {
+      "content_sha256": "2c48a4c8a154918cc7dd449a4e73b7ca1032866a6dcf94a94f5c5a63a9f3380f",
+      "declared_source_sha256": "24d533950bd393225aacf49c4ef7870834b0d49313d560e6af5bb63a395549f1",
+      "source_ref": "raw/documents/certificates-source.md"
+    },
+    {
+      "content_sha256": "ccaf3db87b9be910884820d6d7c202b231920113dc02fe8a078344e6257c9693",
+      "declared_source_sha256": "a175ee45d97ed22321102a39cb45238b939a089b1bda2a99321813cd727e7fa8",
+      "source_ref": "raw/documents/faq-main-source.md"
+    },
+    {
+      "content_sha256": "7adba46466fed9605f8020a816def3b796446b8d455a757d6711cc3dbdefe0e0",
+      "declared_source_sha256": "0dd7ba11932ddc8832c7129aef13284acf20d298e184bd2c9129ced0acb1d85b",
+      "source_ref": "raw/documents/faq-short-source.md"
+    },
+    {
+      "content_sha256": "fc0b171a3eeacb262374e826dfd3ca080eda93dba8394d58442ab48f934447c0",
+      "declared_source_sha256": "",
+      "source_ref": "raw/documents/flight-announcements-governor-2026-09-09.md"
+    },
+    {
+      "content_sha256": "f1878994cbfbdb2e28087de961e72996e9ec4c92b6784ce2a4af5f61ea6accf2",
+      "declared_source_sha256": "e9a525e810bac5720c3b504b5d9c3adadb20723211756776aed07a6598da882e",
+      "source_ref": "raw/documents/general-info-source.md"
+    },
+    {
+      "content_sha256": "7fc53fc324c1386bdaffba08052ed79b639a6a502b7d0c4f5ad90c99dd619cc7",
+      "declared_source_sha256": "",
+      "source_ref": "raw/documents/legacy-approved-policy-source.md"
+    },
+    {
+      "content_sha256": "d9327e85fcabb53e566722b5a7503aca1d733b3627859e4089508993c5a3da1e",
+      "declared_source_sha256": "",
+      "source_ref": "raw/documents/operator-case-vk-1104184290.md"
+    },
+    {
+      "content_sha256": "883425fe0c8644c997fe14ad61db0e675586ad376bd91108d483c5a013704fe4",
+      "declared_source_sha256": "",
+      "source_ref": "raw/documents/operator-case-vk-291545750-chat.md"
+    },
+    {
+      "content_sha256": "1190e40392991b6d449196c4699cc4d932b6639d301f68ff9467929c564257f1",
+      "declared_source_sha256": "",
+      "source_ref": "raw/documents/operator-case-vk-530781299.md"
+    },
+    {
+      "content_sha256": "a74a08733f84289da2a90a16600cba12d1bf67fbc915e55f1619b2a2dc340a46",
+      "declared_source_sha256": "",
+      "source_ref": "raw/documents/operator-case-vk-718942316.md"
+    },
+    {
+      "content_sha256": "869eb07e6431c793f6e73e03f88046c22754a0267f00c395884b1cc02a3078f3",
+      "declared_source_sha256": "",
+      "source_ref": "raw/documents/operator-case-vk-841-certificate-printing.md"
+    },
+    {
+      "content_sha256": "030cc50786a97015134725e315b5a5fdd532fa387d7ad3b540b255151a416b2e",
+      "declared_source_sha256": "",
+      "source_ref": "raw/documents/operator-case-vk-994-flight-schedule.md"
+    },
+    {
+      "content_sha256": "13659f1d8f7261e6269702ee6684001a1567685d317b0b762772d4e107ce66c2",
+      "declared_source_sha256": "",
+      "source_ref": "raw/documents/operator-case-vk-999-prices-and-tandem-flow.md"
+    },
+    {
+      "content_sha256": "28b273370924098728b895773c625c324a191276b8d141e385331c4b8dc3a741",
+      "declared_source_sha256": "",
+      "source_ref": "raw/documents/payment-methods-governor-2026-09-03.md"
+    }
+  ]
+}

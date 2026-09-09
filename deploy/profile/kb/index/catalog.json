@@ -1,0 +1,296 @@
+{
+  "catalog_version": 1,
+  "pages": [
+    {
+      "description": "Для запроса записи, где дата названа только числом, условия записи указаны в закреплённом посте или анонсе на эту дату; день недели для этого не требуется.",
+      "linked_source_refs": [],
+      "provenance": [
+        "raw/documents/operator-case-vk-530781299.md",
+        "raw/documents/operator-case-vk-291545750-chat.md"
+      ],
+      "source_ref": "compiled/concepts/booking-and-schedule.md",
+      "tags": [
+        "booking",
+        "schedule",
+        "chat",
+        "vk"
+      ],
+      "title": "Booking Conditions for a Date",
+      "type": "concept",
+      "updated": "2026-09-01"
+    },
+    {
+      "description": "- Самостоятельный прыжок: телефон `+7 (351) 214-30-30`, добавочный 1. Запись обычно открывается в пятницу после 12:00 на субботу и в субботу после 12:00 на воскресенье. - Тандем-прыжок: форма `https://vk.cc/cMwabq` или телефон `+7 (351) 214-30-30`, добавочный 2. - После заполнения формы на тандем клиента добавляют в чат Telegram или MAX и сообщают время.",
+      "linked_source_refs": [
+        "compiled/concepts/booking-and-schedule.md",
+        "compiled/concepts/ordinary-jump-schedule.md"
+      ],
+      "provenance": [
+        "raw/documents/faq-main-source.md",
+        "raw/documents/faq-short-source.md",
+        "raw/documents/general-info-source.md",
+        "raw/documents/legacy-approved-policy-source.md",
+        "raw/documents/operator-case-vk-291545750-chat.md",
+        "raw/documents/booking-email-chat-governor-2026-09-09.md",
+        "raw/documents/operator-case-vk-994-flight-schedule.md",
+        "raw/documents/flight-announcements-governor-2026-09-09.md"
+      ],
+      "source_ref": "compiled/concepts/booking-channels.md",
+      "tags": [
+        "booking",
+        "tandem",
+        "solo-jump",
+        "flights",
+        "vk",
+        "chat"
+      ],
+      "title": "Booking Channels",
+      "type": "concept",
+      "updated": "2026-09-09"
+    },
+    {
+      "description": "Подарочный сертификат можно купить онлайн или в офисе. Сертификат не именной и действует 6 месяцев с даты покупки.",
+      "linked_source_refs": [
+        "compiled/concepts/booking-and-schedule.md",
+        "compiled/entities/office-chelyabinsk.md",
+        "compiled/concepts/skydiving-services.md",
+        "compiled/concepts/flight-services.md"
+      ],
+      "provenance": [
+        "raw/documents/certificates-source.md",
+        "raw/documents/faq-main-source.md",
+        "raw/documents/faq-short-source.md",
+        "raw/documents/legacy-approved-policy-source.md",
+        "raw/documents/operator-case-vk-841-certificate-printing.md",
+        "raw/documents/payment-methods-governor-2026-09-03.md",
+        "raw/documents/operator-case-vk-994-flight-schedule.md"
+      ],
+      "source_ref": "compiled/concepts/certificates.md",
+      "tags": [
+        "services",
+        "certificates",
+        "booking",
+        "office"
+      ],
+      "title": "Certificates",
+      "type": "concept",
+      "updated": "2026-09-09"
+    },
+    {
+      "description": "Для прыжка требуется закрытая одежда и обувь с фиксацией голеностопа. Берцы доступны в прокате на месте.",
+      "linked_source_refs": [
+        "compiled/concepts/pricing-and-addons.md",
+        "compiled/concepts/skydiving-services.md",
+        "compiled/concepts/restrictions-and-safety.md"
+      ],
+      "provenance": [
+        "raw/documents/faq-main-source.md",
+        "raw/documents/faq-short-source.md"
+      ],
+      "source_ref": "compiled/concepts/equipment-and-rental.md",
+      "tags": [
+        "equipment",
+        "rental",
+        "solo-jump"
+      ],
+      "title": "Equipment and Rental",
+      "type": "concept",
+      "updated": "2026-08-17"
+    },
+    {
+      "description": "Доступны прогулочные полёты на АН-2 и полёты с лётчиком-инструктором на Як-52.",
+      "linked_source_refs": [
+        "compiled/concepts/booking-and-schedule.md",
+        "compiled/concepts/pricing-and-addons.md",
+        "compiled/concepts/restrictions-and-safety.md"
+      ],
+      "provenance": [
+        "raw/documents/general-info-source.md",
+        "raw/documents/faq-main-source.md",
+        "raw/documents/faq-short-source.md",
+        "raw/documents/legacy-approved-policy-source.md",
+        "raw/documents/operator-case-vk-994-flight-schedule.md",
+        "raw/documents/flight-announcements-governor-2026-09-09.md"
+      ],
+      "source_ref": "compiled/concepts/flight-services.md",
+      "tags": [
+        "services",
+        "flights",
+        "restrictions"
+      ],
+      "title": "Flight Services",
+      "type": "concept",
+      "updated": "2026-09-09"
+    },
+    {
+      "description": "Обычные прыжки обычно проходят по субботам и воскресеньям и зависят от погоды и анонсов.",
+      "linked_source_refs": [
+        "compiled/concepts/booking-and-schedule.md",
+        "compiled/concepts/flight-services.md"
+      ],
+      "provenance": [
+        "raw/documents/faq-main-source.md",
+        "raw/documents/general-info-source.md",
+        "raw/documents/operator-case-vk-994-flight-schedule.md"
+      ],
+      "source_ref": "compiled/concepts/ordinary-jump-schedule.md",
+      "tags": [
+        "schedule",
+        "solo-jump",
+        "weather"
+      ],
+      "title": "Ordinary Jump Schedule",
+      "type": "concept",
+      "updated": "2026-09-09"
+    },
+    {
+      "description": "Оплата услуг возможна в офисе, на аэродроме и на сайте `https://dzkalachevo.ru`. Для фото- и видеосъёмки действует отдельное правило: эта услуга оплачивается только наличными в кассе аэродрома.",
+      "linked_source_refs": [
+        "compiled/concepts/certificates.md",
+        "compiled/concepts/pricing-and-addons.md",
+        "compiled/entities/office-chelyabinsk.md"
+      ],
+      "provenance": [
+        "raw/documents/faq-short-source.md",
+        "raw/documents/faq-main-source.md",
+        "raw/documents/payment-methods-governor-2026-09-03.md"
+      ],
+      "source_ref": "compiled/concepts/payment-methods.md",
+      "tags": [
+        "payment",
+        "certificates",
+        "office"
+      ],
+      "title": "Payment Methods",
+      "type": "concept",
+      "updated": "2026-09-03"
+    },
+    {
+      "description": "Клиентам на прямые вопросы о стоимости отвечают только ссылкой на актуальные цены: `https://vk.cc/cYzS5j`. В ответах клиентам не нужно упоминать Wiki или внутреннюю базу знаний.",
+      "linked_source_refs": [
+        "compiled/concepts/certificates.md",
+        "compiled/concepts/skydiving-services.md",
+        "compiled/concepts/flight-services.md",
+        "compiled/concepts/equipment-and-rental.md"
+      ],
+      "provenance": [
+        "raw/documents/general-info-source.md",
+        "raw/documents/faq-main-source.md",
+        "raw/documents/faq-short-source.md",
+        "raw/documents/legacy-approved-policy-source.md",
+        "raw/documents/payment-methods-governor-2026-09-03.md",
+        "raw/documents/operator-case-vk-999-prices-and-tandem-flow.md"
+      ],
+      "source_ref": "compiled/concepts/pricing-and-addons.md",
+      "tags": [
+        "pricing",
+        "add-ons",
+        "certificates",
+        "flights",
+        "tandem"
+      ],
+      "title": "Pricing and Add-ons",
+      "type": "concept",
+      "updated": "2026-09-09"
+    },
+    {
+      "description": "Для прыжков и полётов действуют возрастные, весовые, медицинские и погодные ограничения.",
+      "linked_source_refs": [
+        "compiled/concepts/skydiving-services.md",
+        "compiled/concepts/flight-services.md",
+        "compiled/entities/office-chelyabinsk.md",
+        "compiled/concepts/equipment-and-rental.md"
+      ],
+      "provenance": [
+        "raw/documents/general-info-source.md",
+        "raw/documents/faq-main-source.md",
+        "raw/documents/faq-short-source.md",
+        "raw/documents/age-restrictions-governor-2026-09-07.md"
+      ],
+      "source_ref": "compiled/concepts/restrictions-and-safety.md",
+      "tags": [
+        "restrictions",
+        "safety",
+        "tandem",
+        "solo-jump",
+        "flights"
+      ],
+      "title": "Restrictions and Safety",
+      "type": "concept",
+      "updated": "2026-09-07"
+    },
+    {
+      "description": "Первый прыжок можно выполнить самостоятельно или в тандеме с инструктором.",
+      "linked_source_refs": [
+        "compiled/concepts/booking-and-schedule.md",
+        "compiled/concepts/restrictions-and-safety.md",
+        "compiled/concepts/pricing-and-addons.md",
+        "compiled/concepts/equipment-and-rental.md"
+      ],
+      "provenance": [
+        "raw/documents/general-info-source.md",
+        "raw/documents/faq-main-source.md",
+        "raw/documents/faq-short-source.md",
+        "raw/documents/legacy-approved-policy-source.md",
+        "raw/documents/operator-case-vk-999-prices-and-tandem-flow.md"
+      ],
+      "source_ref": "compiled/concepts/skydiving-services.md",
+      "tags": [
+        "services",
+        "tandem",
+        "solo-jump",
+        "safety",
+        "restrictions"
+      ],
+      "title": "Skydiving Services",
+      "type": "concept",
+      "updated": "2026-09-09"
+    },
+    {
+      "description": "Прыжки, полёты и использование подарочных сертификатов доступны только на аэродроме Калачево в Челябинске; в других городах эти услуги не оказываются.",
+      "linked_source_refs": [
+        "compiled/concepts/booking-and-schedule.md",
+        "compiled/concepts/certificates.md",
+        "compiled/concepts/skydiving-services.md"
+      ],
+      "provenance": [
+        "raw/documents/faq-main-source.md",
+        "raw/documents/general-info-source.md",
+        "raw/documents/legacy-approved-policy-source.md"
+      ],
+      "source_ref": "compiled/entities/kalachevo-airfield.md",
+      "tags": [
+        "airfield",
+        "logistics",
+        "flights",
+        "solo-jump",
+        "tandem"
+      ],
+      "title": "Kalachevo Airfield",
+      "type": "entity",
+      "updated": "2026-08-17"
+    },
+    {
+      "description": "Офис используется для покупки бумажных сертификатов, очной оплаты и решения нестандартных вопросов.",
+      "linked_source_refs": [
+        "compiled/concepts/certificates.md",
+        "compiled/concepts/booking-and-schedule.md",
+        "compiled/concepts/restrictions-and-safety.md"
+      ],
+      "provenance": [
+        "raw/documents/certificates-source.md",
+        "raw/documents/faq-main-source.md",
+        "raw/documents/legacy-approved-policy-source.md"
+      ],
+      "source_ref": "compiled/entities/office-chelyabinsk.md",
+      "tags": [
+        "office",
+        "booking",
+        "certificates"
+      ],
+      "title": "Office in Chelyabinsk",
+      "type": "entity",
+      "updated": "2026-08-17"
+    }
+  ]
+}
