@@ -263,7 +263,16 @@ class KBAgentService:
                     return self._retry_pending_catalog_read(trace, navigation, "navigation_unavailable")
                 selected_refs = self._fallback_select_catalog_refs(text, kb_context, limit=MAX_CATALOG_SELECTION)
             loaded_pages = self._load_catalog_pages(kb_context, selected_refs)
-            if settings.kb_agent_skip_coverage_review and not require_coverage_review:
+            if settings.kb_agent_merge_coverage_extraction:
+                # The extractor already returns typed per-question coverage bound to
+                # cited facts.  Avoid a second LLM pass that merely pre-checks it.
+                review = {
+                    "coverage_status": "merged_into_extraction",
+                    "missing_facts": [],
+                    "additional_source_refs": [],
+                    "reason": "merged_into_grounded_extraction",
+                }
+            elif settings.kb_agent_skip_coverage_review and not require_coverage_review:
                 review = {
                     "coverage_status": "enough",
                     "missing_facts": [],

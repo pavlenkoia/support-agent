@@ -47,6 +47,7 @@ class Settings(BaseSettings):
     kb_agent_retry_backoff_seconds: float | None = None
     kb_agent_retry_deadline_seconds: float | None = None
     kb_agent_skip_coverage_review: bool = False
+    kb_agent_merge_coverage_extraction: bool = False
     kb_agent_deterministic_navigation: bool = False
     kb_agent_minimal_extraction_schema: bool = False
     kb_agent_deferred_retry_delay_seconds: int = 5

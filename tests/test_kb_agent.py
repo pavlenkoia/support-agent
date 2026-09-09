@@ -291,6 +291,39 @@ def test_kb_agent_recovers_json_object_from_markdown_fence(tmp_path: Path) -> No
     assert result["trace"]["navigation"]["reason"] == "fenced json"
 
 
+def test_kb_agent_merges_coverage_into_extraction_for_agent_tool_reads(tmp_path: Path, monkeypatch) -> None:
+    booking = tmp_path / "booking-and-schedule.md"
+    booking.write_text("# Booking and Schedule\n\nПрыжки обычно по выходным.\n", encoding="utf-8")
+    client = SequentialClient([
+        {
+            "user_intent": "расписание",
+            "information_needs": ["когда проходят прыжки"],
+            "selected_source_refs": [str(booking)],
+            "reason": "picked booking page",
+        },
+        migrate_fixture({
+            "grounding_status": "ready",
+            "answer_basis": "Прыжки обычно по выходным.",
+            "grounded_facts": ["Прыжки обычно по выходным."],
+            "missing_information": [],
+            "cited_source_refs": [str(booking)],
+            "reason": "selected_pages_grounded",
+        }),
+    ])
+    service = KBAgentService(client=client)
+    kb_hits = [
+        {"source_ref": str(tmp_path / "index.md"), "source_type": "wiki_index", "retrieval_mode": "llm_wiki_catalog", "text": "# Wiki Index"},
+        {"source_ref": str(booking), "source_type": "wiki_page_card", "page_title": "Booking and Schedule", "linked_pages": [], "page_summary": "Расписание прыжков.", "page_preview": "Прыжки обычно по выходным.", "retrieval_mode": "llm_wiki_catalog", "text": "# Booking and Schedule"},
+    ]
+    monkeypatch.setattr(settings, "kb_agent_merge_coverage_extraction", True, raising=False)
+
+    result = service.read("Когда обычно проходят прыжки?", kb_hits, require_coverage_review=True)
+
+    assert result["grounding_status"] == "ready"
+    assert result["trace"]["review"]["reason"] == "merged_into_grounded_extraction"
+    assert len(client.calls) == 2
+
+
 def test_kb_agent_can_skip_coverage_review_via_settings(tmp_path: Path) -> None:
     booking = tmp_path / "booking-and-schedule.md"
     booking.write_text("# Booking and Schedule\n\nПрыжки обычно по выходным.\n", encoding="utf-8")
