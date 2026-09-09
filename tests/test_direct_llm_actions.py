@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+
+import pytest
 from tests.evidence_fixtures import migrate_fixture
 
 from app.services import direct_llm as direct_llm_module
@@ -188,27 +190,25 @@ def test_selector_normalizes_standard_openai_tool_calls_envelope() -> None:
     assert result["tool_call_id"] == "call-1"
 
 
-def test_selector_coalesces_provider_parallel_wiki_calls_with_same_scope() -> None:
+@pytest.mark.parametrize("count", [2, 3, 4])
+def test_selector_coalesces_any_same_scope_parallel_wiki_calls(count: int) -> None:
     service = DirectLLMService(client=ActionClient("{}"), prompt_service=PromptService())
     service._active_llm_trace = [{}]
+    calls = []
+    for index in range(count):
+        calls.append({"id": f"wiki-{index}", "type": "function", "function": {"name": "wiki_lookup", "arguments": json.dumps({
+            "query": f"часть запроса {index + 1}",
+            "context_scope": "прыжок с инструктором",
+            "needed_fact": f"сведение {index + 1}",
+        })}})
 
-    result = service._selector_decision({"_native_tool_calls": [
-        {"id": "price", "type": "function", "function": {"name": "wiki_lookup", "arguments": json.dumps({
-            "query": "стоимость прыжка с инструктором и видеосъёмкой",
-            "context_scope": "прыжок с инструктором",
-            "needed_fact": "цена и доплата за видео",
-        })}},
-        {"id": "process", "type": "function", "function": {"name": "wiki_lookup", "arguments": json.dumps({
-            "query": "как проходит прыжок с инструктором",
-            "context_scope": "прыжок с инструктором",
-            "needed_fact": "этапы прыжка",
-        })}},
-    ]})
+    result = service._selector_decision({"_native_tool_calls": calls})
 
     assert result["kind"] == "wiki_lookup"
-    assert result["tool_call_id"] == "price"
-    assert "стоимость прыжка с инструктором" in result["tool_request"]["query"]
-    assert "как проходит прыжок с инструктором" in result["tool_request"]["query"]
+    assert result["tool_call_id"] == "wiki-0"
+    for index in range(count):
+        assert f"часть запроса {index + 1}" in result["tool_request"]["query"]
+        assert f"сведение {index + 1}" in result["tool_request"]["needed_fact"]
     assert service._active_llm_trace[-1]["provider_protocol_normalization"] == "coalesced_parallel_wiki_calls"
 
 
