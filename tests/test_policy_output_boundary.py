@@ -18,7 +18,13 @@ def test_output_boundary_adds_standard_greeting_only_to_first_nonempty_reply() -
     assert policy.finalize_simple_customer_text(raw, first_reply_in_dialogue=False) == raw
 
 
-def test_output_boundary_does_not_duplicate_model_greeting() -> None:
+def test_output_boundary_replaces_model_greeting_on_first_reply() -> None:
     policy = PolicyService()
 
-    assert policy.finalize_simple_customer_text("Здравствуйте! Ответ.", first_reply_in_dialogue=True) == "Здравствуйте! Ответ."
+    assert policy.finalize_simple_customer_text("Привет! Ответ.", first_reply_in_dialogue=True) == "Здравствуйте! Ответ."
+
+
+def test_output_boundary_preserves_model_greeting_on_follow_up() -> None:
+    policy = PolicyService()
+
+    assert policy.finalize_simple_customer_text("Привет! Ответ.", first_reply_in_dialogue=False) == "Привет! Ответ."

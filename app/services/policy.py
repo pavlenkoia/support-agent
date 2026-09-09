@@ -16,6 +16,11 @@ class PolicyService:
         r"доброго\s+времени\s+суток|рад(?:а)?\s+(?:вас\s+)?приветствовать)\b",
         flags=re.IGNORECASE,
     )
+    _LEADING_GREETING_PATTERN = re.compile(
+        r"^\s*(?:здравствуй(?:те)?|добрый\s+(?:день|вечер)|доброе\s+утро|привет(?:ствую)?|"
+        r"доброго\s+времени\s+суток|рад(?:а)?\s+(?:вас\s+)?приветствовать)\b[!,.\s]*",
+        flags=re.IGNORECASE,
+    )
 
     def __init__(self, profile_root: str | None = None, prompt_service: object | None = None) -> None:
         _ = prompt_service
@@ -44,8 +49,9 @@ class PolicyService:
         cleaned = clean_customer_text(text)
         if not cleaned:
             return ""
-        if first_reply_in_dialogue and not self._GREETING_PATTERN.search(cleaned):
-            cleaned = f"Здравствуйте! {cleaned}"
+        if first_reply_in_dialogue:
+            cleaned = self._LEADING_GREETING_PATTERN.sub("", cleaned).strip()
+            cleaned = "Здравствуйте!" if not cleaned else f"Здравствуйте! {cleaned}"
         return cleaned
 
     def finalize_simple_customer_text(self, text: str, *, first_reply_in_dialogue: bool) -> str:
