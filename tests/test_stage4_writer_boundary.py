@@ -41,6 +41,47 @@ def test_writer_receives_typed_full_evidence_without_losing_conditions():
     assert actual == packet
 
 
+def test_partial_evidence_with_covered_facts_reaches_writer_without_gap_diagnostics():
+    client = Client()
+    packet = evidence()
+
+    result = DirectLLMService(client=client).respond(
+        'Расскажите об услуге.',
+        {'grounding_status': 'ready', 'answer_evidence': packet, 'source_refs': ['compiled/page.md']},
+    )
+
+    assert result['route'] == 'answer'
+    assert len(client.calls) == 1
+    payload = client.calls[0]
+    assert 'answer' in payload['allowed_routes']
+    assert payload['grounding_evidence'] == {
+        'schema_version': 'answer-evidence/v1',
+        'user_question': 'Первое и второе?',
+        'context_scope': 'Выбранный предмет',
+        'acquisition_status': 'ready',
+        'facts': [{
+            'id': 'f1',
+            'text': 'Первое возможно при условии.',
+            'source_refs': ['compiled/page.md'],
+            'conditions': ['при условии'],
+            'modality': 'возможно',
+        }],
+        'coverage': {
+            'status': 'full',
+            'answered_parts': [{'question_part': 'Первое?', 'fact_ids': ['f1']}],
+            'missing_parts': [],
+            'conflicts': [],
+            'unresolved_constraints': [],
+        },
+        'answer_basis': '',
+        'calendar_facts': [],
+        'policy_evidence': [],
+    }
+    serialized = json.dumps(payload, ensure_ascii=False)
+    assert 'Второе?' not in serialized
+    assert 'Кандидатная сводка' not in serialized
+
+
 def test_malformed_ready_packet_does_not_invoke_writer():
     client = Client()
     result = DirectLLMService(client=client).respond('Вопрос?', {'grounding_status': 'ready', 'answer_evidence': {'facts': [{}]}})

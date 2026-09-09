@@ -10,7 +10,9 @@ def test_cannot_answer_writer_receives_policy_without_incident_details():
     packet = evidence()
     packet['user_question'] = 'PRIVATE_QUESTION_MARKER'
     packet['context_scope'] = 'PRIVATE_SCOPE_MARKER'
-    packet['coverage']['status'] = 'partial'
+    packet['coverage']['status'] = 'none'
+    packet['facts'] = []
+    packet['coverage']['answered_parts'] = []
     packet['coverage']['missing_parts'] = ['PRIVATE_MISSING_MARKER']
     original = deepcopy(packet)
     writer = Writer('cannot_answer')

@@ -28,12 +28,14 @@ class Writer:
         return {}
 
 
-@pytest.mark.parametrize('status', ['partial', 'none', 'conflicting'])
+@pytest.mark.parametrize('status', ['none', 'conflicting'])
 @pytest.mark.parametrize('calendar', [False, True])
 @pytest.mark.parametrize('route', ['cannot_answer', 'answer'])
 def test_non_answerable_writer_restriction(status, calendar, route):
     packet = evidence()
     packet['coverage']['status'] = status
+    packet['facts'] = []
+    packet['coverage']['answered_parts'] = []
     original = deepcopy(packet)
     writer = Writer(route)
     result = DirectLLMService(client=writer).respond('Первое и второе?', {'grounding_status': 'ready', 'source_refs': ['compiled/page.md'], 'answer_evidence': packet}, tool_observations=[POLICY] + ([CALENDAR] if calendar else []))
@@ -58,7 +60,9 @@ def test_non_answerable_writer_restriction(status, calendar, route):
 def test_writer_v2_primary_task_preserves_uncertainty_and_context():
     writer = Writer('cannot_answer')
     packet = evidence()
-    packet['coverage']['status'] = 'partial'
+    packet['coverage']['status'] = 'none'
+    packet['facts'] = []
+    packet['coverage']['answered_parts'] = []
     DirectLLMService(client=writer).respond(
         'Вопрос', {'grounding_status': 'ready', 'source_refs': ['compiled/page.md'], 'answer_evidence': packet},
         tool_observations=[POLICY],
@@ -136,13 +140,10 @@ def test_actual_channel_boundary_no_synthetic_refusal(tmp_path, monkeypatch, cha
                 'tool_observations': [{'tool': 'wiki_lookup', 'status': 'ready', 'answer_evidence': packet}],
                 'trace': {'actions': ['wiki_lookup']}, 'llm_trace': []}
     monkeypatch.setattr(ReadyWikiTurn, 'run', turn)
-    result, sent, persisted, sends, statuses = run_delivery(tmp_path, channel, reply(route=route, response_text='Точный модельный текст.'), wiki=True)
+    result, sent, persisted, _sends, _statuses = run_delivery(tmp_path, channel, reply(route=route, response_text='Точный модельный текст.'), wiki=True)
     if route == 'answer':
-        assert result['route']['route'] == 'retry_pending'
-        assert result['route']['reason'] == 'final_response_route_not_allowed'
-        assert result['outcome']['outcome_payload']['response_text'] == ''
-        assert sent == persisted == sends == []
-        assert statuses == ['retry_pending']
+        assert result['route']['route'] == 'answer'
+        assert sent == persisted == ['Здравствуйте! Точный модельный текст.']
     else:
         assert result['route']['route'] == 'cannot_answer'
         assert sent == persisted == ['Здравствуйте! Точный модельный текст.']

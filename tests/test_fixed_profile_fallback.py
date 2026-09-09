@@ -12,10 +12,12 @@ OFFICE_POLICY = {
 }
 
 
-@pytest.mark.parametrize('status', ['partial', 'none', 'conflicting'])
+@pytest.mark.parametrize('status', ['none', 'conflicting'])
 def test_fixed_office_fallback_does_not_call_model(status):
     packet = evidence()
     packet['coverage']['status'] = status
+    packet['facts'] = []
+    packet['coverage']['answered_parts'] = []
     writer = Writer('answer')
     result = DirectLLMService(client=writer).respond(
         'Вопрос без прямого ответа',

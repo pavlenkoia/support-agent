@@ -149,6 +149,51 @@ def allowed_answer_routes(
     return ["cannot_answer"]
 
 
+def project_partial_answer_evidence(packet: dict[str, Any]) -> dict[str, Any] | None:
+    """Project a usable partial Wiki result to customer-safe writer evidence.
+
+    Missing facts and coverage diagnostics stay in internal audit.  The writer
+    receives only facts explicitly linked to answered parts, so it cannot
+    explain what the Wiki did not find or invent the omitted part.
+    """
+    validated = validate_answer_evidence(packet)
+    coverage = validated["coverage"]
+    if (
+        validated["acquisition_status"] != "ready"
+        or coverage["status"] != "partial"
+        or coverage["conflicts"]
+        or coverage["unresolved_constraints"]
+    ):
+        return None
+
+    covered_fact_ids = {
+        fact_id
+        for part in coverage["answered_parts"]
+        for fact_id in part["fact_ids"]
+    }
+    if not covered_fact_ids:
+        return None
+    facts = [fact for fact in validated["facts"] if fact["id"] in covered_fact_ids]
+    answered_parts = [part for part in coverage["answered_parts"] if part["fact_ids"]]
+    if not facts or not answered_parts:
+        return None
+
+    return validate_answer_evidence({
+        **validated,
+        "facts": facts,
+        "coverage": {
+            "status": "full",
+            "answered_parts": answered_parts,
+            "missing_parts": [],
+            "conflicts": [],
+            "unresolved_constraints": [],
+        },
+        # A candidate summary may include a missing detail.  Exact covered
+        # facts are the only business evidence that may reach the writer.
+        "answer_basis": "",
+    })
+
+
 def _normalize_facts(value: Any) -> list[dict[str, Any]]:
     if not isinstance(value, list):
         raise EvidenceValidationError("evidence_unavailable")

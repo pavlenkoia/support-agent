@@ -441,7 +441,12 @@ class DirectLLMService:
             knowledge_mode=knowledge_mode,
         )
         kb_packet = self._coerce_kb_result(kb_result)
-        from app.services.answer_evidence import EvidenceValidationError, validate_answer_evidence, allowed_answer_routes
+        from app.services.answer_evidence import (
+            EvidenceValidationError,
+            allowed_answer_routes,
+            project_partial_answer_evidence,
+            validate_answer_evidence,
+        )
 
         try:
             grounding_evidence = self._build_finalization_evidence(kb_packet, text=text)
@@ -450,6 +455,10 @@ class DirectLLMService:
             grounding_evidence["policy_evidence"] = [item for item in tool_facts if item["kind"] == "profile_no_answer_option"]
             grounding_evidence = validate_answer_evidence(grounding_evidence)
             wiki_executed = any(item.get("tool") == "wiki_lookup" for item in tool_observations) or kb_packet.get("answer_evidence") is not None
+            if wiki_executed:
+                projected_partial = project_partial_answer_evidence(grounding_evidence)
+                if projected_partial is not None:
+                    grounding_evidence = projected_partial
             allowed_routes = allowed_answer_routes(
                 grounding_evidence, wiki_executed=wiki_executed,
                 calendar_executed=bool(grounding_evidence["calendar_facts"]), response_intent=response_intent,
