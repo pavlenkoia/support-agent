@@ -189,7 +189,11 @@ def verify_http_health() -> dict[str, object]:
 def verify_worker_liveness(env: Mapping[str, str]) -> dict[str, bool]:
     required = {"worker": "telegram polling tick", "vk-worker": "vk polling tick"}
     result: dict[str, bool] = {}
-    deadline = time.monotonic() + 70
+    # Telegram's initial long-poll can exceed the former 70-second gate even
+    # though the worker is healthy.  Keep release verification longer than the
+    # configured poll timeout plus startup, instead of recording a false failed
+    # release after the app plane was already recreated.
+    deadline = time.monotonic() + 150
     while time.monotonic() < deadline:
         result = {
             service: marker in compose(("logs", "--since", "2m", service), env=env, capture=True)

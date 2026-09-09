@@ -10,13 +10,13 @@ python3 scripts/release.py
 
 `deploy/profile/` is the sole reviewed runtime profile: it contains prompts, raw provenance, compiled Wiki pages, catalog and manifest. Containers mount this directory read-only at `/data/profile`; no external editable profile copy participates in releases.
 
-The command verifies the mounted profile against this same tracked directory, obtains the full Git SHA, builds release-tagged images for `app`, `worker`, `vk-worker`, `viewer-web`, and `viewer-push-worker`, and force-recreates exactly those services. PostgreSQL is not recreated.
+The command verifies the mounted profile against this same tracked directory, obtains the full Git SHA, builds release-tagged images for `app`, `worker`, `vk-worker`, `viewer-web`, and `viewer-push-worker`, and force-recreates exactly those services. PostgreSQL is not recreated. The polling-liveness gate allows up to 150 seconds for an initial Telegram Long Poll plus startup.
 
 A release is successful only when the command exits with `RELEASE SUCCESS` and writes a JSON receipt beneath `${SUPPORT_AGENT_RUNTIME_ROOT_HOST:-/home/tian/support-agent-runtime}/releases/`.
 
 ## Hard verification gate
 
-The command fails when the generated artifact is stale relative to the committed source, when the external runtime profile differs or contains stale extra files, or when any application-plane service is missing, not running, was not recreated for the operation, has a mismatched OCI revision label, or (for Python runtime services) has a mismatched complete `app/**/*.py` source manifest. It additionally requires backend health, Telegram/VK polling liveness, and a controlled final-model failure probe in `app`, `worker`, and `vk-worker`; that probe must return `retry_pending` with empty customer text.
+The command fails when the single tracked/mounted profile tree is empty or inconsistent, or when any application-plane service is missing, not running, was not recreated for the operation, has a mismatched OCI revision label, or (for Python runtime services) has a mismatched complete `app/**/*.py` source manifest. It additionally requires backend health, Telegram/VK polling liveness, and a controlled final-model failure probe in `app`, `worker`, and `vk-worker`; that probe must return `retry_pending` with empty customer text.
 
 `docker compose ps`, a successful build, and a standalone `/health` response are insufficient evidence of a completed production release.
 
