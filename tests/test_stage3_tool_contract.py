@@ -48,6 +48,25 @@ class RecordingWiki:
         return migrate_fixture({"grounding_status": "ready", "grounded_facts": ["Факт"], "answer_basis": "Факт"})
 
 
+class PartialRecordingWiki(RecordingWiki):
+    """Ready Wiki result without complete coverage, so continuation is required."""
+
+    def lookup(self, *, text: str, context: dict, tool_request: dict[str, str]) -> dict:
+        self.calls.append({"text": text, "context": context, "tool_request": tool_request})
+        return migrate_fixture({
+            "grounding_status": "ready",
+            "grounded_facts": ["Частичный факт"],
+            "answer_basis": "Частичный факт",
+            "coverage": {
+                "status": "partial",
+                "answered_parts": [{"question_part": "Подтверждённая часть", "fact_ids": ["f1"]}],
+                "missing_parts": ["Недостающий факт"],
+                "conflicts": [],
+                "unresolved_constraints": [],
+            },
+        })
+
+
 class RecordingCalendar:
     def __init__(self) -> None:
         self.calls: list[dict] = []
@@ -103,7 +122,7 @@ def test_unified_turn_stops_after_third_tool_request() -> None:
                 return {"kind": "calendar_lookup", "tool_request": {"date_expression": "today", "requested_calendar_fact": "weekday"}, "tool_call_id": "c1", "llm_trace": []}
             return {"kind": "wiki_lookup", "tool_request": {"query": "q2", "context_scope": "s2", "needed_fact": "f2"}, "tool_call_id": "w2", "llm_trace": []}
 
-    turn = UnifiedTurnService(model=LoopModel(), wiki_lookup=RecordingWiki(), calendar_lookup=RecordingCalendar())
+    turn = UnifiedTurnService(model=LoopModel(), wiki_lookup=PartialRecordingWiki(), calendar_lookup=RecordingCalendar())
     result = turn.run(text="Вопрос", context={"recent_messages": []})
 
     assert result["final_result"]["reason"] == "tool_budget_exceeded"

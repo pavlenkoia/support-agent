@@ -8,7 +8,7 @@ from app.services.agent_tool_loop import UnifiedTurnService
 from app.services.audit import capture_model_input
 from app.services.direct_llm import DirectLLMService
 from tests.test_stage3_native_protocol import ARGS, FINAL, native
-from tests.test_stage3_tool_contract import PromptService, RecordingCalendar, RecordingWiki, Stage3RecordingClient
+from tests.test_stage3_tool_contract import PartialRecordingWiki, PromptService, RecordingCalendar, Stage3RecordingClient
 
 
 def terminal_context(order=('wiki_lookup', 'calendar_lookup')):
@@ -39,7 +39,7 @@ def continue_terminal(context, output=None):
 @pytest.mark.parametrize('order', [('wiki_lookup', 'calendar_lookup'), ('calendar_lookup', 'wiki_lookup')])
 def test_terminal_wire_exact_packet_preserves_both_orders_and_native_middle(order):
     client = Stage3RecordingClient([json.dumps(native(name, f'id-{i}')) for i, name in enumerate(order)] + [json.dumps(FINAL)])
-    wiki, calendar = RecordingWiki(), RecordingCalendar()
+    wiki, calendar = PartialRecordingWiki(), RecordingCalendar()
     result = UnifiedTurnService(model=DirectLLMService(client=client, prompt_service=PromptService()), wiki_lookup=wiki, calendar_lookup=calendar).run(text='Исходный вопрос\nДополнение.', context={})
     assert result['finalization_requested'] == {'response_intent': 'answer', 'reason': 'done'}
     assert len(client.calls) == 3
@@ -182,7 +182,7 @@ def test_real_compatible_http_payload_preserves_terminal_protocol_without_networ
         return FakeResponse({'choices': [{'message': message}]})
     monkeypatch.setattr('app.integrations.llm.openai_compatible.request.urlopen', fake_urlopen)
     client = OpenAICompatibleClient(provider='openai_compatible', base_url='https://terminal-protocol.invalid/v1', api_key='synthetic-test-only', model='synthetic', max_retries=0)
-    result = UnifiedTurnService(model=DirectLLMService(client=client, prompt_service=PromptService()), wiki_lookup=RecordingWiki(), calendar_lookup=RecordingCalendar()).run(text='Исходный вопрос', context={})
+    result = UnifiedTurnService(model=DirectLLMService(client=client, prompt_service=PromptService()), wiki_lookup=PartialRecordingWiki(), calendar_lookup=RecordingCalendar()).run(text='Исходный вопрос', context={})
     assert result['finalization_requested']['response_intent'] == 'answer'
     assert len(payloads) == 3
     assert [m['role'] for m in payloads[-1]['messages']] == ['system', 'user']

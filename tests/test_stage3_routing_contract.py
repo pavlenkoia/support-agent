@@ -99,8 +99,8 @@ def test_all_collection_paths_use_one_real_common_writer(tmp_path, order):
     from app.services.agent_tool_loop import UnifiedTurnService
     from tests.test_stage3_native_protocol import native
     from tests.test_stage3_tool_contract import (
+        PartialRecordingWiki,
         RecordingCalendar,
-        RecordingWiki,
         Stage3RecordingClient,
     )
 
@@ -110,7 +110,9 @@ def test_all_collection_paths_use_one_real_common_writer(tmp_path, order):
                   json.dumps({"route": intent, "response_text": "Подтверждённый ответ.", "reason": "writer", "confidence": None})]
     client = Stage3RecordingClient(responses)
     direct = DirectLLMService(client=client, prompt_service=PromptService())
-    wiki, calendar = RecordingWiki(), RecordingCalendar()
+    # This test covers the two-tool/terminal path; full Wiki coverage is
+    # finalized immediately and intentionally skips that selector step.
+    wiki, calendar = PartialRecordingWiki(), RecordingCalendar()
     turn = UnifiedTurnService(model=direct, wiki_lookup=wiki, calendar_lookup=calendar)
     factory = make_session_factory(f"sqlite+pysqlite:///{tmp_path / 'paths.db'}")
     Base.metadata.create_all(bind=factory.kw['bind'])
@@ -126,6 +128,6 @@ def test_all_collection_paths_use_one_real_common_writer(tmp_path, order):
     assert [a["action"] for a in trace["ordered_actions"]] == [*order, "final_response"]
     assert trace["finalization_input"]["boundary"] == "respond"
     payload = json.loads(client.calls[-1]["user_prompt"])
-    assert [fact["text"] for fact in payload["grounding_evidence"]["facts"]] == (["Факт"] if "wiki_lookup" in order else [])
+    assert [fact["text"] for fact in payload["grounding_evidence"]["facts"]] == (["Частичный факт"] if "wiki_lookup" in order else [])
     assert [f["kind"] for f in payload["tool_facts"]] == (["calendar_lookup"] if "calendar_lookup" in order else [])
     assert not {"tool_requests", "llm_trace", "planner_reason", "native_tool_messages"}.intersection(payload)

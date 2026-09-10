@@ -280,7 +280,10 @@ def test_nonready_extraction_is_not_finalizer_evidence(monkeypatch) -> None:
     )
 
     assert client.payload is not None
-    assert client.payload["grounding_evidence"] == empty_answer_evidence(client.payload["user_message"])
+    # The missing-fact fallback writer is deliberately denied the question and
+    # extraction details; it receives only profile-backed policy evidence.
+    assert "user_message" not in client.payload
+    assert client.payload["grounding_evidence"] == {"policy_evidence": []}
     serialized = json.dumps(client.payload, ensure_ascii=False)
     assert "внутреннем источнике" not in serialized
     assert "https://example.test/prices" not in serialized

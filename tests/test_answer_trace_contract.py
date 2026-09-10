@@ -67,12 +67,13 @@ def run_trace(tmp_path, **kwargs):
     return result, routing, client, factory
 
 
-@pytest.mark.parametrize('attempts,expected', [(0,0),(None,None),(2,6)])
+@pytest.mark.parametrize('attempts,expected', [(0,0),(None,None),(2,4)])
 def test_real_model_metrics_keep_unknown_and_zero(tmp_path, attempts, expected):
     result, _, _, _ = run_trace(tmp_path, attempts=attempts)
     assert result['audit']['route_reason'] == 'exact-final-reason'
     assert result['audit']['route_confidence'] is None
-    assert result['audit']['logical_llm_call_count'] == 3
+    # Complete Wiki evidence bypasses the redundant second selector pass.
+    assert result['audit']['logical_llm_call_count'] == 2
     assert result['audit']['provider_attempt_count'] == expected
 
 

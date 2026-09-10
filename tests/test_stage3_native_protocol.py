@@ -4,6 +4,7 @@ import pytest
 
 from app.services.agent_tool_loop import UnifiedTurnService
 from app.services.direct_llm import DirectLLMService
+from tests.evidence_fixtures import migrate_fixture
 from tests.test_stage3_tool_contract import (
     PromptService,
     RecordingCalendar,
@@ -16,6 +17,25 @@ ARGS = {'wiki_lookup': {'query': 'q', 'context_scope': 's', 'needed_fact': 'f'},
 FINAL = {'action': 'finalize', 'response_intent': 'answer', 'reason': 'done'}
 
 
+class PartialRecordingWiki(RecordingWiki):
+    """Wiki evidence that requires the selector to consider the other tool."""
+
+    def lookup(self, *, text: str, context: dict, tool_request: dict[str, str]) -> dict:
+        self.calls.append({"text": text, "context": context, "tool_request": tool_request})
+        return migrate_fixture({
+            "grounding_status": "ready",
+            "grounded_facts": ["Частично подтверждённый факт"],
+            "answer_basis": "Нужен календарный факт для полного ответа",
+            "coverage": {
+                "status": "partial",
+                "answered_parts": [{"question_part": "часть вопроса", "fact_ids": ["f1"]}],
+                "missing_parts": ["календарный факт"],
+                "conflicts": [],
+                "unresolved_constraints": [],
+            },
+        })
+
+
 def native(name, ident):
     return {'_native_tool_calls': [{'id': ident, 'type': 'function', 'function': {'name': name, 'arguments': json.dumps(ARGS[name])}}]}
 
@@ -24,7 +44,7 @@ def native(name, ident):
 def test_real_selector_preserves_both_tools_and_native_history(order):
     client = Stage3RecordingClient([json.dumps(native(name, f'id-{i}')) for i, name in enumerate(order)] + [json.dumps(FINAL)])
     model = DirectLLMService(client=client, prompt_service=PromptService())
-    result = UnifiedTurnService(model=model, wiki_lookup=RecordingWiki(), calendar_lookup=RecordingCalendar()).run(text='Вопрос', context={})
+    result = UnifiedTurnService(model=model, wiki_lookup=PartialRecordingWiki(), calendar_lookup=RecordingCalendar()).run(text='Вопрос', context={})
     assert result.get('finalization_requested', {}).get('response_intent') == 'answer'
     assert result['kb_result']['grounding_status'] == 'ready'
     assert [o['tool'] for o in result['tool_observations']] == list(order)
@@ -148,7 +168,7 @@ def test_writer_requires_json_at_system_priority_without_weakening_evidence():
 ])
 def test_forbidden_sequential_requests_never_execute(order, reason):
     client = Stage3RecordingClient([json.dumps(native(tool, f"id-{i}")) for i, tool in enumerate(order)])
-    wiki, calendar = RecordingWiki(), RecordingCalendar()
+    wiki, calendar = PartialRecordingWiki(), RecordingCalendar()
     model = DirectLLMService(client=client, prompt_service=PromptService())
     result = UnifiedTurnService(model=model, wiki_lookup=wiki, calendar_lookup=calendar).run(text="Вопрос", context={})
     assert result["final_result"]["reason"] == reason
