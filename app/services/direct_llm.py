@@ -171,10 +171,14 @@ class DirectLLMService:
         if not isinstance(parsed, list) or len(parsed) != 1 or not isinstance(parsed[0], dict):
             return parsed
         legacy_call = parsed[0]
-        if len(legacy_call) != 1:
-            return parsed
-        name, arguments = next(iter(legacy_call.items()))
-        if name not in {"wiki_lookup", "calendar_lookup"} or not isinstance(arguments, dict):
+        if set(legacy_call) == {"action", "query", "context_scope", "needed_fact"} and legacy_call.get("action") == "wiki_lookup":
+            name = "wiki_lookup"
+            arguments = {key: legacy_call[key] for key in ("query", "context_scope", "needed_fact")}
+        elif len(legacy_call) == 1:
+            name, arguments = next(iter(legacy_call.items()))
+            if name not in {"wiki_lookup", "calendar_lookup"} or not isinstance(arguments, dict):
+                return parsed
+        else:
             return parsed
         return {
             "_native_tool_calls": [{

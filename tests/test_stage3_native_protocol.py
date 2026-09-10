@@ -60,6 +60,29 @@ def test_finalize_rejects_extra_customer_fields_and_invalid_reason(extra):
     assert result['result']['route'] == 'retry_pending'
 
 
+def test_selector_accepts_compatible_action_object_list_as_one_native_tool_call():
+    raw = [{
+        "action": "wiki_lookup",
+        "query": "доступность записи",
+        "context_scope": "тандем-прыжок по сертификату",
+        "needed_fact": "можно ли записаться на указанные даты",
+    }]
+    wiki = RecordingWiki()
+    model = DirectLLMService(client=Stage3RecordingClient([json.dumps(raw)]), prompt_service=PromptService())
+
+    result = UnifiedTurnService(model=model, wiki_lookup=wiki, calendar_lookup=RecordingCalendar()).run(
+        text="Можно ли прыгнуть 26 или 27 сентября?", context={}
+    )
+
+    assert len(wiki.calls) == 1
+    assert wiki.calls[0]["tool_request"] == {
+        "query": "доступность записи",
+        "context_scope": "тандем-прыжок по сертификату",
+        "needed_fact": "можно ли записаться на указанные даты",
+    }
+    assert result["tool_requests"][0]["tool"] == "wiki_lookup"
+
+
 @pytest.mark.parametrize('ident', ['', None, 7])
 def test_missing_or_invalid_native_id_never_executes(ident):
     wiki = RecordingWiki()
