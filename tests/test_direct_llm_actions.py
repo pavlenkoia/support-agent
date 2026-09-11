@@ -66,6 +66,7 @@ def test_begin_turn_requests_wiki_as_the_only_factual_source() -> None:
     assert "wiki_lookup — единственный источник бизнес-фактов из Wiki." in prompt
     assert "Не вводи фиксированную последовательность инструментов" in prompt
     assert "отдельного финализатора" in prompt
+    assert "Не утверждай, что выполнил действие" in prompt
     assert "Любой неизвестный инструмент" in prompt
     assert client.calls[0]["tool_choice"] == "auto"
     assert client.calls[0]["parallel_tool_calls"] is False
