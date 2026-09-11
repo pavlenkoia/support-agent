@@ -133,7 +133,15 @@ class RoutingService:
         ]
         if history and history[-1] == {"role": "user", "content": payload.text}:
             history.pop()
-        context = {"user_message": payload.text, "recent_messages": history[-10:]}
+        context = {
+            "user_message": payload.text,
+            "recent_messages": history[-10:],
+            "case_state": {
+                "case_id": case["case_id"],
+                "case_status": case["case_status"],
+                "conversation_id": case["conversation_id"],
+            },
+        }
         if self.simple_answer_engine is None:
             raise RuntimeError("simple full-corpus engine is not configured")
         tool_result = self.tool_runtime.collect(text=payload.text, kb_hits=[], conversation_context=context)
