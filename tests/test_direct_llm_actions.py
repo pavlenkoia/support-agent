@@ -67,6 +67,7 @@ def test_begin_turn_requests_wiki_as_the_only_factual_source() -> None:
     assert "Не вводи фиксированную последовательность инструментов" in prompt
     assert "отдельного финализатора" in prompt
     assert "Не утверждай, что выполнил действие" in prompt
+    assert "profile_context" in json.loads(prompt)
     assert "Любой неизвестный инструмент" in prompt
     assert client.calls[0]["tool_choice"] == "auto"
     assert client.calls[0]["parallel_tool_calls"] is False
@@ -329,3 +330,16 @@ def test_begin_turn_retries_invalid_native_tool_envelope_once() -> None:
     assert len(client.calls) == 2
     retry_packet = json.loads(str(client.calls[1]["user_prompt"]))
     assert retry_packet["protocol_recovery"] == "previous_selector_output_violated_native_protocol"
+
+
+def test_selector_packet_includes_declared_profile_scope(monkeypatch: pytest.MonkeyPatch) -> None:
+    class ProfilePolicy:
+        def load_profile(self) -> dict:
+            return {"role": "declared role", "scope": {"in_scope": ["declared service"], "out_of_scope": ["other service"]}}
+
+    monkeypatch.setattr(direct_llm_module, "PolicyService", ProfilePolicy)
+    service = DirectLLMService(client=ActionClient("{}"), prompt_service=PromptService())
+
+    packet = json.loads(service._build_selector_prompt(text="question", context={"recent_messages": []}))
+
+    assert packet["profile_context"] == {"role": "declared role", "in_scope": ["declared service"], "out_of_scope": ["other service"]}

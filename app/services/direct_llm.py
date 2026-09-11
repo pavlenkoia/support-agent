@@ -9,6 +9,7 @@ from app.integrations.llm.factory import get_llm_client
 from app.integrations.llm.openai_compatible import LLMRecoveryExhausted
 from app.services.audit import capture_model_input
 from app.services.agent_response_validation import validate_agent_response
+from app.services.policy import PolicyService
 from app.services.system_prompt import SystemPromptService
 
 MAX_CATALOG_SELECTION = 3
@@ -162,6 +163,7 @@ class DirectLLMService:
                 },
                 "user_message": text,
                 "first_reply_in_dialogue": first_reply,
+                "profile_context": self._profile_context(),
                 "conversation": conversation,
                 "tool_observations": tool_observations,
                 "tool_state": tool_state,
@@ -184,6 +186,16 @@ class DirectLLMService:
             },
             ensure_ascii=False,
         )
+
+    @staticmethod
+    def _profile_context() -> dict[str, Any]:
+        profile = PolicyService().load_profile()
+        scope = profile.get("scope") if isinstance(profile, dict) else {}
+        return {
+            "role": str(profile.get("role") or "").strip() if isinstance(profile, dict) else "",
+            "in_scope": [str(item).strip() for item in scope.get("in_scope", []) if str(item).strip()] if isinstance(scope, dict) else [],
+            "out_of_scope": [str(item).strip() for item in scope.get("out_of_scope", []) if str(item).strip()] if isinstance(scope, dict) else [],
+        }
 
     @staticmethod
     def _normalize_selector_input(parsed: object) -> object:
