@@ -170,7 +170,7 @@ def test_begin_turn_returns_a_tool_free_social_reply_directly() -> None:
     assert result["result"]["response_text"] == "Привет! Чем могу помочь?"
 
 
-def test_continue_after_tool_returns_agent_answer_and_keeps_all_tools_available() -> None:
+def test_continue_after_tool_hides_completed_tool_from_agent() -> None:
     client = ActionClient('{"route":"answer","response_text":"26 сентября — суббота, выходной.","confidence":0.9,"reason":"calendar_fact"}')
     service = DirectLLMService(client=client, prompt_service=PromptService())
 
@@ -188,7 +188,7 @@ def test_continue_after_tool_returns_agent_answer_and_keeps_all_tools_available(
 
     assert result["kind"] == "direct_response"
     assert result["result"]["route"] == "answer"
-    assert {tool["function"]["name"] for tool in client.calls[0]["tools"]} == {"wiki_lookup", "calendar_lookup"}
+    assert {tool["function"]["name"] for tool in client.calls[0]["tools"]} == {"wiki_lookup"}
     assert "отдельному финализатору" in client.calls[0]["messages"][-1]["content"]
 
 

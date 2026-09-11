@@ -50,7 +50,7 @@ def test_unified_turn_runs_wiki_after_model_requests_its_tool() -> None:
     assert result["trace"]["actions"] == ["wiki_lookup"]
 
 
-def test_unified_turn_keeps_semantic_answer_in_agent_after_repeated_tools() -> None:
+def test_unified_turn_rejects_repeated_tool_in_one_customer_turn() -> None:
     class TurnModel:
         def __init__(self) -> None:
             self.step = 0
@@ -58,15 +58,10 @@ def test_unified_turn_keeps_semantic_answer_in_agent_after_repeated_tools() -> N
         def begin_turn(self, *, text: str, context: dict) -> dict:
             _ = (text, context)
             self.step += 1
-            if self.step < 3:
-                return {
-                    "kind": "wiki_lookup", "tool_call_id": f"wiki-{self.step}",
-                    "tool_request": {"query": f"часть {self.step}", "context_scope": "прыжки", "needed_fact": "условие"},
-                    "llm_trace": [],
-                }
             return {
-                "kind": "direct_response",
-                "result": {"route": "answer", "response_text": "Готовый ответ агента.", "confidence": 0.9, "reason": "facts_collected"},
+                "kind": "wiki_lookup",
+                "tool_call_id": f"wiki-{self.step}",
+                "tool_request": {"query": f"часть {self.step}", "context_scope": "прыжки", "needed_fact": "условие"},
                 "llm_trace": [],
             }
 
@@ -75,10 +70,11 @@ def test_unified_turn_keeps_semantic_answer_in_agent_after_repeated_tools() -> N
         text="Вопрос", context={"recent_messages": []},
     )
 
-    assert len(wiki.calls) == 2
-    assert result["trace"]["actions"] == ["wiki_lookup", "wiki_lookup"]
-    assert result["final_result"]["response_text"] == "Готовый ответ агента."
-    assert "finalization_requested" not in result
+    assert len(wiki.calls) == 1
+    assert result["trace"]["actions"] == ["wiki_lookup"]
+    assert result["final_result"] == {
+        "route": "retry_pending", "response_text": "", "confidence": None, "reason": "tool_reuse_not_allowed",
+    }
 
 
 def test_agent_loop_owns_calendar_and_wiki_answer_without_second_writer() -> None:

@@ -24,7 +24,10 @@ class UnifiedTurnService:
     This service only validates the wire protocol and executes registered tools.
     """
 
-    MAX_SEQUENTIAL_TOOL_CALLS = 3
+    # One business-Wiki lookup and one calendar lookup are sufficient for one
+    # customer turn. Re-reading the same Wiki is not new evidence; it only
+    # multiplies latency and makes the answer loop unstable.
+    MAX_SEQUENTIAL_TOOL_CALLS = 2
 
     def __init__(self, *, model: UnifiedTurnModel, wiki_lookup: WikiLookup, calendar_lookup: CalendarLookup) -> None:
         self.model = model
@@ -71,6 +74,8 @@ class UnifiedTurnService:
                 return failure("tool_request_invalid")
             if decision_index >= self.MAX_SEQUENTIAL_TOOL_CALLS:
                 return failure("tool_budget_exceeded")
+            if kind in actions:
+                return failure("tool_reuse_not_allowed")
             request = current.get("tool_request")
             if DirectLLMService._validated_legacy_tool_request(kind, request) is None:
                 return failure("tool_request_invalid")
