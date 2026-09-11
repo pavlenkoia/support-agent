@@ -313,3 +313,19 @@ def test_malformed_json_retries_once_and_records_both_provider_calls() -> None:
     assert "protocol_recovery" not in result["llm_trace"][1]["input_packet"]["data"]
 
 
+
+
+def test_begin_turn_retries_invalid_native_tool_envelope_once() -> None:
+    client = SequenceActionClient(
+        '{"_native_tool_calls":[{"id":"bad","function":{"name":"calendar_lookup","arguments":"{\\"date_expressions\\":[\\"25 сентября\\"],\\"requested_calendar_fact\\":\\"день недели\\",\\"extra\\":true}"}}]}',
+        '{"_native_tool_calls":[{"id":"calendar-ok","function":{"name":"calendar_lookup","arguments":"{\\"date_expressions\\":[\\"25 сентября\\",\\"26 сентября\\"],\\"requested_calendar_fact\\":\\"дни недели\\"}"}}]}',
+    )
+    service = DirectLLMService(client=client, prompt_service=PromptService())
+
+    result = service.begin_turn(text="Можно ли прыгнуть 25 и 26 сентября?", context={"recent_messages": []})
+
+    assert result["kind"] == "calendar_lookup"
+    assert result["tool_call_id"] == "calendar-ok"
+    assert len(client.calls) == 2
+    retry_packet = json.loads(str(client.calls[1]["user_prompt"]))
+    assert retry_packet["protocol_recovery"] == "previous_selector_output_violated_native_protocol"

@@ -72,15 +72,14 @@ class DirectLLMService:
         system_prompt = self._build_selector_system_prompt(self.prompt_service.load_system_prompt())
         selector_packet = json.loads(self._build_selector_prompt(text=text, context=context))
         last_error: Exception | None = None
+        recovery_marker = "previous_selector_output_was_not_valid_json"
         for protocol_attempt in range(2):
             packet = dict(selector_packet)
             if protocol_attempt:
-                # A malformed free-text response is a provider protocol error,
-                # not a semantic decision.  Repeat the same literal customer
-                # turn once with an explicit, non-semantic recovery marker.
-                # This also changes the request body so a proxy must not replay
-                # a malformed cached completion from the first request.
-                packet["protocol_recovery"] = "previous_selector_output_was_not_valid_json"
+                # A malformed selector envelope is a provider protocol error,
+                # not a semantic decision. Repeat the unchanged literal turn
+                # once with an explicit, non-semantic recovery marker.
+                packet["protocol_recovery"] = recovery_marker
             user_prompt = json.dumps(packet, ensure_ascii=False)
             recorded_call = False
             try:
@@ -94,7 +93,16 @@ class DirectLLMService:
                 )
                 self._record_llm_call("customer_turn", capture_model_input("begin_turn", packet))
                 recorded_call = True
-                return self._selector_decision(self._parse_json_object(raw))
+                decision = self._selector_decision(self._parse_json_object(raw))
+                result = decision.get("result") if isinstance(decision, dict) else None
+                if (
+                    protocol_attempt == 0
+                    and isinstance(result, dict)
+                    and result.get("reason") == "native_tool_request_invalid"
+                ):
+                    recovery_marker = "previous_selector_output_violated_native_protocol"
+                    continue
+                return decision
             except json.JSONDecodeError as exc:
                 last_error = exc
                 if not recorded_call:
