@@ -367,3 +367,11 @@ def test_continue_after_tool_retries_invalid_terminal_envelope_once() -> None:
     assert result["result"]["response_text"] == "Подтверждённый ответ."
     assert len(client.calls) == 2
     assert "protocol_recovery" in client.calls[1]["messages"][-1]["content"]
+
+
+def test_agent_contract_requires_direct_brief_answer_without_unsupported_actions() -> None:
+    prompt = DirectLLMService._build_selector_system_prompt("base")
+
+    assert "настолько коротким" in prompt
+    assert "Не предлагай оформить заявку" in prompt
+    assert "не повторяй тот же запрос инструмента" in prompt
