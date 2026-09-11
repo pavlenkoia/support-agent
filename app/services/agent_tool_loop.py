@@ -24,7 +24,7 @@ class UnifiedTurnService:
     This service only validates the wire protocol and executes registered tools.
     """
 
-    MAX_SEQUENTIAL_TOOL_CALLS = 6
+    MAX_SEQUENTIAL_TOOL_CALLS = 4
 
     def __init__(self, *, model: UnifiedTurnModel, wiki_lookup: WikiLookup, calendar_lookup: CalendarLookup) -> None:
         self.model = model
