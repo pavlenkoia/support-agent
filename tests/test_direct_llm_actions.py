@@ -22,6 +22,16 @@ class ActionClient:
         return {"provider": "test", "model": "test", "usage": {"prompt_tokens": 1}}
 
 
+class SequenceActionClient(ActionClient):
+    def __init__(self, *responses: str) -> None:
+        super().__init__(responses[0])
+        self.responses = list(responses)
+
+    def generate(self, **kwargs: object) -> str:
+        self.calls.append(kwargs)
+        return self.responses.pop(0)
+
+
 class PromptService:
     def load_system_prompt(self) -> str:
         return "Поведенческий контракт агента."
@@ -116,6 +126,25 @@ def test_begin_turn_does_not_guess_an_unknown_malformed_native_tool() -> None:
 
     assert result["kind"] == "final"
     assert result["result"]["route"] == "retry_pending"
+
+
+def test_begin_turn_retries_a_non_json_selector_response_with_fresh_protocol_context() -> None:
+    client = SequenceActionClient(
+        "Совершенно посторонний свободный текст, не JSON и не tool call.",
+        '{"_native_tool_calls":[{"id":"native-wiki-retry","function":{"name":"wiki_lookup","arguments":"{\\"query\\":\\"стоимость прыжка с видео\\",\\"context_scope\\":\\"прыжок с инструктором\\",\\"needed_fact\\":\\"стоимость\\"}"}}]}',
+    )
+    service = DirectLLMService(client=client, prompt_service=PromptService())
+
+    result = service.begin_turn(text="Сколько стоит прыжок с видео и инструктором?", context={"recent_messages": []})
+
+    assert result["kind"] == "wiki_lookup"
+    assert result["tool_call_id"] == "native-wiki-retry"
+    assert len(client.calls) == 2
+    first_packet = json.loads(str(client.calls[0]["user_prompt"]))
+    retry_packet = json.loads(str(client.calls[1]["user_prompt"]))
+    assert first_packet["user_message"] == retry_packet["user_message"]
+    assert "protocol_recovery" not in first_packet
+    assert retry_packet["protocol_recovery"] == "previous_selector_output_was_not_valid_json"
 
 
 def test_begin_turn_parses_valid_tool_envelope_before_provider_trailing_junk() -> None:
@@ -309,7 +338,7 @@ def test_continue_after_tool_prompt_requests_action_finalize_without_client_text
     assert "Не создавай клиентский ответ, route, response_text, confidence или черновик." in prompt
 
 
-def test_malformed_json_only_records_one_provider_call() -> None:
+def test_malformed_json_retries_once_and_records_both_provider_calls() -> None:
     class MalformedClient:
         def __init__(self) -> None:
             self.calls = 0
@@ -328,25 +357,14 @@ def test_malformed_json_only_records_one_provider_call() -> None:
 
     assert result["kind"] == "final"
     assert result["result"]["route"] == "retry_pending"
-    assert len(result["llm_trace"]) == 1
-    assert result["llm_trace"][0]["entry_kind"] == "model_call"
-    assert result["llm_trace"][0]["input_packet"]["status"] == "complete"
-    assert [{k: v for k, v in item.items() if k not in {"entry_kind", "input_packet"}} for item in result["llm_trace"]] == [
-        {
-            "role": "direct_llm",
-            "step": "customer_turn",
-            "provider": "test",
-            "model": "test",
-            "duration_ms": 11,
-            "attempts": 1,
-            "api_key_index": None,
-            "used_failover": None,
-            "failover_count": None,
-            "failover_events": [],
-            "usage": {"prompt_tokens": 1, "completion_tokens": None, "total_tokens": None},
-            "error": None,
-        }
-    ]
+    assert len(result["llm_trace"]) == 2
+    assert all(item["entry_kind"] == "model_call" for item in result["llm_trace"])
+    assert all(item["input_packet"]["status"] == "complete" for item in result["llm_trace"])
+    assert result["llm_trace"][0]["input_packet"]["data"]["user_message"] == "Содержательный вопрос"
+    assert "protocol_recovery" not in result["llm_trace"][0]["input_packet"]["data"]
+    # The retry marker is sent to the provider but intentionally excluded from
+    # the customer-safe trace packet.
+    assert "protocol_recovery" not in result["llm_trace"][1]["input_packet"]["data"]
 
 
 def test_finalizer_prompt_requires_natural_grammatical_russian() -> None:

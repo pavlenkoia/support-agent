@@ -193,7 +193,7 @@ def test_probe_json_roundtrip_contains_full_packet(tmp_path):
 
 
 @pytest.mark.parametrize('boundary',['begin_turn','continue_after_tool','respond'])
-def test_parse_failure_counts_one_real_call_and_no_metadata(tmp_path,boundary):
+def test_parse_failure_counts_bounded_real_calls_and_no_raw_metadata(tmp_path,boundary):
     class Bad(Model):
         def generate(self, **kwargs):
             self.calls.append(kwargs)
@@ -207,8 +207,8 @@ def test_parse_failure_counts_one_real_call_and_no_metadata(tmp_path,boundary):
     else:
         value=direct.continue_after_tool(text='x',context={},tool_name='calendar_lookup',tool_call_id='id',tool_request={'date_expression':'2026-01-01','requested_calendar_fact':'weekday'},observation={})
     calls=[x for x in value['llm_trace'] if x.get('entry_kind')=='model_call']
-    assert len(calls)==1
-    assert calls[0]['attempts']==0
+    assert len(calls) == (2 if boundary == 'begin_turn' else 1)
+    assert all(call['attempts'] == 0 for call in calls)
     assert 'raw' not in json.dumps(value['llm_trace'])
 
 

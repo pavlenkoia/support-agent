@@ -74,34 +74,59 @@ class DirectLLMService:
         """Run one grounded customer turn with typed native tool requests."""
         self._reset_llm_trace()
         system_prompt = self._build_selector_system_prompt(self.prompt_service.load_system_prompt())
-        user_prompt = self._build_selector_prompt(text=text, context=context)
-        recorded_call = False
-        try:
-            raw = self.client.generate(
-                system_prompt=system_prompt,
-                user_prompt=user_prompt,
-                temperature=self.temperature,
-                tools=self._native_tools(),
-                tool_choice="auto",
-                parallel_tool_calls=False,
-            )
-            self._record_llm_call("customer_turn", capture_model_input("begin_turn", json.loads(user_prompt)))
-            recorded_call = True
-            parsed = self._parse_json_object(raw)
-        except Exception as exc:
-            if not recorded_call:
-                self._record_llm_call("customer_turn", capture_model_input("begin_turn", json.loads(user_prompt)))
-            return {
-                "kind": "final",
-                "result": {
-                    "route": "retry_pending",
-                    "response_text": "",
-                    "confidence": 0.0,
-                    "reason": "llm_recovery_exhausted" if isinstance(exc, LLMRecoveryExhausted) else f"customer_turn_error:{type(exc).__name__}",
-                },
-                "llm_trace": list(self._active_llm_trace),
-            }
-        return self._selector_decision(parsed)
+        selector_packet = json.loads(self._build_selector_prompt(text=text, context=context))
+        last_error: Exception | None = None
+        for protocol_attempt in range(2):
+            packet = dict(selector_packet)
+            if protocol_attempt:
+                # A malformed free-text response is a provider protocol error,
+                # not a semantic decision.  Repeat the same literal customer
+                # turn once with an explicit, non-semantic recovery marker.
+                # This also changes the request body so a proxy must not replay
+                # a malformed cached completion from the first request.
+                packet["protocol_recovery"] = "previous_selector_output_was_not_valid_json"
+            user_prompt = json.dumps(packet, ensure_ascii=False)
+            recorded_call = False
+            try:
+                raw = self.client.generate(
+                    system_prompt=system_prompt,
+                    user_prompt=user_prompt,
+                    temperature=self.temperature,
+                    tools=self._native_tools(),
+                    tool_choice="auto",
+                    parallel_tool_calls=False,
+                )
+                self._record_llm_call("customer_turn", capture_model_input("begin_turn", packet))
+                recorded_call = True
+                return self._selector_decision(self._parse_json_object(raw))
+            except json.JSONDecodeError as exc:
+                last_error = exc
+                if not recorded_call:
+                    self._record_llm_call("customer_turn", capture_model_input("begin_turn", packet))
+                continue
+            except Exception as exc:
+                if not recorded_call:
+                    self._record_llm_call("customer_turn", capture_model_input("begin_turn", packet))
+                return {
+                    "kind": "final",
+                    "result": {
+                        "route": "retry_pending",
+                        "response_text": "",
+                        "confidence": 0.0,
+                        "reason": "llm_recovery_exhausted" if isinstance(exc, LLMRecoveryExhausted) else f"customer_turn_error:{type(exc).__name__}",
+                    },
+                    "llm_trace": list(self._active_llm_trace),
+                }
+        return {
+            "kind": "final",
+            "result": {
+                "route": "retry_pending",
+                "response_text": "",
+                "confidence": 0.0,
+                "reason": f"customer_turn_error:{type(last_error).__name__}" if last_error else "customer_turn_error:JSONDecodeError",
+            },
+            "llm_trace": list(self._active_llm_trace),
+        }
 
     @staticmethod
     def _build_selector_system_prompt(active_system_prompt: str) -> str:
