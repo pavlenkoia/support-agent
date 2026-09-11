@@ -211,9 +211,6 @@ class OpenAICompatibleClient(BaseLLMClient):
             "model": self.model,
             "temperature": temperature,
             "stream": False,
-            # The active one-call support model is asked to reason before it
-            # emits the compact JSON envelope; only the final envelope is used.
-            "think": True,
             "messages": messages if messages is not None else [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
