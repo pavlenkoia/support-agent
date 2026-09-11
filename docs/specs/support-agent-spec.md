@@ -1,12 +1,14 @@
 # Support Agent Runtime Spec
 
-## Current target behavior
+## Current runtime — one-call full-corpus experiment
 
-> Production mode is `ANSWER_ENGINE_MODE=agent_tool_loop`: the model selects zero, one, or two native tools (`wiki_lookup`, `calendar_lookup`), then the common finalizer receives the literal current message, bounded dialogue, and compact verified tool facts. The former `simple_llm_wiki`, `simple_full_corpus`, and orchestrator answer engines were removed from the runtime. A technical Wiki failure is not proof that a business fact is absent and must not be described to the customer as such.
+> Current production configuration is `ANSWER_ENGINE_MODE=simple_full_corpus_natural`. One model call receives the literal customer turn, up to ten prior `user|assistant` messages, deterministic calendar observations where applicable, and the complete mounted compiled Wiki. It returns the customer text directly; no selector, native Wiki call, KB navigation/extraction, or second finalizer is in the active path.
 
-The support agent is a **bounded, policy-driven conversational agent**.
+The output boundary adds the first-response greeting and removes provider reasoning metadata (`source_refs`, `evidence`, tool fields) and Markdown code delimiters. It never composes business content.
 
-For a clear in-domain request with no direct grounded answer, the active profile may declare a no-answer customer option as allowlisted policy evidence. The common finalizer may offer that option naturally; the application never hardcodes a business contact, office hours, or customer-facing template. Future operator handoff may consume the same policy outcome.
+The OpenAI-compatible provider-default reasoning mode may return ready customer text rather than JSON. The runtime accepts that text only in `simple_full_corpus_natural`; JSON responses retain source/evidence validation. Provider inference can still reach the bounded 300-second retry deadline and becomes textless `retry_pending`; this is a provider/runtime failure, not `cannot_answer`.
+
+This is a live, operator-approved experiment. Literal no-send tests showed good direct answers but also overlong/adjacent facts and intermittent 300-second provider timeouts. Do not characterize it as fully accepted or stable until these issues are resolved.
 
 It is not a ticket router and not an escalation-first bot.
 
