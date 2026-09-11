@@ -13,7 +13,7 @@ OFFICE_POLICY = {
 
 
 @pytest.mark.parametrize('status', ['none', 'conflicting'])
-def test_fixed_office_fallback_does_not_call_model(status):
+def test_office_policy_reaches_common_finalizer(status):
     packet = evidence()
     packet['coverage']['status'] = status
     packet['facts'] = []
@@ -24,11 +24,10 @@ def test_fixed_office_fallback_does_not_call_model(status):
         {'grounding_status': 'ready', 'source_refs': ['compiled/page.md'], 'answer_evidence': packet},
         tool_observations=[OFFICE_POLICY],
     )
-    assert writer.calls == []
-    assert result['route'] == 'cannot_answer'
-    assert result['response_text'] == 'Пожалуйста, позвоните в офис в рабочее время.'
-    assert result['reason'] == 'fixed_profile_fallback'
-    assert result['llm_trace'] == []
+    assert len(writer.calls) == 1
+    assert writer.calls[0]['tool_facts'] == [OFFICE_POLICY]
+    assert result['route'] == 'answer'
+    assert result['response_text'] == 'Точный модельный текст.'
 
 
 def test_known_answer_keeps_model_generation():
@@ -60,18 +59,16 @@ def test_technical_failure_does_not_become_office_fallback():
 
 
 @pytest.mark.parametrize('channel', ['telegram', 'vk'])
-def test_channel_routing_keeps_fixed_fallback_literal(monkeypatch, channel):
+def test_channel_routing_runs_common_finalizer(monkeypatch, channel):
     from types import SimpleNamespace
     from app.services.routing import RoutingService
     from tests.test_stage4_routing_policy_evidence import FakeSession, FakeTurnService
 
     writer = Writer('answer')
     direct = DirectLLMService(client=writer)
-    def forbidden_formatter(*args, **kwargs):
-        raise AssertionError('Fixed fallback must not be rewritten')
     policy = SimpleNamespace(
         no_answer_policy_evidence=lambda: [{'text': OFFICE_POLICY['summary'], 'source_ref': OFFICE_POLICY['source_ref']}],
-        finalize_simple_customer_text=forbidden_formatter,
+        finalize_simple_customer_text=lambda text, **kwargs: text,
     )
     turn = FakeTurnService(finalization_requested={'response_intent': 'missing_grounding'})
     service = RoutingService(session_factory=lambda: FakeSession(), direct_llm=direct,
@@ -84,5 +81,5 @@ def test_channel_routing_keeps_fixed_fallback_literal(monkeypatch, channel):
         FakeSession(), {'case_id': 1, 'case_status': 'open'},
         SimpleNamespace(text='Вопрос', channel=channel, external_message_id='m1', external_event_id='e1'),
     )
-    assert writer.calls == []
-    assert result['outcome']['outcome_payload']['response_text'] == 'Пожалуйста, позвоните в офис в рабочее время.'
+    assert len(writer.calls) == 1
+    assert result['outcome']['outcome_payload']['response_text'] == 'Точный модельный текст.'

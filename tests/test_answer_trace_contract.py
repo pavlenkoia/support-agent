@@ -67,13 +67,14 @@ def run_trace(tmp_path, **kwargs):
     return result, routing, client, factory
 
 
-@pytest.mark.parametrize('attempts,expected', [(0,0),(None,None),(2,4)])
+@pytest.mark.parametrize('attempts,expected', [(0,0),(None,None),(2,6)])
 def test_real_model_metrics_keep_unknown_and_zero(tmp_path, attempts, expected):
     result, _, _, _ = run_trace(tmp_path, attempts=attempts)
     assert result['audit']['route_reason'] == 'exact-final-reason'
     assert result['audit']['route_confidence'] is None
-    # Complete Wiki evidence bypasses the redundant second selector pass.
-    assert result['audit']['logical_llm_call_count'] == 2
+    # The agent loop selects the tool, completes the terminal action, then
+    # the common finalizer renders customer text.
+    assert result['audit']['logical_llm_call_count'] == 3
     assert result['audit']['provider_attempt_count'] == expected
 
 
@@ -121,8 +122,9 @@ def test_overflow_is_bounded_explicit_and_does_not_change_answer(tmp_path, monke
     result, _, _, _ = run_trace(tmp_path, basis='Я'*5000)
     packet = result['audit']['trace_packet']
     assert len(json.dumps(packet,ensure_ascii=False).encode()) <= 16384
-    assert packet['finalization_input']['status'] == 'overflow'
-    assert packet['finalization_input']['sha256']
+    # The finalizer receives compact projected facts, not the oversized raw
+    # evidence/audit packet.
+    assert packet['finalization_input']['status'] == 'complete'
     assert packet['result']['reason'] == 'exact-final-reason'
     assert result['route']['route'] == 'answer'
     assert 'Я'*5000 not in json.dumps(result['audit'],ensure_ascii=False)
@@ -185,7 +187,8 @@ def test_probe_json_roundtrip_contains_full_packet(tmp_path):
     probe.send_message(sid,'Текущий вопрос')
     trace = probe.get_trace(sid)
     payload = next(x['payload'] for x in trace['events'] if x['event_type']=='inbound_processed')
-    assert payload['trace_packet']['finalization_input']['data']['grounding_evidence']['answer_basis'] == 'Кандидат'
+    facts = payload['trace_packet']['finalization_input']['data']['grounding_evidence']['facts']
+    assert any(item['text'] == 'Факт с условием' for item in facts)
     assert any(x['event_type']=='answer_delivery_recorded' for x in trace['events'])
 
 

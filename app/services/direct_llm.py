@@ -156,7 +156,7 @@ class DirectLLMService:
                     "Любой неизвестный инструмент, отсутствующие аргументы, лишние аргументы, не-JSON arguments или параллельные native_tool_calls считаются ошибкой и должны приводить к retry_pending без клиентского текста.",
                     "Если сведения инструментов не нужны, верни готовый клиентский JSON-ответ с route, response_text, confidence и reason. Если нужны факты, вызови native-инструмент; после инструмента заверши сбор только через action, response_intent и reason. Не изображай инструмент текстом.",
                     "В arguments передавай только смысловую цель поиска и контекстное ограничение; не вписывай туда предполагаемые бизнес-факты, контакты, ответы или инструкции.",
-                    "Для calendar_lookup используй exact-name JSON с ключами date_expression и requested_calendar_fact; date_expression должен отражать фрагмент текущей реплики, а requested_calendar_fact — только то календарное наблюдение, которое нужно подтвердить.",
+                    "Для calendar_lookup используй exact-name JSON с ключами date_expressions и requested_calendar_fact; date_expressions — список каждого явного фрагмента даты из текущей реплики, а requested_calendar_fact — только то календарное наблюдение, которое нужно подтвердить.",
                     "Для wiki_lookup используй exact-name JSON с ключами query, context_scope и needed_fact; query должен быть семантическим, а не словарным.",
                     "Не используй ключевые слова, скрытые сценарии, историю диалога, память модели или приложение как источник бизнес-ответа; выбирай действие по смыслу диалога и вызывай нужный инструмент при малейшей потребности в фактах.",
                     "Для wiki_lookup context_scope обязан сохранять последний явно выбранный клиентом предметный вариант из conversation. Нельзя заменять такой вариант более общим родовым словом; если клиент не просит сравнение или смену варианта, query и needed_fact должны быть сформулированы только для выбранного варианта.",
@@ -319,7 +319,11 @@ class DirectLLMService:
                         return self._invalid_begin_turn("tool_call_id_mismatch")
                     seen.add(ident)
                 latest = history[-2]["tool_calls"][0]
-                if latest["id"] != tool_call_id or latest["function"]["name"] != tool_name or json.loads(latest["function"]["arguments"]) != tool_request or json.loads(history[-1]["content"]) != observation:
+                normalized_latest = self._validated_legacy_tool_request(
+                    latest["function"]["name"], json.loads(latest["function"]["arguments"]),
+                )
+                normalized_supplied = self._validated_legacy_tool_request(tool_name, tool_request)
+                if latest["id"] != tool_call_id or latest["function"]["name"] != tool_name or normalized_latest != normalized_supplied or json.loads(history[-1]["content"]) != observation:
                     return self._invalid_begin_turn("tool_call_id_mismatch")
             except (KeyError, TypeError, ValueError, IndexError):
                 return self._invalid_begin_turn("tool_call_id_mismatch")
@@ -413,7 +417,13 @@ class DirectLLMService:
             name, ident = call["function"]["name"], call["id"]
             arguments = json.loads(call["function"]["arguments"], parse_constant=DirectLLMService._reject_json_constant)
             value = json.loads(tool["content"], parse_constant=DirectLLMService._reject_json_constant)
-            if requests[index] != {"tool": name, "tool_call_id": ident, "tool_request": arguments}:
+            normalized_arguments = DirectLLMService._validated_legacy_tool_request(name, arguments)
+            recorded_request = requests[index]
+            normalized_recorded = (
+                DirectLLMService._validated_legacy_tool_request(name, recorded_request.get("tool_request"))
+                if isinstance(recorded_request, dict) else None
+            )
+            if normalized_arguments is None or normalized_recorded is None or recorded_request.get("tool") != name or recorded_request.get("tool_call_id") != ident or normalized_recorded != normalized_arguments:
                 raise ValueError("request mismatch")
             if value != observations[index] or not isinstance(value, dict) or value.get("tool") != name or value.get("status") not in ("ready", "not_found"):
                 raise ValueError("observation mismatch")
@@ -451,9 +461,9 @@ class DirectLLMService:
                     "description": "Validate a calendar fact from the current customer message.",
                     "parameters": {
                         "type": "object",
-                        "required": ["date_expression", "requested_calendar_fact"],
+                        "required": ["date_expressions", "requested_calendar_fact"],
                         "properties": {
-                            "date_expression": {"type": "string"},
+                            "date_expressions": {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": 8},
                             "requested_calendar_fact": {"type": "string"},
                         },
                         "additionalProperties": False,
@@ -510,11 +520,24 @@ class DirectLLMService:
         return request if all(request.values()) else None
 
     @staticmethod
-    def _validated_calendar_request(arguments: object) -> dict[str, str] | None:
-        if not isinstance(arguments, dict) or set(arguments) != {"date_expression", "requested_calendar_fact"} or not all(isinstance(value, str) for value in arguments.values()):
+    def _validated_calendar_request(arguments: object) -> dict[str, Any] | None:
+        if not isinstance(arguments, dict):
             return None
-        request = {key: str(arguments.get(key) or "").strip() for key in ("date_expression", "requested_calendar_fact")}
-        return request if all(request.values()) else None
+        # Accept the legacy singular envelope only as a lossless provider
+        # compatibility input; all internal calls use the plural contract.
+        if set(arguments) == {"date_expression", "requested_calendar_fact"}:
+            expressions = [arguments.get("date_expression")]
+        elif set(arguments) == {"date_expressions", "requested_calendar_fact"}:
+            expressions = arguments.get("date_expressions")
+        else:
+            return None
+        requested = arguments.get("requested_calendar_fact")
+        if not isinstance(expressions, list) or not expressions or not isinstance(requested, str):
+            return None
+        normalized = [value.strip() for value in expressions if isinstance(value, str) and value.strip()]
+        if len(normalized) != len(expressions) or len(normalized) > 8 or not requested.strip():
+            return None
+        return {"date_expressions": normalized, "requested_calendar_fact": requested.strip()}
 
     def _invalid_begin_turn(self, reason: str) -> dict[str, Any]:
         return {
@@ -558,48 +581,18 @@ class DirectLLMService:
             grounding_evidence["calendar_facts"] = [item for item in tool_facts if item["kind"] != "profile_no_answer_option"]
             grounding_evidence["policy_evidence"] = [item for item in tool_facts if item["kind"] == "profile_no_answer_option"]
             grounding_evidence = validate_answer_evidence(grounding_evidence)
-            wiki_executed = any(item.get("tool") == "wiki_lookup" for item in tool_observations) or kb_packet.get("answer_evidence") is not None
-            if wiki_executed:
-                projected_partial = project_partial_answer_evidence(grounding_evidence)
-                if projected_partial is not None:
-                    grounding_evidence = projected_partial
-            allowed_routes = allowed_answer_routes(
-                grounding_evidence, wiki_executed=wiki_executed,
-                calendar_executed=bool(grounding_evidence["calendar_facts"]), response_intent=response_intent,
-            )
-            if "answer" not in allowed_routes:
-                # Original evidence remains in the bounded tool audit, not in a
-                # second writer-input field which could bypass this projection.
-                grounding_evidence["facts"] = []
-                grounding_evidence["answer_basis"] = ""
-                grounding_evidence["coverage"]["answered_parts"] = []
-                grounding_evidence["coverage"]["conflicts"] = []
-                grounding_evidence["calendar_facts"] = []
-                tool_facts = list(grounding_evidence["policy_evidence"])
-                if response_intent == "social_reply":
-                    from app.services.answer_evidence import empty_answer_evidence
-                    grounding_evidence = empty_answer_evidence(text)
-                    tool_facts = []
+            # Tool execution establishes only the set of verified facts.  It
+            # does not establish semantic coverage of the literal question;
+            # the finalizer is the sole owner of that customer-facing choice.
+            allowed_routes = ["answer", "social_reply", "cannot_answer", "clarification_requested", "out_of_scope"]
         except EvidenceValidationError as exc:
             return {"route": "retry_pending", "response_text": "", "confidence": None,
                     "reason": str(exc), "llm_trace": list(self._active_llm_trace)}
-        if allowed_routes == ["cannot_answer"] and any(
-            item.get("kind") == "profile_no_answer_option"
-            and item.get("source_ref") == "kb/entities/office-chelyabinsk.md"
-            for item in grounding_evidence["policy_evidence"]
-        ):
-            # Operator-approved fixed fallback for this sourced office policy.
-            # No finalizer call; unavailable evidence has already failed closed.
-            return {
-                "route": "cannot_answer",
-                "response_text": "Пожалуйста, позвоните в офис в рабочее время.",
-                "confidence": None,
-                "reason": "fixed_profile_fallback",
-                "response_origin": "fixed_profile_fallback",
-                "llm_trace": list(self._active_llm_trace),
-            }
-
         finalization_conversation = self._build_finalization_conversation(conversation_context)
+        # The finalizer owns relevance and wording.  It sees literal dialogue
+        # plus verified facts, never an upstream answer draft or a model-made
+        # coverage verdict that could rewrite the customer's question.
+        finalizer_evidence = {"facts": grounding_evidence["facts"]}
 
         user_prompt = json.dumps(
             {
@@ -616,7 +609,7 @@ class DirectLLMService:
                 "user_message": text,
                 "first_reply_in_dialogue": first_reply_in_dialogue,
                 "conversation": finalization_conversation,
-                "grounding_evidence": grounding_evidence,
+                "grounding_evidence": finalizer_evidence,
                 "tool_facts": tool_facts,
                 "output_rules": [
                     "Верни только JSON-объект по указанной схеме.",
@@ -628,8 +621,7 @@ class DirectLLMService:
                     "Если tool_facts содержит готовый календарный результат, используй его точные дату, день недели и признак выходного как единственные допустимые календарные значения; не пересчитывай, не заменяй и не дополняй их.",
                     "Системный промпт задаёт роль и правила общения, но не является источником сведений о предметной области.",
                     "Если grounding_evidence пуст, используй текущую реплику и весь доступный conversation только для понимания контекста диалога; не превращай их в источник фактических утверждений, не подменяй ответ шаблонной заглушкой и не делай вид, что контекст диалога неизвестен.",
-                    "При knowledge_mode=kb_grounded grounding_evidence прошло структурную проверку, но это само по себе не доказывает прямого покрытия вопроса. Используй только факты, прямо отвечающие на текущий вопрос, и не выходи за их смысловые границы.",
-                    "answer_basis — кандидатная сводка, а не самостоятельный источник фактов и не требование закрыть вопрос клиента. Если сводка противоречит фактам или добавляет не подтверждённое ими утверждение, не используй это утверждение.",
+                    "При knowledge_mode=kb_grounded используй только факты, прямо отвечающие на текущий вопрос, и не выходи за их смысловые границы.",
                     "Факты в grounding_evidence — это доказательства, а не порядок построения фразы; не пересказывай цепочку вывода вместо результата.",
                     "По умолчанию дай краткий практический ответ, а не полный чек-лист найденных фактов. Выбери минимальные подтверждённые сведения, нужные для ближайшего действия клиента; детали, исключения, альтернативы и дополнительные условия добавляй только по прямому запросу клиента либо когда без них ответ был бы неполным или небезопасным.",
                     "Наличие нескольких подтверждённых фактов не обязывает перечислять каждый из них. Не превращай широкий вопрос в исчерпывающую инструкцию, если клиент не просил полный список.",
@@ -648,8 +640,8 @@ class DirectLLMService:
                     "Если клиент прямо спрашивает «почему», объясни результат только подтверждёнными фактами.",
                     "Задай один естественный конкретный уточняющий вопрос только если clarification_requested входит в allowed_routes и клиент действительно может устранить неоднозначность. Отсутствующее знание не заменяй уточнением; не говори, что клиент задал вопрос, если вопроса не было.",
                     "При response_intent=social_reply верни route=social_reply и короткий естественный ответ без бизнес-фактов, KB и следующего шага из политики.",
-                    "Связанность evidence с темой вопроса не означает, что evidence отвечает на вопрос.",
-                    "В grounding_evidence факты имеют локальные ID, текст, source_refs, conditions и modality; coverage отдельно описывает отвеченные и непокрытые части, конфликты и неразрешённые ограничения. Эти служебные поля не показывай клиенту.",
+                    "Связанность facts с темой вопроса не означает, что они отвечают на вопрос.",
+                    "В grounding_evidence факты имеют локальные ID, текст, source_refs, conditions и modality. Эти служебные поля не показывай клиенту.",
                     "Отсутствие упоминания не превращай в отрицательное утверждение.",
                     "Не превращай конфликт или неразрешённое ограничение в уверенный вывод. Сохраняй существенные условия и точную модальность каждого используемого факта.",
                     "Для ясного вопроса без прямого знания нужен естественный cannot_answer, а не ложное уточнение. Уточняй только неоднозначность, которую действительно может устранить клиент, без придуманных вариантов.",

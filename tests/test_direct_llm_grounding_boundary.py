@@ -1,4 +1,4 @@
-from app.services.answer_evidence import empty_answer_evidence
+
 from tests.evidence_fixtures import migrate_fixture
 import json
 
@@ -48,7 +48,14 @@ def test_ready_grounding_is_finalized_with_system_prompt_and_compact_evidence(mo
 
     assert client.calls == 1
     assert client.payload is not None
-    assert client.payload["grounding_evidence"]["answer_basis"] == "Да, прыгнуть можно."
+    facts = client.payload["grounding_evidence"]["facts"]
+    assert [fact["text"] for fact in facts] == [
+        "Да, прыгнуть можно.",
+        "Очки, шлем, комбинезон и перчатки не выдаются.",
+        "Их отсутствие само по себе не мешает прыжку.",
+    ]
+    assert all(fact["source_refs"] == ["synthetic/fixture.md"] for fact in facts)
+    assert "answer_basis" not in client.payload["grounding_evidence"]
     assert "В разрешённом фактическом ответе сначала дай прямой ответ, подтверждённый переданным evidence." in client.system_prompt
     assert "явно отрази его в первом предложении" in client.system_prompt
     assert "Сохраняй последнее явное ограничение" in client.system_prompt
@@ -92,7 +99,7 @@ def test_clarification_finalizer_receives_generic_intent_without_kb_evidence(mon
     assert client.payload is not None
     assert client.payload["knowledge_mode"] == "prompt_only"
     assert client.payload["response_intent"] == "clarification"
-    assert client.payload["grounding_evidence"] == empty_answer_evidence(client.payload["user_message"])
+    assert client.payload["grounding_evidence"] == {"facts": []}
 
 
 def test_finalizer_payload_is_allowlisted_and_excludes_internal_reasoning(monkeypatch) -> None:
@@ -280,10 +287,10 @@ def test_nonready_extraction_is_not_finalizer_evidence(monkeypatch) -> None:
     )
 
     assert client.payload is not None
-    # The missing-fact fallback writer is deliberately denied the question and
-    # extraction details; it receives only profile-backed policy evidence.
-    assert "user_message" not in client.payload
-    assert client.payload["grounding_evidence"] == {"policy_evidence": []}
+    # Even without facts, the common finalizer sees the literal turn; legacy
+    # extraction drafts remain excluded from its customer-safe packet.
+    assert client.payload["user_message"] == "Сколько стоит место?"
+    assert client.payload["grounding_evidence"] == {"facts": []}
     serialized = json.dumps(client.payload, ensure_ascii=False)
     assert "внутреннем источнике" not in serialized
     assert "https://example.test/prices" not in serialized

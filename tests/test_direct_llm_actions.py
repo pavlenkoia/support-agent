@@ -148,6 +148,51 @@ def test_finalizer_accepts_valid_response_before_provider_trailing_junk() -> Non
     assert result["response_text"] == "Да, можно."
 
 
+def test_finalizer_receives_literal_dialogue_and_compact_tool_facts_only() -> None:
+    class CapturingClient(ActionClient):
+        def generate(self, **kwargs: object) -> str:
+            super().generate(**kwargs)
+            return '{"route":"answer","response_text":"Да, можно.","confidence":0.9,"reason":"grounded"}'
+
+    client = CapturingClient("")
+    service = DirectLLMService(client=client, prompt_service=PromptService())
+
+    service.respond(
+        "Можно ли прыгнуть 26/27 сентября?",
+        migrate_fixture({
+            "grounding_status": "ready",
+            "grounded_facts": ["Прыжки обычно проходят по выходным."],
+            "answer_basis": "Добавить запись и активацию сертификата.",
+            "source_refs": ["compiled/concepts/booking.md"],
+        }),
+        response_intent="answer",
+        conversation_context={"recent_messages": [
+            {"role": "user", "content": "Мне подарили сертификат на тандем."},
+            {"role": "assistant", "content": "На какую дату рассматриваете?"},
+        ]},
+        tool_observations=[{
+            "tool": "calendar_lookup",
+            "status": "ready",
+            "summary": "26.09.2026 — суббота, выходной.",
+            "structured": {"dates": [{"iso_date": "2026-09-26", "weekday_ru": "суббота", "is_weekend": True, "year": 2026}]},
+        }],
+    )
+
+    packet = json.loads(str(client.calls[0]["user_prompt"]))
+    assert packet["conversation"] == [
+        {"role": "user", "content": "Мне подарили сертификат на тандем."},
+        {"role": "assistant", "content": "На какую дату рассматриваете?"},
+    ]
+    assert packet["grounding_evidence"] == {
+        "facts": [{
+            "id": "f1", "text": "Прыжки обычно проходят по выходным.",
+            "source_refs": ["compiled/concepts/booking.md"], "conditions": [], "modality": None,
+        }],
+    }
+    assert "answer_basis" not in json.dumps(packet, ensure_ascii=False)
+    assert "coverage" not in json.dumps(packet, ensure_ascii=False)
+
+
 def test_begin_turn_requests_social_finalization_without_customer_text() -> None:
     client = ActionClient('{"action":"finalize","response_intent":"social_reply","reason":"social"}')
     service = DirectLLMService(client=client, prompt_service=PromptService())
@@ -319,9 +364,9 @@ def test_finalizer_prompt_requires_natural_grammatical_russian() -> None:
     assert "Сформулируй естественный клиентский ответ как редактор переданного evidence, выбрав route только из allowed_routes. response_intent задаёт намерение, но не доказывает достаточности сведений и не отменяет allowed_routes. Если answer разрешён и evidence прямо покрывает фактический запрос с существенными ограничениями, передай прямой ответ без дополнений и неподтверждённых выводов. Если существенных сведений нет, верни cannot_answer: клиентский текст содержит только естественно сформулированный профильный fallback из profile_no_answer_option. Не добавляй объяснение отсутствия сведений, оправдание отказа, пересказ вопроса, рассуждение, уточняющий вопрос или обещание результата. Служебные основания оставь только в reason. Для чистого календарного вопроса используй готовое календарное evidence; в смешанном запросе календарь не компенсирует непокрытую фактическую часть. Для социальной реплики создай короткий естественный social_reply без бизнес-фактов. Если текущая реплика прямо отвечает на предыдущий вопрос ассистента, прими её как состояние диалога; не повторяй тот же вопрос." in prompt
     assert "Для чистого календарного вопроса используй готовое календарное evidence" in prompt
     assert "Если текущая реплика прямо отвечает на предыдущий вопрос ассистента, прими её как состояние диалога; не повторяй тот же вопрос." in prompt
-    assert "Связанность evidence с темой вопроса не означает, что evidence отвечает на вопрос." in prompt
+    assert "Связанность facts с темой вопроса не означает, что они отвечают на вопрос." in prompt
     assert "Если прямого ответа нет, не создавай route=answer и не задавай вопрос, который предполагает неподтверждённый факт." in prompt
-    assert "answer_basis — кандидатная сводка, а не самостоятельный источник фактов и не требование закрыть вопрос клиента." in prompt
+    assert "answer_basis" not in prompt
     assert "Если evidence не содержит прямого ответа на фактическую часть текущей реплики, не возвращай route=answer." in prompt
     assert "allowed_routes обязательно для любого исхода. Если answer запрещён, не переоценивай отброшенные факты и кандидатную сводку и не создавай содержательный ответ. cannot_answer должен быть естественным индивидуальным текстом; фактический следующий шаг допустим только из переданной подтверждённой политики." in prompt
     assert "Отсутствие упоминания не превращай в отрицательное утверждение. При частичном покрытии ответь на подтверждённую часть и естественно обозначь границу знания; не отказывайся от всего ответа из-за одного непокрытого подпункта и не достраивай его." not in prompt

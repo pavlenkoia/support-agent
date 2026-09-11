@@ -38,7 +38,11 @@ def test_writer_receives_typed_full_evidence_without_losing_conditions():
     assert result['route'] == 'answer'
     assert len(client.calls) == 1
     actual = client.calls[0]['grounding_evidence']
-    assert actual == packet
+    assert actual['facts'][0]['text'] == 'Первое возможно при условии.'
+    assert actual['facts'][0]['source_refs'] == ['compiled/page.md']
+    assert actual['facts'][0]['conditions'] == ['при условии']
+    assert actual['facts'][0]['modality'] == 'возможно'
+    assert 'answer_basis' not in actual
 
 
 def test_partial_evidence_with_covered_facts_reaches_writer_without_gap_diagnostics():
@@ -54,29 +58,12 @@ def test_partial_evidence_with_covered_facts_reaches_writer_without_gap_diagnost
     assert len(client.calls) == 1
     payload = client.calls[0]
     assert 'answer' in payload['allowed_routes']
-    assert payload['grounding_evidence'] == {
-        'schema_version': 'answer-evidence/v1',
-        'user_question': 'Первое и второе?',
-        'context_scope': 'Выбранный предмет',
-        'acquisition_status': 'ready',
-        'facts': [{
-            'id': 'f1',
-            'text': 'Первое возможно при условии.',
-            'source_refs': ['compiled/page.md'],
-            'conditions': ['при условии'],
-            'modality': 'возможно',
-        }],
-        'coverage': {
-            'status': 'full',
-            'answered_parts': [{'question_part': 'Первое?', 'fact_ids': ['f1']}],
-            'missing_parts': [],
-            'conflicts': [],
-            'unresolved_constraints': [],
-        },
-        'answer_basis': '',
-        'calendar_facts': [],
-        'policy_evidence': [],
-    }
+    fact = payload['grounding_evidence']['facts'][0]
+    assert fact['text'] == 'Первое возможно при условии.'
+    assert fact['source_refs'] == ['compiled/page.md']
+    assert fact['conditions'] == ['при условии']
+    assert fact['modality'] == 'возможно'
+    assert 'answer_basis' not in payload['grounding_evidence']
     serialized = json.dumps(payload, ensure_ascii=False)
     assert 'Второе?' not in serialized
     assert 'Кандидатная сводка' not in serialized

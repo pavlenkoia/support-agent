@@ -97,9 +97,15 @@ class UnifiedTurnService:
                         observation["answer_evidence"] = validate_answer_evidence(
                             value["answer_evidence"], selected_source_refs=value.get("source_refs", []),
                         )
-                    except EvidenceValidationError as exc:
-                        observations.append({"tool": kind, "status": "unavailable", "reason": str(exc)})
-                        return failure(str(exc))
+                    except EvidenceValidationError:
+                        # A malformed extractor packet is not a customer fact.
+                        # Preserve any already-collected native observations and
+                        # let the model finish from their verified facts instead
+                        # of treating a coverage verdict as a terminal answer
+                        # decision.  Do not forward the malformed Wiki payload.
+                        kb_result = {"grounding_status": "not_found"}
+                        status = "not_found"
+                        observation = {"tool": kind, "status": status, "source_refs": [], "grounded_facts": []}
             else:
                 status = value.get("status")
                 observation = {"tool": kind, "status": status, "summary": value.get("summary", ""), "structured": value.get("structured", {})}
@@ -109,29 +115,13 @@ class UnifiedTurnService:
                 return failure(reason if isinstance(reason, str) and reason else "tool_unavailable")
             if status not in {"ready", "not_found"}:
                 return failure("tool_result_invalid")
-            if kind == "wiki_lookup" and status == "not_found":
-                # A successful Wiki miss contains no business evidence for a
-                # second selector pass to refine.  Hand it to the common
-                # finalization boundary, which applies the sourced fallback.
-                return {
-                    **packet(),
-                    "finalization_requested": {
-                        "response_intent": "missing_grounding",
-                        "reason": "wiki_not_found",
-                    },
-                }
-            if kind == "wiki_lookup" and self._has_complete_answer_evidence(observation.get("answer_evidence")):
-                return {
-                    **packet(),
-                    "finalization_requested": {
-                        "response_intent": "answer",
-                        "reason": "complete_wiki_evidence",
-                    },
-                }
             history.extend([
                 {"role": "assistant", "tool_calls": [{"id": ident, "type": "function", "function": {"name": kind, "arguments": json.dumps(request, ensure_ascii=False)}}]},
                 {"role": "tool", "tool_call_id": ident, "content": json.dumps(observation, ensure_ascii=False)},
             ])
+            # The selector sees literal dialogue and ordered tool results.  A
+            # model-authored lookup query is retrieval-only and must never
+            # become a rewritten customer question for later decisions.
             continuation_context = {**context, "tool_observations": list(observations), "tool_requests": list(requests), "native_tool_messages": list(history)}
             continuation = getattr(self.model, "continue_after_tool", None)
             if callable(continuation):
@@ -185,8 +175,10 @@ class CalendarLookupTool:
 
     def lookup(self, *, text: str, context: dict, tool_request: dict[str, str]) -> dict[str, Any]:
         _ = text
+        date_expressions = tool_request.get("date_expressions")
         return self.runtime.lookup_calendar(
-            date_expression=tool_request["date_expression"],
+            date_expressions=date_expressions if isinstance(date_expressions, list) else None,
+            date_expression=tool_request.get("date_expression"),
             conversation_context=context,
         )
 
@@ -203,7 +195,6 @@ class WikiLookupTool:
     def lookup(self, *, text: str, context: dict, tool_request: dict[str, str]) -> dict[str, Any]:
         query = tool_request["query"]
         scoped_context = dict(context)
-        scoped_context["tool_request"] = dict(tool_request)
         scoped_context["user_question"] = text
         retrieval = self.retrieval.retrieve(
             query,

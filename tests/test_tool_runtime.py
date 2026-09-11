@@ -57,7 +57,7 @@ def test_prompt_only_finalizer_preserves_social_text_without_grounding_evidence(
 
     assert client.payload is not None
     assert client.payload["knowledge_mode"] == "prompt_only"
-    assert client.payload["grounding_evidence"] == empty_answer_evidence(client.payload["user_message"])
+    assert client.payload["grounding_evidence"] == {"facts": []}
     assert "planner_action" not in json.dumps(client.payload, ensure_ascii=False)
     assert "planner_reason" not in json.dumps(client.payload, ensure_ascii=False)
     assert result["response_text"] == "Спасибо за обращение!"
@@ -80,6 +80,26 @@ def test_tool_runtime_resolves_relative_dates_from_runtime_context(monkeypatch) 
         assert result["tool_status"] == "used"
         assert result["tool_trace"][0]["tool_name"] == "calendar_weekday"
         assert result["tool_trace"][0]["input"]["iso_date"] == expected_iso_date
+
+
+def test_calendar_lookup_resolves_each_explicit_date_against_current_year(monkeypatch) -> None:
+    monkeypatch.setattr(tool_runtime_module, "datetime", FrozenDateTime)
+
+    result = ToolRuntimeService().lookup_calendar(
+        date_expressions=["26 сентября", "27 сентября"],
+        conversation_context={"calendar_reference_at": "2026-09-11T05:34:46+00:00"},
+    )
+
+    assert result == {
+        "status": "ready",
+        "summary": "26.09.2026 — суббота, выходной; 27.09.2026 — воскресенье, выходной.",
+        "structured": {
+            "dates": [
+                {"iso_date": "2026-09-26", "weekday_ru": "суббота", "is_weekend": True, "year": 2026},
+                {"iso_date": "2026-09-27", "weekday_ru": "воскресенье", "is_weekend": True, "year": 2026},
+            ],
+        },
+    }
 
 
 def test_tool_runtime_does_not_treat_office_hours_as_weekend_jump_check(monkeypatch) -> None:
@@ -183,7 +203,7 @@ def test_ready_grounding_is_finalized_by_customer_facing_model(monkeypatch) -> N
     assert result["reason"] == "contextual_answer"
 
 
-def test_ready_grounding_sends_answer_basis_and_facts_without_internal_trace_to_final_model(monkeypatch) -> None:
+def test_ready_grounding_sends_facts_without_internal_synthesis_or_trace_to_final_model(monkeypatch) -> None:
     class CapturingClient(BaseLLMClient):
         def __init__(self) -> None:
             self.payload: dict | None = None
@@ -230,7 +250,8 @@ def test_ready_grounding_sends_answer_basis_and_facts_without_internal_trace_to_
     assert client.payload is not None
     assert client.system_prompt is not None
     evidence = client.payload["grounding_evidence"]
-    assert evidence["answer_basis"] == "В этот день прыжки не проводятся."
+    assert "answer_basis" not in evidence
+    assert "coverage" not in evidence
     assert [fact["text"] for fact in evidence["facts"]] == [
         "Прыжки обычно проходят по выходным.",
         "Дата 2026-08-04 — вторник, будний день.",

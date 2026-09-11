@@ -53,24 +53,41 @@ class ToolRuntimeService:
     def matches_calendar_query(self, text: str) -> bool:
         return self._extract_calendar_period(text) is not None or self._extract_date(text) is not None
 
-    def lookup_calendar(self, *, date_expression: str, conversation_context: dict | None = None) -> dict[str, Any]:
-        """Return a calendar fact only; business rules remain exclusively in Wiki."""
-        reference_date = self._reference_date(conversation_context)
-        parsed_date = self._extract_date(date_expression, reference_date=reference_date)
-        if parsed_date is None:
+    def lookup_calendar(
+        self,
+        *,
+        date_expressions: list[str] | None = None,
+        date_expression: str | None = None,
+        conversation_context: dict | None = None,
+    ) -> dict[str, Any]:
+        """Resolve every explicitly requested date against the turn reference.
+
+        Calendar facts are deterministic.  A customer can name several dates in
+        one turn, so the tool owns splitting them into separate facts rather
+        than making the model choose one date or infer a year itself.
+        """
+        expressions = date_expressions or ([date_expression] if date_expression else [])
+        if not expressions or any(not isinstance(value, str) or not value.strip() for value in expressions):
             return {"status": "not_found", "summary": "", "structured": {}}
-        weekday_index = parsed_date.weekday()
-        weekday_ru = WEEKDAY_RU[weekday_index]
-        return {
-            "status": "ready",
-            "summary": f"Дата {parsed_date.isoformat()} приходится на {weekday_ru}.",
-            "structured": {
-                "iso_date": parsed_date.isoformat(),
-                "weekday_ru": weekday_ru,
-                "is_weekend": weekday_index >= 5,
-                "year": parsed_date.year,
-            },
-        }
+        reference_date = self._reference_date(conversation_context)
+        dates = [self._extract_date(value, reference_date=reference_date) for value in expressions]
+        if any(value is None for value in dates):
+            return {"status": "not_found", "summary": "", "structured": {}}
+        facts = [
+            {
+                "iso_date": value.isoformat(),
+                "weekday_ru": WEEKDAY_RU[value.weekday()],
+                "is_weekend": value.weekday() >= 5,
+                "year": value.year,
+            }
+            for value in dates
+            if value is not None
+        ]
+        summary = "; ".join(
+            f"{item['iso_date'][8:10]}.{item['iso_date'][5:7]}.{item['year']} — {item['weekday_ru']}, {'выходной' if item['is_weekend'] else 'будний день'}"
+            for item in facts
+        ) + "."
+        return {"status": "ready", "summary": summary, "structured": {"dates": facts}}
 
     @staticmethod
     def _reference_date(conversation_context: dict | None) -> date:

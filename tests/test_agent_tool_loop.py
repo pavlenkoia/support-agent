@@ -74,7 +74,7 @@ def test_unified_turn_runs_wiki_after_model_requests_its_tool() -> None:
     assert result["trace"]["actions"] == ["wiki_lookup"]
 
 
-def test_unified_turn_finalizes_complete_wiki_evidence_without_selector_continuation() -> None:
+def test_unified_turn_returns_complete_wiki_evidence_to_selector_before_finalization() -> None:
     class TurnModel:
         def __init__(self) -> None:
             self.continuation_calls = 0
@@ -93,23 +93,24 @@ def test_unified_turn_finalizes_complete_wiki_evidence_without_selector_continua
             }
 
         def continue_after_tool(self, **kwargs) -> dict:
-            _ = kwargs
             self.continuation_calls += 1
-            raise AssertionError("complete validated wiki evidence must go directly to the finalizer")
+            assert kwargs["context"]["recent_messages"] == [{"role": "user", "content": "Мне 17 лет, можно в тандем?"}]
+            assert "tool_request" not in kwargs["context"]
+            return {"kind": "finalization_requested", "response_intent": "answer", "reason": "selector_checked_tool_result", "llm_trace": []}
 
     model = TurnModel()
     turn = UnifiedTurnService(model=model, wiki_lookup=RecordingWikiLookup(), calendar_lookup=RecordingCalendarLookup())
 
-    result = turn.run(text="Мне 17 лет, можно в тандем?", context={})
+    result = turn.run(text="Мне 17 лет, можно в тандем?", context={"recent_messages": [{"role": "user", "content": "Мне 17 лет, можно в тандем?"}]})
 
-    assert model.continuation_calls == 0
+    assert model.continuation_calls == 1
     assert result["finalization_requested"] == {
         "response_intent": "answer",
-        "reason": "complete_wiki_evidence",
+        "reason": "selector_checked_tool_result",
     }
 
 
-def test_unified_turn_finalizes_wiki_not_found_without_selector_continuation() -> None:
+def test_unified_turn_returns_wiki_not_found_to_selector_before_finalization() -> None:
     class NotFoundWikiLookup:
         def lookup(self, *, text: str, context: dict, tool_request: dict[str, str]) -> dict:
             _ = (text, context, tool_request)
@@ -135,17 +136,17 @@ def test_unified_turn_finalizes_wiki_not_found_without_selector_continuation() -
         def continue_after_tool(self, **kwargs) -> dict:
             _ = kwargs
             self.continuation_calls += 1
-            raise AssertionError("not_found must reach the common fallback boundary directly")
+            return {"kind": "finalization_requested", "response_intent": "missing_grounding", "reason": "selector_checked_wiki_miss", "llm_trace": []}
 
     model = TurnModel()
     turn = UnifiedTurnService(model=model, wiki_lookup=NotFoundWikiLookup(), calendar_lookup=RecordingCalendarLookup())
 
     result = turn.run(text="Где получить нашу запись?", context={})
 
-    assert model.continuation_calls == 0
+    assert model.continuation_calls == 1
     assert result["finalization_requested"] == {
         "response_intent": "missing_grounding",
-        "reason": "wiki_not_found",
+        "reason": "selector_checked_wiki_miss",
     }
 
 
@@ -250,13 +251,13 @@ def test_calendar_lookup_tool_resolves_relative_date_against_message_context() -
 
     assert result == {
         "status": "ready",
-        "summary": "Дата 2026-08-31 приходится на понедельник.",
-        "structured": {
+        "summary": "31.08.2026 — понедельник, будний день.",
+        "structured": {"dates": [{
             "iso_date": "2026-08-31",
             "weekday_ru": "понедельник",
             "is_weekend": False,
             "year": 2026,
-        },
+        }]},
     }
 
 
@@ -269,8 +270,8 @@ def test_calendar_lookup_tool_interprets_reference_in_operational_timezone() -> 
         tool_request={"date_expression": "сегодня", "requested_calendar_fact": "день недели"},
     )
 
-    assert result["structured"]["iso_date"] == "2026-08-31"
-    assert result["structured"]["weekday_ru"] == "понедельник"
+    assert result["structured"]["dates"][0]["iso_date"] == "2026-08-31"
+    assert result["structured"]["dates"][0]["weekday_ru"] == "понедельник"
 
 
 def test_unified_turn_keeps_wiki_llm_trace_for_operational_audit() -> None:
@@ -337,6 +338,6 @@ def test_wiki_lookup_tool_preserves_existing_catalog_reader_contract() -> None:
     assert reader.calls == [{
         "text": "запись на самостоятельный прыжок",
         "hits": [{"source_ref": "index/catalog.json"}],
-        "conversation_context": {"user_question": "Как записаться?", "recent_messages": [], "tool_request": {"query": "запись на самостоятельный прыжок", "context_scope": "самостоятельный прыжок", "needed_fact": "канал записи"}},
+        "conversation_context": {"user_question": "Как записаться?", "recent_messages": []},
         "require_coverage_review": True,
     }]

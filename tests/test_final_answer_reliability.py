@@ -41,20 +41,16 @@ def test_non_answerable_writer_restriction(status, calendar, route):
     result = DirectLLMService(client=writer).respond('Первое и второе?', {'grounding_status': 'ready', 'source_refs': ['compiled/page.md'], 'answer_evidence': packet}, tool_observations=[POLICY] + ([CALENDAR] if calendar else []))
     assert len(writer.calls) == 1
     payload = writer.calls[0]
-    assert payload['allowed_routes'] == ['cannot_answer']
-    # The writer gets only profile policy; factual packet and dialogue stay in audit.
-    assert payload['grounding_evidence'] == {'policy_evidence': [POLICY]}
-    assert payload['tool_facts'] == []
+    assert 'answer' in payload['allowed_routes']
+    # The writer receives literal dialogue plus compact facts; coverage verdicts
+    # no longer decide whether it may answer.
+    assert payload['grounding_evidence'] == {'facts': []}
+    assert payload['tool_facts'] == [POLICY] + ([{'kind': 'calendar_lookup', 'summary': CALENDAR['summary'], 'source_ref': 'tool:calendar_lookup', 'structured': CALENDAR['structured']}] if calendar else [])
     assert 'Первое возможно при условии.' not in json.dumps(payload, ensure_ascii=False)
     assert 'Кандидатная сводка' not in json.dumps(payload, ensure_ascii=False)
     assert packet == original
-    if route == 'cannot_answer':
-        assert result['route'] == route
-        assert result['response_text'] == 'Точный модельный текст.'
-    else:
-        assert result['route'] == 'retry_pending'
-        assert result['response_text'] == ''
-        assert result['reason'] == 'final_response_route_not_allowed'
+    assert result['route'] == route
+    assert result['response_text'] == 'Точный модельный текст.'
 
 
 def test_writer_v2_primary_task_preserves_uncertainty_and_context():
@@ -74,8 +70,9 @@ def test_writer_v2_primary_task_preserves_uncertainty_and_context():
     assert 'Сформулируй готовый естественный ответ на русском языке.' in payload['output_rules']
     assert 'Не склеивай извлечённые факты механически.' in payload['output_rules']
     assert any('весь response_text — только профильный fallback' in r for r in payload['output_rules'])
-    assert payload['grounding_evidence']['policy_evidence'] == [POLICY]
-    assert payload['allowed_routes'] == ['cannot_answer']
+    assert payload['grounding_evidence'] == {'facts': []}
+    assert payload['tool_facts'] == [POLICY]
+    assert 'answer' in payload['allowed_routes']
     system = DirectLLMService._build_finalization_system_prompt('', knowledge_mode='kb_grounded')
     assert 'При route=cannot_answer весь response_text содержит только' in system
     assert 'при cannot_answer они не применяются' in system
@@ -164,7 +161,7 @@ def test_coverage_restriction_does_not_use_intent_as_evidence(status, intent, ro
 def test_missing_wiki_with_calendar_cannot_bypass_restriction():
     writer = Writer('cannot_answer')
     result = DirectLLMService(client=writer).respond('Вопрос', {}, tool_observations=[{'tool': 'wiki_lookup', 'status': 'not_found'}, CALENDAR, POLICY])
-    assert writer.calls[0]['allowed_routes'] == ['cannot_answer']
+    assert 'answer' in writer.calls[0]['allowed_routes']
     assert result['route'] == 'cannot_answer'
 
 
@@ -194,9 +191,8 @@ def test_outer_nonready_cannot_promote_inner_full():
     assert writer.calls == []
 
 
-def test_social_forbidden_answer_is_not_relabelled():
+def test_social_finalizer_keeps_model_selected_route():
     writer = Writer('answer')
     result = DirectLLMService(client=writer).respond('Спасибо!', {}, response_intent='social_reply')
-    assert result['route'] == 'retry_pending'
-    assert result['response_text'] == ''
-    assert result['reason'] == 'final_response_route_not_allowed'
+    assert result['route'] == 'answer'
+    assert result['response_text'] == 'Точный модельный текст.'

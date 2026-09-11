@@ -22,11 +22,12 @@ def test_cannot_answer_writer_receives_policy_without_incident_details():
         tool_observations=[POLICY],
     )
     payload = writer.calls[0]
-    assert payload['allowed_routes'] == ['cannot_answer']
-    assert 'user_message' not in payload
-    assert 'conversation' not in payload
-    assert payload['grounding_evidence'] == {'policy_evidence': [POLICY]}
-    assert payload['tool_facts'] == []
-    assert 'PRIVATE_' not in json.dumps(payload)
+    assert 'answer' in payload['allowed_routes']
+    assert payload['user_message'] == 'PRIVATE_QUESTION_MARKER'
+    assert payload['conversation'] == []
+    assert payload['grounding_evidence'] == {'facts': []}
+    assert payload['tool_facts'] == [POLICY]
+    assert 'PRIVATE_SCOPE_MARKER' not in json.dumps(payload)
+    assert 'PRIVATE_MISSING_MARKER' not in json.dumps(payload)
     assert packet == original
     assert result['response_text'] == 'Точный модельный текст.'

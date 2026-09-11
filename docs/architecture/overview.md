@@ -2,7 +2,7 @@
 
 ## Repository contract — deployed minimal stabilization
 
-The engine runs as `ANSWER_ENGINE_MODE=agent_tool_loop`. Production release `aaa9b51219b00875764bf497f40f8ca280c3ae95` preserves the two verified one-Wiki-result paths: complete validated evidence reaches the common finalizer directly; a successful Wiki `not_found` reaches the sourced fixed fallback directly. It also bounds the grounded-evidence packet to the facts explicitly linked from `coverage.answered_parts`, preventing incidental surplus extraction facts from turning a directly covered answer into a technical `evidence_too_large` failure. Multi-tool/calendar ordering remains a separately unaccepted scope and is not release evidence for this stabilization.
+The engine runs as `ANSWER_ENGINE_MODE=agent_tool_loop`. Production uses one semantically owned answer path: the model selects zero to two native Wiki/calendar calls, then the common finalizer writes customer text from the literal turn, bounded dialogue, and compact verified facts. Retrieval query/scope, candidate answer basis, coverage verdicts, raw pages, and internal reasons are audit mechanics and never finalizer input.
 
 ```text
 Telegram / VK inbound event
@@ -14,14 +14,14 @@ Telegram / VK inbound event
       → all assistant.tool_calls / role=tool pairs retain native IDs during execution
       → after the second successful tool, one terminal selection projection is built from the checked native history
       → action=finalize + response_intent, no customer draft
-  → RoutingService allowlisted evidence + structural allowed_routes + common respond exactly once
+  → RoutingService allowlisted compact facts + common respond exactly once
   → shared output validator + PolicyService + channel limit
   → durable message persistence + transport delivery
 ```
 
 Technical selector/tool failures take a textless `retry_pending` path without invoking the writer. A semantic `not_found` result can proceed to finalization.
 
-The common writer system contract uses a compact allowlisted evidence packet; allowed_routes restrict outcomes after collection; non-answerable facts/basis are excluded from writer input. A ready partial Wiki result with answerable facts is projected to only the fact IDs linked by `coverage.answered_parts`: the writer sees neither missing parts, coverage diagnostics, nor a candidate basis that could contain an omitted detail. If no answerable facts remain, or evidence is conflicting/unavailable, the current office policy emits an exact sourced fallback without a writer call; this is the only fixed-text exception. The verified direct-fact path has no post-Wiki selector call, so a complete packet cannot be lost in a second provider protocol exchange.
+The common writer receives a compact allowlisted packet: literal current message, bounded dialogue, cited Wiki facts, deterministic calendar facts, and sourced policy options. The writer, not coverage or retrieval, selects only facts directly relevant to the question and writes the outcome. There is no fixed customer-text fallback: even a sourced no-answer option is presented to the common writer as policy evidence. Technical failures remain textless `retry_pending`.
 
 ## Core boundaries
 
@@ -29,7 +29,7 @@ The common writer system contract uses a compact allowlisted evidence packet; al
 - **Wiki is the only business-fact source.** The system prompt is generic and contains no profile facts. For a substantive turn, the customer model must call `wiki_lookup` before returning customer facts, procedures, contacts, promises, or domain-specific clarification/out-of-scope text.
 - **Social exception is narrow.** A short pure social message without a request or continuation of a customer situation may return a non-factual `social_reply` without Wiki and without a second finalizer call.
 - **Runtime tools are factual sources for their own domain only.** The date tool supplies calendar facts; it does not infer business schedules.
-- **Evidence acquisition and direct coverage are separate.** The stage-4 candidate validates `answer-evidence/v1` (up to 16384 bytes): literal question/scope, acquisition status, cited fact IDs/text/conditions/modality, coverage/missing/conflicts, candidate basis and separate calendar/policy facts. The packet allows at most eight facts; surplus extraction facts are removed only when they are not referenced by `coverage.answered_parts`. A ready partial packet may still reach the writer, but only after a customer-safe projection keeps those linked facts and removes every missing/conflicting diagnostic and candidate basis. A packet with no linked answerable facts, a conflict, or an unresolved constraint fails closed. `ready` is not semantic proof; a typed `not_found` is not upgraded because related facts exist. Unavailable/invalid evidence blocks the writer. Raw extraction rationale and pages are excluded.
+- **Evidence acquisition and direct coverage are separate.** The runtime validates typed evidence and retains compact cited fact text, source references, conditions, and modality. `ready` is not semantic proof: retrieval requests, answer basis, coverage/missing/conflict verdicts, and related but unasked facts do not authorize an answer. The finalizer evaluates direct relevance against the literal question. Raw extraction rationale and pages are excluded.
 - **Customer output is validated at the boundary.** The shared application validator requires an object, an exact supported route and non-empty string `response_text`; missing/null `confidence` stays unknown (`None`), otherwise only finite numbers in `[0, 1]` are valid. Invalid output is textless `retry_pending`, with reason distinct from outcome. After the idempotent greeting policy, Telegram's 4096-character / VK's 9000-character plain-text limits are checked: overflow is `output_too_long`, never a silent cut. Newlines and complete conditions survive; existing outer trim and `**`/`__` marker removal remain. See [the structural output contract](../specs/final-answer-contract.md#structural-output-validation-stage-1).
 - **Technical LLM/Wiki failure is fail-closed.** It creates `retry_pending` with empty customer text and is retried by the transport worker. It is never converted into a guessed domain answer.
 - **The first-reply greeting is deterministic.** `PolicyService.finalize_simple_customer_text()` adds exactly one `Здравствуйте!` to the first non-empty customer-visible reply. It adds none to later replies and does not duplicate a model-provided greeting.
@@ -50,7 +50,7 @@ The common writer system contract uses a compact allowlisted evidence packet; al
 
 The OpenAI-compatible adapter normalizes the supported provider variants—`_native_tool_calls`, standard OpenAI `tool_calls`, legacy `function_call`, a one-item legacy map list such as `[{"wiki_lookup": {...}}]`, and the exact one-item Wiki action-object list `[{"action":"wiki_lookup","query":"...","context_scope":"...","needed_fact":"..."}]`—then validates one exact registered function name and its JSON arguments against the tool schema. The action-object form is translated losslessly to one synthetic native call; it cannot add capability or infer missing arguments. Unknown tools, multiple calls, malformed JSON, missing fields, and invalid schemas fail closed as `retry_pending`; normalization never invents a tool or rewrites an argument into a business decision. `parallel_tool_calls=false` bounds the customer action to one call. The runtime passes the model-selected request to catalog navigation and grounded extraction. Extraction returns both fact-bound `coverage` and cited evidence, so the former separate `coverage_review` LLM pass is disabled in production (`KB_AGENT_MERGE_COVERAGE_EXTRACTION=true`). For a contextual follow-up, `context_scope` preserves the last explicit customer-selected subject; it must not be widened to a neighboring variant unless the customer asks to compare or change it.
 
-`calendar_lookup` requires exactly `date_expression` and `requested_calendar_fact`. It supplies calendar facts only and never infers a business schedule. A ready calendar observation is retained separately from Wiki business facts and passed to the common finalizer after collection.
+`calendar_lookup` requires exactly `date_expressions` and `requested_calendar_fact`; `date_expressions` is a list of one to eight explicit date fragments. It resolves every date against the turn reference time and returns deterministic ISO date, weekday, and weekend facts. It supplies calendar facts only and never infers a business schedule. A ready calendar observation is retained separately from Wiki business facts and passed to the common finalizer after collection.
 
 ## Main runtime components
 
