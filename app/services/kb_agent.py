@@ -679,10 +679,16 @@ class KBAgentService:
             if any(ref not in refs for fact in answer_evidence["facts"] for ref in fact["source_refs"]):
                 raise EvidenceValidationError("evidence_citation_missing")
         except EvidenceValidationError as exc:
-            packet = empty_answer_evidence(original_question, context_scope=tool_request.get("context_scope", ""), acquisition_status="unavailable")
-            return {"grounding_status": "unavailable", "answer_basis": "", "grounded_facts": [],
-                    "missing_information": [], "cited_source_refs": [], "needs_customer_clarification": False,
-                    "answer_evidence": packet, "reason": str(exc)}
+            # A malformed extraction envelope is not an absence of the pages that
+            # were already selected and read. Preserve those literal page facts
+            # for the agent loop; it remains the only component that decides
+            # whether the facts answer the customer question.
+            return self._fallback_grounded_facts(
+                answer_context,
+                reason=f"evidence_validation_fallback:{exc}",
+                user_question=original_question,
+                context_scope=tool_request.get("context_scope", ""),
+            )
         return {"grounding_status": parsed["grounding_status"], "answer_basis": answer_evidence["answer_basis"],
                 "grounded_facts": answer_evidence["facts"], "coverage": answer_evidence["coverage"],
                 "missing_information": missing, "cited_source_refs": list(refs),
