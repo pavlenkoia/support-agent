@@ -142,7 +142,7 @@ class DirectLLMService:
         first_reply = not any(item.get("role") == "assistant" for item in conversation if isinstance(item, dict))
         tool_observations = self._project_tool_observations(context)
         tool_state = {"wiki_lookup": "available", "calendar_lookup": "available"}
-        remaining_tool_calls = max(0, 4 - len(tool_observations))
+        remaining_tool_calls = max(0, 3 - len(tool_observations))
         return json.dumps(
             {
                 "task": "Выбери следующее действие agent loop для исходного вопроса user_message с учётом conversation и всех результатов инструментов. Сохранение предмета, отношений, ограничений и неопределённости вопроса важнее удобства поиска: аргументы инструмента не должны добавлять отсутствующее уточнение или предполагаемый ответ. Если нужен ещё факт зарегистрированного инструмента, вызови ровно один native-инструмент: calendar_lookup или wiki_lookup. Инструменты можно вызывать повторно и в произвольном порядке, пока не исчерпан remaining_tool_calls. Когда фактов достаточно, сам верни готовый содержательный клиентский JSON-ответ по response_schema. Не возвращай action=finalize и не передавай задачу другому решателю.",
