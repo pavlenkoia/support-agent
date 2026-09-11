@@ -78,6 +78,7 @@ def test_begin_turn_requests_wiki_as_the_only_factual_source() -> None:
     assert "calendar_lookup — не источник бизнес-фактов" in prompt
     assert "wiki_lookup — единственный источник бизнес-фактов из Wiki." in prompt
     assert "Если явная дата или несколько явных дат влияют на ответ" in prompt
+    assert "практический условный вывод" in prompt
     assert "Любой неизвестный инструмент" in prompt
     assert client.calls[0]["tool_choice"] == "auto"
     assert client.calls[0]["parallel_tool_calls"] is False
