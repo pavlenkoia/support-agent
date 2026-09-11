@@ -373,21 +373,37 @@ class DirectLLMService:
             }, ensure_ascii=False)
         captured_input = json.loads(messages[1]["content"])
         captured_input["tool_observation"] = observation
-        recorded_call = False
-        try:
-            raw = self.client.generate(
-                system_prompt=system_prompt, user_prompt="", temperature=self.temperature,
-                messages=messages, **selection_options,
-            )
-            self._record_llm_call("tool_result_selection", capture_model_input("continue_after_tool", captured_input))
-            recorded_call = True
-            parsed = self._parse_json_object(raw)
-        except Exception as exc:
-            if not recorded_call:
+        for protocol_attempt in range(2):
+            attempt_messages = list(messages)
+            if protocol_attempt:
+                attempt_messages.append({
+                    "role": "user",
+                    "content": json.dumps({
+                        "protocol_recovery": "previous_selector_output_was_not_valid_json",
+                        "task": "Повтори тот же шаг agent loop строго в требуемом JSON-формате, не меняя предмет, facts или доступные возможности.",
+                    }, ensure_ascii=False),
+                })
+            recorded_call = False
+            try:
+                raw = self.client.generate(
+                    system_prompt=system_prompt, user_prompt="", temperature=self.temperature,
+                    messages=attempt_messages, **selection_options,
+                )
                 self._record_llm_call("tool_result_selection", capture_model_input("continue_after_tool", captured_input))
-            self._active_llm_trace.append({"role": "direct_llm", "step": "tool_result_finalization_failed", "error": type(exc).__name__})
-            return self._invalid_begin_turn("tool_result_finalization_failed")
-        return self._selector_decision(parsed)
+                recorded_call = True
+                decision = self._selector_decision(self._parse_json_object(raw))
+            except Exception as exc:
+                if not recorded_call:
+                    self._record_llm_call("tool_result_selection", capture_model_input("continue_after_tool", captured_input))
+                if protocol_attempt == 0:
+                    continue
+                self._active_llm_trace.append({"role": "direct_llm", "step": "tool_result_finalization_failed", "error": type(exc).__name__})
+                return self._invalid_begin_turn("tool_result_finalization_failed")
+            result = decision.get("result") if isinstance(decision, dict) else None
+            if protocol_attempt == 0 and isinstance(result, dict) and result.get("reason") in {"native_tool_request_invalid", "invalid_selector_output"}:
+                continue
+            return decision
+        return self._invalid_begin_turn("tool_result_finalization_failed")
 
     def _project_tool_observations(self, context: dict) -> list[dict[str, Any]]:
         observations = context.get("tool_observations") if isinstance(context, dict) else []

@@ -343,3 +343,27 @@ def test_selector_packet_includes_declared_profile_scope(monkeypatch: pytest.Mon
     packet = json.loads(service._build_selector_prompt(text="question", context={"recent_messages": []}))
 
     assert packet["profile_context"] == {"role": "declared role", "in_scope": ["declared service"], "out_of_scope": ["other service"]}
+
+
+def test_continue_after_tool_retries_invalid_terminal_envelope_once() -> None:
+    client = SequenceActionClient(
+        "not-json",
+        '{"route":"answer","response_text":"Подтверждённый ответ.","confidence":0.9,"reason":"grounded"}',
+    )
+    service = DirectLLMService(client=client, prompt_service=PromptService())
+    context = {"recent_messages": [], "tool_observations": [
+        {"tool": "calendar_lookup", "status": "ready", "summary": "calendar"},
+        {"tool": "wiki_lookup", "status": "ready", "source_refs": ["kb/page.md"]},
+        {"tool": "wiki_lookup", "status": "not_found", "source_refs": []},
+    ]}
+
+    result = service.continue_after_tool(
+        text="Question", context=context, tool_name="wiki_lookup", tool_call_id="call-3",
+        tool_request={"query": "Question", "context_scope": "Question", "needed_fact": "fact"},
+        observation={"tool": "wiki_lookup", "status": "not_found", "source_refs": [], "grounded_facts": []},
+    )
+
+    assert result["kind"] == "direct_response"
+    assert result["result"]["response_text"] == "Подтверждённый ответ."
+    assert len(client.calls) == 2
+    assert "protocol_recovery" in client.calls[1]["messages"][-1]["content"]
