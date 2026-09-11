@@ -146,10 +146,20 @@ class SimpleAnswerEngine:
                 telemetry["contract_error"] = "forbidden_exact_dates_for_period"
                 return self._result("cannot_answer", "", [], telemetry)
             return self._result(kind, response_text, source_refs, telemetry)
+        except json.JSONDecodeError as exc:
+            # Provider-default reasoning returns a customer-ready final text in
+            # content rather than the requested JSON envelope. In natural
+            # full-corpus mode it is still the sole model output; preserve it
+            # instead of converting a valid answer into a blank refusal.
+            if self.preserve_grounded_text and isinstance(raw, str) and raw.strip():
+                telemetry["contract_error"] = "reasoning_plain_text"
+                return self._result("final_response", raw.strip(), [], telemetry)
+            telemetry["contract_error"] = str(exc)
+            return self._result("cannot_answer", "", [], telemetry)
         except ValueError as exc:
             telemetry["contract_error"] = str(exc)
             return self._result("cannot_answer", "", [], telemetry)
-        except (KeyError, TypeError, json.JSONDecodeError) as exc:
+        except (KeyError, TypeError) as exc:
             telemetry["contract_error"] = f"invalid_envelope:{type(exc).__name__}"
             return self._result("cannot_answer", "", [], telemetry)
 
