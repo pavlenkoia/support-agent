@@ -21,7 +21,7 @@ Telegram / VK inbound event
 
 Technical selector/tool failures take a textless `retry_pending` path without invoking the writer. A semantic `not_found` result can proceed to finalization.
 
-The common writer receives a compact allowlisted packet: literal current message, bounded dialogue, cited Wiki facts, deterministic calendar facts, and sourced policy options. The writer, not coverage or retrieval, selects only facts directly relevant to the question and writes the outcome. There is no fixed customer-text fallback: even a sourced no-answer option is presented to the common writer as policy evidence. Technical failures remain textless `retry_pending`.
+The common writer receives a compact allowlisted packet: literal current message, bounded dialogue, cited Wiki facts, deterministic calendar facts, and sourced policy options. The writer, not coverage or retrieval, selects only facts directly relevant to the question and writes the outcome. A confirmed current source for a requested dynamic value is a direct answer; the writer gives the source without adding merely related conditions, internal process, contact, payment, or explanation of an absent value. There is no fixed customer-text fallback: even a sourced no-answer option is presented to the common writer as policy evidence. Technical failures remain textless `retry_pending`.
 
 ## Core boundaries
 
