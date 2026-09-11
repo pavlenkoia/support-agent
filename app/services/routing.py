@@ -7,6 +7,7 @@ from sqlalchemy import select
 from app.core.config import settings
 from app.core.db import SessionLocal
 from app.models.case import SupportCase
+from app.models.message import Message
 from app.models.workflow_event import WorkflowEvent
 from app.schemas.message import InboundMessage
 from app.services.agent_tool_loop import (
@@ -33,6 +34,7 @@ from app.services.persistence import (
 )
 from app.services.policy import PolicyService
 from app.services.retrieval import RetrievalService
+from app.services.simple_answer_engine import SimpleAnswerEngine
 from app.services.tool_runtime import ToolRuntimeService
 from app.workers.summarizer import SummaryService
 
@@ -51,6 +53,7 @@ class RoutingService:
         policy: PolicyService | None = None,
         tool_runtime: ToolRuntimeService | None = None,
         turn_service: UnifiedTurnService | None = None,
+        simple_answer_engine: SimpleAnswerEngine | None = None,
         answer_engine_mode: str | None = None,
     ) -> None:
         self.session_factory = session_factory
@@ -64,8 +67,17 @@ class RoutingService:
         self.policy = policy or PolicyService()
         self.tool_runtime = tool_runtime or ToolRuntimeService()
         self.answer_engine_mode = answer_engine_mode or settings.answer_engine_mode
-        if self.answer_engine_mode != "agent_tool_loop":
+        self.simple_answer_engine = simple_answer_engine
+        if self.answer_engine_mode not in {"agent_tool_loop", "simple_full_corpus_natural"}:
             raise ValueError(f"unsupported answer engine: {self.answer_engine_mode}")
+        if self.answer_engine_mode == "simple_full_corpus_natural" and self.simple_answer_engine is None:
+            self.simple_answer_engine = SimpleAnswerEngine(
+                client=self.direct_llm.client,
+                profile_root=settings.support_agent_profile_root,
+                max_corpus_chars=settings.simple_answer_max_corpus_chars,
+                temperature=settings.direct_llm_temperature,
+                preserve_grounded_text=True,
+            )
         self.turn_service = turn_service or UnifiedTurnService(
             model=self.direct_llm,
             calendar_lookup=CalendarLookupTool(runtime=self.tool_runtime),
@@ -104,8 +116,61 @@ class RoutingService:
             case = resolve_case(session, payload)
             if persist_inbound:
                 persist_inbound_message(session, case["case_id"], payload)
+            if self.answer_engine_mode == "simple_full_corpus_natural":
+                return self._handle_simple_full_corpus_inbound(session, case, payload)
             return self._handle_agent_tool_loop_inbound(session, case, payload)
 
+
+
+    def _handle_simple_full_corpus_inbound(self, session, case: dict, payload: InboundMessage) -> dict:
+        messages = session.scalars(
+            select(Message).where(Message.case_id == case["case_id"]).order_by(Message.id.desc()).limit(11)
+        ).all()
+        history = [
+            {"role": message.role, "content": message.content}
+            for message in reversed(messages)
+            if message.role in {"user", "assistant"}
+        ]
+        if history and history[-1] == {"role": "user", "content": payload.text}:
+            history.pop()
+        context = {"user_message": payload.text, "recent_messages": history[-10:]}
+        if self.simple_answer_engine is None:
+            raise RuntimeError("simple full-corpus engine is not configured")
+        tool_result = self.tool_runtime.collect(text=payload.text, kb_hits=[], conversation_context=context)
+        engine_result = self.simple_answer_engine.answer(
+            question=payload.text,
+            history=context["recent_messages"],
+            tool_observations=tool_result["tool_results"],
+        )
+        kind = str(engine_result["kind"])
+        route_name = "answer" if kind in {"grounded_answer", "final_response", "social_reply"} else kind
+        first_reply = not any(item["role"] == "assistant" for item in context["recent_messages"])
+        raw_text = str(engine_result["response_text"] or "")
+        response_text = "" if route_name == "retry_pending" else self.policy.finalize_simple_customer_text(
+            raw_text, first_reply_in_dialogue=first_reply,
+        )
+        route = {
+            "route": route_name,
+            "reply": {"response_text": response_text},
+            "reason": "simple_full_corpus_natural",
+            "route_reason": "simple_full_corpus_natural",
+            "route_confidence": 1.0,
+            "answer_engine": self.answer_engine_mode,
+            "outcome_kind": kind,
+            "source_refs": engine_result["source_refs"],
+        }
+        retrieval = {"kb_status": "full_corpus", "kb_snippets": [], "kb_skip_reason": self.answer_engine_mode}
+        outcome = self.outcome.execute(route, case, context, retrieval, payload.text)
+        support_case = session.scalar(select(SupportCase).where(SupportCase.id == case["case_id"]))
+        if support_case is not None:
+            support_case.status = case["case_status"]
+            support_case.route_mode = route_name
+        response_strategy = {"answer_engine": self.answer_engine_mode, **engine_result["telemetry"]}
+        audit = build_audit_event(case, route, retrieval, outcome, {"turn_type": "simple_full_corpus"}, response_strategy)
+        persist_workflow_event(session, case["case_id"], audit["response_strategy"], event_type="response_strategy_selected", actor="system:routing")
+        persist_workflow_event(session, case["case_id"], audit, event_type="inbound_processed", actor="system:routing")
+        session.commit()
+        return {"case": case, "context": context, "retrieval": retrieval, "kb_result": {}, "route": {key: value for key, value in route.items() if key != "reply"}, "outcome": outcome, "audit": audit}
 
 
     def _handle_agent_tool_loop_inbound(self, session, case: dict, payload: InboundMessage) -> dict:
