@@ -4,6 +4,13 @@ import argparse
 from pathlib import Path
 
 LLM_PREFIXES = ("DIRECT_LLM_", "KB_AGENT_", "SUMMARY_LLM_")
+# This transport compatibility flag changes the actual native-tool request
+# accepted by OpenAI-compatible backends, so it is part of LLM parity too.
+LLM_PARITY_KEYS = {"OPENAI_COMPATIBLE_DROP_PARAMS"}
+
+
+def is_llm_parity_key(key: str) -> bool:
+    return key.startswith(LLM_PREFIXES) or key in LLM_PARITY_KEYS
 
 
 def parse_env_file(path: Path) -> dict[str, str]:
@@ -20,8 +27,8 @@ def parse_env_file(path: Path) -> dict[str, str]:
 def verify_llm_parity(production_path: Path, test_path: Path) -> list[str]:
     production = parse_env_file(production_path)
     test = parse_env_file(test_path)
-    production_llm = {key: value for key, value in production.items() if key.startswith(LLM_PREFIXES)}
-    test_llm = {key: value for key, value in test.items() if key.startswith(LLM_PREFIXES)}
+    production_llm = {key: value for key, value in production.items() if is_llm_parity_key(key)}
+    test_llm = {key: value for key, value in test.items() if is_llm_parity_key(key)}
     return sorted(
         key
         for key in set(production_llm) | set(test_llm)
@@ -33,9 +40,9 @@ def sync_llm_settings(production_path: Path, test_path: Path) -> None:
     production = parse_env_file(production_path)
     test = parse_env_file(test_path)
     for key in list(test):
-        if key.startswith(LLM_PREFIXES):
+        if is_llm_parity_key(key):
             del test[key]
-    test.update({key: value for key, value in production.items() if key.startswith(LLM_PREFIXES)})
+    test.update({key: value for key, value in production.items() if is_llm_parity_key(key)})
     test_path.parent.mkdir(parents=True, exist_ok=True)
     test_path.write_text(
         "\n".join(f"{key}={value}" for key, value in sorted(test.items())) + "\n",
