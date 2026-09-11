@@ -224,52 +224,10 @@ def make_test_routing_service(tmp_path: Path, direct_llm=None, kb_agent=None) ->
 
 
 
-def test_routing_service_marks_out_of_scope_request(tmp_path: Path) -> None:
-    routing = make_test_routing_service(tmp_path)
-    result = routing.handle_inbound(
-        InboundMessage(
-            channel="telegram",
-            external_user_id="u2",
-            external_chat_id="c2",
-            text="Напиши рецепт горохового супа",
-        )
-    )
-
-    assert result["route"]["route"] == "out_of_scope"
-    assert result["outcome"]["outcome_type"] == "out_of_scope"
-    assert "Челябинске" in result["outcome"]["outcome_payload"]["response_text"]
 
 
 
 
-def test_routing_service_persists_outbound_message_for_followup_context(tmp_path: Path) -> None:
-    routing = make_test_routing_service(tmp_path)
-    first = routing.handle_inbound(
-        InboundMessage(
-            channel="telegram",
-            external_user_id="u4",
-            external_chat_id="c4",
-            text="Сколько стоят прыжки?",
-        )
-    )
-    routing.record_outbound_message(first["case"]["case_id"], first["outcome"]["outcome_payload"]["response_text"])
-    second = routing.handle_inbound(
-        InboundMessage(
-            channel="telegram",
-            external_user_id="u4",
-            external_chat_id="c4",
-            text="А где это?",
-        )
-    )
-
-    assert second["case"]["case_id"] == first["case"]["case_id"]
-    assert second["context"]["recent_messages"] == [
-        {"role": "user", "content": "Сколько стоят прыжки?"},
-        {"role": "assistant", "content": "Здравствуйте! Все цены доступны по ссылке https://vk.cc/cYzS5j."},
-        {"role": "user", "content": "А где это?"},
-    ]
-    respond_calls = [call for call in routing.direct_llm.calls if call["method"] == "respond"]
-    assert respond_calls[-1]["first_reply_in_dialogue"] is False
 
 
 def test_routing_starts_new_case_when_local_calendar_day_changes(tmp_path: Path) -> None:
@@ -354,112 +312,13 @@ def test_routing_keeps_same_case_within_two_hours_on_same_local_day(tmp_path: Pa
 
 
 
-def test_direct_llm_leaves_first_reply_greeting_to_output_boundary(tmp_path: Path) -> None:
-    class BodyOnlyClient:
-        def generate(self, **kwargs):
-            return json.dumps(
-                {
-                    "route": "answer",
-                    "response_text": "Все актуальные цены доступны по ссылке https://vk.cc/cYzS5j.",
-                    "confidence": 0.9,
-                    "reason": "grounded_pricing",
-                },
-                ensure_ascii=False,
-            )
-
-    prompt_path = tmp_path / "SYSTEM_PROMPT.md"
-    prompt_path.write_text(TEST_PROMPT, encoding="utf-8")
-    service = DirectLLMService(client=BodyOnlyClient(), prompt_service=SystemPromptService(str(prompt_path)))
-
-    result = service.respond(
-        "Сколько стоит прыжок в тандеме?",
-        migrate_fixture({"kb_status": "found", "grounding_status": "ready", "grounded_facts": ["Все актуальные цены доступны по ссылке https://vk.cc/cYzS5j."], "answer_context": []}),
-        first_reply_in_dialogue=True,
-    )
-
-    assert result["response_text"] == "Все актуальные цены доступны по ссылке https://vk.cc/cYzS5j."
-
-
-def test_direct_llm_does_not_duplicate_recognised_model_greeting_on_first_reply(tmp_path: Path) -> None:
-    class GreetingClient:
-        def generate(self, **kwargs):
-            return json.dumps(
-                {
-                    "route": "answer",
-                    "response_text": "Добрый день! Все актуальные цены доступны по ссылке https://vk.cc/cYzS5j.",
-                    "confidence": 0.9,
-                    "reason": "grounded_pricing",
-                },
-                ensure_ascii=False,
-            )
-
-    prompt_path = tmp_path / "SYSTEM_PROMPT.md"
-    prompt_path.write_text(TEST_PROMPT, encoding="utf-8")
-    service = DirectLLMService(client=GreetingClient(), prompt_service=SystemPromptService(str(prompt_path)))
-
-    result = service.respond(
-        "Сколько стоит прыжок в тандеме?",
-        migrate_fixture({"kb_status": "found", "grounding_status": "ready", "grounded_facts": ["Все актуальные цены доступны по ссылке https://vk.cc/cYzS5j."], "answer_context": []}),
-        first_reply_in_dialogue=True,
-    )
-
-    assert result["response_text"] == "Добрый день! Все актуальные цены доступны по ссылке https://vk.cc/cYzS5j."
-
-
-def test_direct_llm_keeps_model_answer_without_forced_greeting_in_any_dialogue_turn(tmp_path: Path) -> None:
-    class BodyOnlyClient:
-        def generate(self, **kwargs):
-            return json.dumps(
-                {
-                    "route": "answer",
-                    "response_text": "Все актуальные цены доступны по ссылке https://vk.cc/cYzS5j.",
-                    "confidence": 0.9,
-                    "reason": "grounded_pricing",
-                },
-                ensure_ascii=False,
-            )
-
-    prompt_path = tmp_path / "SYSTEM_PROMPT.md"
-    prompt_path.write_text(TEST_PROMPT, encoding="utf-8")
-    service = DirectLLMService(client=BodyOnlyClient(), prompt_service=SystemPromptService(str(prompt_path)))
-
-    first = service.respond(
-        "Сколько стоит прыжок в тандеме?",
-        migrate_fixture({"kb_status": "found", "grounding_status": "ready", "grounded_facts": ["Все актуальные цены доступны по ссылке https://vk.cc/cYzS5j."], "answer_context": []}),
-        first_reply_in_dialogue=True,
-    )
-    followup = service.respond(
-        "А можно подарить сертификат?",
-        migrate_fixture({"kb_status": "found", "grounding_status": "ready", "grounded_facts": ["Все актуальные цены доступны по ссылке https://vk.cc/cYzS5j."], "answer_context": []}),
-        conversation_context={"recent_messages": [{"role": "assistant", "content": first["response_text"]}]},
-        first_reply_in_dialogue=False,
-    )
-
-    assert first["response_text"] == "Все актуальные цены доступны по ссылке https://vk.cc/cYzS5j."
-    assert followup["response_text"] == "Все актуальные цены доступны по ссылке https://vk.cc/cYzS5j."
 
 
 
 
 
 
-def test_prompt_runtime_suppresses_internal_envelope_without_canned_fallback(tmp_path: Path) -> None:
-    class LeakClient:
-        def generate(self, **kwargs):
-            return json.dumps(
-                {
-                    "route": "answer",
-                    "response_text": "KnowledgeBase Result: [служебные данные]",
-                    "confidence": 0.9,
-                    "reason": "bad_output",
-                },
-                ensure_ascii=False,
-            )
 
-    prompt_path = tmp_path / "SYSTEM_PROMPT.md"
-    prompt_path.write_text(TEST_PROMPT, encoding="utf-8")
-    service = DirectLLMService(client=LeakClient(), prompt_service=SystemPromptService(str(prompt_path)))
-    result = service.respond("Сколько стоят прыжки?", [{"text": "Все цены доступны по ссылке https://vk.cc/cYzS5j.", "source_ref": "kb/pricing.md"}])
 
-    assert result["route"] == "retry_pending"
-    assert result["response_text"] == ""
+
+

@@ -23,7 +23,7 @@ from app.services.audit import (
 from app.services.case_resolution import reset_conversation_session, resolve_case
 from app.services.context_builder import build_context
 from app.services.direct_llm import DirectLLMService
-from app.services.final_response_validation import validate_final_response
+from app.services.agent_response_validation import validate_agent_response
 from app.services.kb_agent import KBAgentService
 from app.services.outcome import OutcomeService
 from app.services.persistence import (
@@ -114,62 +114,31 @@ class RoutingService:
         raw_kb_result = loop_result.get("kb_result")
         kb_result: dict[str, Any] = raw_kb_result if isinstance(raw_kb_result, dict) else {}
         raw_final_result = loop_result.get("final_result")
-        finalization_requested = loop_result.get("finalization_requested")
         tool_observations = [item for item in loop_result.get("tool_observations", []) if isinstance(item, dict)]
-        calendar_ready = any(item.get("tool") == "calendar_lookup" and item.get("status") == "ready" for item in tool_observations)
         technical_statuses = {"llm_unavailable", "retry_pending", "unavailable"}
         technical_kb_failure = kb_result.get("grounding_status") in technical_statuses or any(
             item.get("status") in technical_statuses for item in tool_observations
         )
         grounded = kb_result.get("grounding_status") == "ready"
-        finalization_has_evidence = grounded or calendar_ready
         first_reply = not any(item.get("role") == "assistant" for item in context.get("recent_messages", []) if isinstance(item, dict))
-        finalizer_invoked = False
         technical_result = {"route": "retry_pending", "response_text": "", "confidence": None, "reason": "invalid_selector_output"}
         if raw_final_result is not None:
-            final_result = raw_final_result if isinstance(raw_final_result, dict) and raw_final_result.get("route") in {"retry_pending", "social_reply"} else technical_result
+            final_result = raw_final_result if isinstance(raw_final_result, dict) and raw_final_result.get("route") in {"answer", "social_reply", "cannot_answer", "out_of_scope", "clarification_requested", "retry_pending"} else technical_result
         elif technical_kb_failure:
             final_result = {**technical_result, "reason": "kb_technical_failure"}
-        elif not isinstance(finalization_requested, dict) or finalization_requested.get("response_intent") not in {"answer", "social_reply", "clarification", "missing_grounding"}:
-            final_result = technical_result
         else:
-            response_intent = finalization_requested["response_intent"]
-            policy_evidence = [] if response_intent == "social_reply" else self.policy.no_answer_policy_evidence()
-            finalization_observations = list(tool_observations)
-            finalization_observations.extend(
-                {"kind": "profile_no_answer_option", "summary": item["text"], "source_ref": item["source_ref"]}
-                for item in policy_evidence
-            )
-            # Keep calendar facts separate from business evidence, and exclude
-            # navigation results/raw pages before the common writer boundary.
-            finalization_kb_result = {
-                "grounding_status": str(kb_result.get("grounding_status") or "not_found"),
-                "answer_basis": kb_result.get("answer_basis", "") if grounded else "",
-                "grounded_facts": kb_result.get("grounded_facts", []) if grounded else [],
-                "source_refs": kb_result.get("source_refs", []),
-                "answer_evidence": kb_result.get("answer_evidence"),
-            }
-            finalizer_invoked = True
-            final_result = self.direct_llm.respond(
-                payload.text,
-                finalization_kb_result,
-                knowledge_mode="kb_grounded" if finalization_has_evidence or policy_evidence else "prompt_only",
-                conversation_context=context,
-                tool_observations=finalization_observations,
-                first_reply_in_dialogue=first_reply,
-                response_intent=response_intent,
-            )
-        fixed_fallback = final_result.get("response_origin") == "fixed_profile_fallback"
-        if fixed_fallback:
-            finalizer_invoked = False
-        final_result = {**final_result, **validate_final_response(final_result, allow_technical=True)}
+            # The agent loop is the sole semantic writer. A legacy request for
+            # a second LLM finalization is deliberately not executed: it would
+            # create a second answerer that can reinterpret tool facts.
+            final_result = technical_result
+        final_result = {**final_result, **validate_agent_response(final_result, allow_technical=True)}
         if final_result["route"] != "retry_pending":
-            formatted = final_result["response_text"] if fixed_fallback else self.policy.finalize_simple_customer_text(
+            formatted = self.policy.finalize_simple_customer_text(
                 final_result["response_text"], first_reply_in_dialogue=first_reply,
             )
             final_result = {
                 **final_result,
-                **validate_final_response({**final_result, "response_text": formatted}, channel=payload.channel),
+                **validate_agent_response({**final_result, "response_text": formatted}, channel=payload.channel),
             }
         final_route = final_result["route"]
         route_name = "answer" if final_route == "social_reply" else final_route
@@ -177,8 +146,7 @@ class RoutingService:
         response_text = final_result["response_text"]
         source_refs = [str(ref) for ref in kb_result.get("source_refs", []) if str(ref)] if grounded else []
         actions = list((loop_result.get("trace") or {}).get("actions") or [])
-        if finalizer_invoked:
-            actions.append("final_response")
+
         tool_observations = list(loop_result.get("tool_observations") or [])
         wiki_observations = [
             item for item in tool_observations
@@ -187,8 +155,7 @@ class RoutingService:
         wiki_status = str(wiki_observations[-1].get("status") or "not_found") if wiki_observations else "not_started"
         wiki_used = bool(wiki_observations)
         llm_trace = [item for item in loop_result.get("llm_trace", []) if isinstance(item, dict)]
-        finalization_llm_trace = [item for item in final_result.get("llm_trace", []) if isinstance(item, dict)]
-        llm_trace.extend(finalization_llm_trace)
+
         retrieval = {
             "kb_status": wiki_status,
             "kb_snippets": [],
@@ -218,9 +185,7 @@ class RoutingService:
             "tool_requests": list(loop_result.get("tool_requests") or []),
             "source_turn": {"channel": payload.channel, "external_message_id": payload.external_message_id, "external_event_id": payload.external_event_id},
             "wiki_used": wiki_used,
-            "finalizer_invoked": finalizer_invoked,
             "llm_trace": llm_trace,
-            "finalization_llm_trace": clean_llm_trace(finalization_llm_trace),
             **trace_metrics(llm_trace),
         }
         audit = build_audit_event(case, route, retrieval, outcome, {"turn_type": "agent_tool_loop"}, response_strategy)

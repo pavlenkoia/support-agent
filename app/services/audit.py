@@ -8,7 +8,7 @@ from uuid import uuid4
 TRACE_PACKET_VERSION = "stage2-c5"
 TRACE_PACKET_MAX_BYTES = 16384
 INPUT_MAX_BYTES = 8192
-MODEL_STEPS = {"customer_turn", "tool_result_selection", "tool_result_finalization", "final_response", "navigation", "coverage_review", "grounded_extraction"}
+MODEL_STEPS = {"customer_turn", "tool_result_selection", "navigation", "coverage_review", "grounded_extraction"}
 
 
 def json_bytes(value: object) -> bytes:
@@ -69,9 +69,6 @@ def _ordered_actions(response_strategy: dict, calls: list[dict]) -> list[dict]:
             if not candidates and not any(call.get("native_tool_call_id") for call in selectors):
                 candidates = [call for call in selectors if call.get("step") == "customer_turn"]
             matched = candidates[0] if len(candidates) == 1 else None
-        elif action == "final_response":
-            candidates = [call for call in unused_calls if call.get("role") in {None, "direct_llm"} and call.get("step") in {"final_response", "tool_result_finalization", "customer_turn"}]
-            matched = candidates[-1] if candidates and response_strategy.get("finalizer_invoked") is not False else None
         else:
             candidates = [call for call in unused_calls if call.get("step") == action]
             matched = candidates[0] if len(candidates) == 1 else None
@@ -90,20 +87,18 @@ def _ordered_actions(response_strategy: dict, calls: list[dict]) -> list[dict]:
 
 def build_trace_packet(*, case: dict, route: dict, outcome: dict, retrieval: dict, response_strategy: dict) -> dict:
     calls = [{**call, "trace_local_id": call.get("trace_local_id") or f"trace-call-{index}"} for index, call in enumerate(model_calls(response_strategy.get("llm_trace", [])), start=1)]
-    final_input = next((c["input_packet"] for c in reversed(calls) if c.get("role") == "direct_llm" and isinstance(c.get("input_packet"), dict)), {"status": "unavailable"})
-    if response_strategy.get("finalizer_invoked") is False:
-        final_input = {"status": "not_invoked"}
+    agent_final_input = next((c["input_packet"] for c in reversed(calls) if c.get("role") == "direct_llm" and isinstance(c.get("input_packet"), dict)), {"status": "unavailable"})
     observations = response_strategy.get("tool_observations", [])
     statuses = [o.get("status") for o in observations if isinstance(o, dict)]
     evidence_status = "ready" if "ready" in statuses else (statuses[-1] if statuses else "not_started")
     packet = {
         "version": TRACE_PACKET_VERSION, "trace_id": uuid4().hex,
-        "status": "complete" if final_input.get("status") == "complete" else "incomplete",
+        "status": "complete" if agent_final_input.get("status") == "complete" else "incomplete",
         "source_turn": {"case_id": case["case_id"], "conversation_id": case["conversation_id"], **response_strategy.get("source_turn", {})},
         "ordered_actions": _ordered_actions(response_strategy, calls),
         "source_refs": route.get("source_refs", []),
         "tool_requests": response_strategy.get("tool_requests", []),
-        "finalization_input": final_input,
+        "agent_final_input": agent_final_input,
         "model_calls": [{k:v for k,v in c.items() if k != "input_packet"} for c in calls],
         "wiki_status": retrieval.get("kb_status"), "evidence_status": evidence_status,
         "result": {"route": route["route"], "outcome_kind": route.get("outcome_kind"), "reason": route.get("reason"), "confidence": route.get("route_confidence"),
@@ -132,7 +127,7 @@ def build_trace_packet(*, case: dict, route: dict, outcome: dict, retrieval: dic
 
 def bounded_strategy(strategy: dict) -> dict:
     bounded = dict(strategy)
-    for key in ("tool_requests", "tool_observations", "llm_trace", "finalization_llm_trace", "source_turn"):
+    for key in ("tool_requests", "tool_observations", "llm_trace", "source_turn"):
         if key not in bounded:
             continue
         capture = bounded_capture({key: bounded[key]}, max_bytes=TRACE_PACKET_MAX_BYTES)

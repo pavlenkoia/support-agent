@@ -29,30 +29,6 @@ class RecordingWikiLookup:
         })
 
 
-def test_unified_turn_returns_social_customer_text_without_wiki_lookup() -> None:
-    class TurnModel:
-        def __init__(self) -> None:
-            self.calls: list[dict] = []
-
-        def begin_turn(self, *, text: str, context: dict) -> dict:
-            self.calls.append({"text": text, "context": context})
-            return {
-                "kind": "finalization_requested",
-                "response_intent": "social_reply",
-                "reason": "social_reply",
-                "llm_trace": [{"role": "direct_llm", "step": "customer_turn"}],
-            }
-
-    model = TurnModel()
-    wiki = RecordingWikiLookup()
-    turn = UnifiedTurnService(model=model, wiki_lookup=wiki, calendar_lookup=RecordingCalendarLookup())
-
-    result = turn.run(text="Спасибо", context={"recent_messages": []})
-
-    assert model.calls == [{"text": "Спасибо", "context": {"recent_messages": []}}]
-    assert wiki.calls == []
-    assert result["finalization_requested"]["response_intent"] == "social_reply"
-    assert result["trace"]["actions"] == []
 
 
 def test_unified_turn_runs_wiki_after_model_requests_its_tool() -> None:
@@ -74,80 +50,78 @@ def test_unified_turn_runs_wiki_after_model_requests_its_tool() -> None:
     assert result["trace"]["actions"] == ["wiki_lookup"]
 
 
-def test_unified_turn_returns_complete_wiki_evidence_to_selector_before_finalization() -> None:
+def test_unified_turn_keeps_semantic_answer_in_agent_after_repeated_tools() -> None:
     class TurnModel:
         def __init__(self) -> None:
-            self.continuation_calls = 0
+            self.step = 0
 
         def begin_turn(self, *, text: str, context: dict) -> dict:
             _ = (text, context)
+            self.step += 1
+            if self.step < 3:
+                return {
+                    "kind": "wiki_lookup", "tool_call_id": f"wiki-{self.step}",
+                    "tool_request": {"query": f"часть {self.step}", "context_scope": "прыжки", "needed_fact": "условие"},
+                    "llm_trace": [],
+                }
             return {
-                "kind": "wiki_lookup",
-                "tool_call_id": "wiki-minor-tandem",
-                "tool_request": {
-                    "query": "тандем 17 лет разрешение родителей",
-                    "context_scope": "ограничения для тандем-прыжка",
-                    "needed_fact": "минимальный возраст и условия для несовершеннолетнего",
-                },
+                "kind": "direct_response",
+                "result": {"route": "answer", "response_text": "Готовый ответ агента.", "confidence": 0.9, "reason": "facts_collected"},
                 "llm_trace": [],
             }
 
-        def continue_after_tool(self, **kwargs) -> dict:
-            self.continuation_calls += 1
-            assert kwargs["context"]["recent_messages"] == [{"role": "user", "content": "Мне 17 лет, можно в тандем?"}]
-            assert "tool_request" not in kwargs["context"]
-            return {"kind": "finalization_requested", "response_intent": "answer", "reason": "selector_checked_tool_result", "llm_trace": []}
+    wiki = RecordingWikiLookup()
+    result = UnifiedTurnService(model=TurnModel(), wiki_lookup=wiki, calendar_lookup=RecordingCalendarLookup()).run(
+        text="Вопрос", context={"recent_messages": []},
+    )
 
-    model = TurnModel()
-    turn = UnifiedTurnService(model=model, wiki_lookup=RecordingWikiLookup(), calendar_lookup=RecordingCalendarLookup())
-
-    result = turn.run(text="Мне 17 лет, можно в тандем?", context={"recent_messages": [{"role": "user", "content": "Мне 17 лет, можно в тандем?"}]})
-
-    assert model.continuation_calls == 1
-    assert result["finalization_requested"] == {
-        "response_intent": "answer",
-        "reason": "selector_checked_tool_result",
-    }
+    assert len(wiki.calls) == 2
+    assert result["trace"]["actions"] == ["wiki_lookup", "wiki_lookup"]
+    assert result["final_result"]["response_text"] == "Готовый ответ агента."
+    assert "finalization_requested" not in result
 
 
-def test_unified_turn_returns_wiki_not_found_to_selector_before_finalization() -> None:
-    class NotFoundWikiLookup:
-        def lookup(self, *, text: str, context: dict, tool_request: dict[str, str]) -> dict:
-            _ = (text, context, tool_request)
-            return {"grounding_status": "not_found", "grounded_facts": [], "source_refs": []}
-
-    class TurnModel:
+def test_agent_loop_owns_calendar_and_wiki_answer_without_second_writer() -> None:
+    class Model:
         def __init__(self) -> None:
-            self.continuation_calls = 0
+            self.step = 0
 
-        def begin_turn(self, *, text: str, context: dict) -> dict:
-            _ = (text, context)
-            return {
-                "kind": "wiki_lookup",
-                "tool_call_id": "wiki-video",
-                "tool_request": {
-                    "query": "где получить конкретное видео после прыжка",
-                    "context_scope": "видео после самостоятельного прыжка",
-                    "needed_fact": "подтверждённый способ получить запись",
-                },
-                "llm_trace": [],
-            }
+        def begin_turn(self, **kwargs) -> dict:
+            self.step += 1
+            if self.step == 1:
+                return {"kind": "calendar_lookup", "tool_call_id": "calendar-1", "tool_request": {
+                    "date_expressions": ["25 сентября", "26 сентября"], "requested_calendar_fact": "дни недели",
+                }, "llm_trace": []}
+            if self.step == 2:
+                return {"kind": "wiki_lookup", "tool_call_id": "wiki-1", "tool_request": {
+                    "query": "обычные прыжки в выходные", "context_scope": "прыжки 25 и 26 сентября", "needed_fact": "правило буднего дня и выходного",
+                }, "llm_trace": []}
+            return {"kind": "direct_response", "result": {
+                "route": "answer",
+                "response_text": "25 сентября — пятница: только по отдельной договорённости для группы. 26 сентября — суббота: обычные прыжки возможны при анонсе и подходящей погоде.",
+                "confidence": 0.9, "reason": "calendar_and_wiki_facts",
+            }, "llm_trace": []}
 
-        def continue_after_tool(self, **kwargs) -> dict:
-            _ = kwargs
-            self.continuation_calls += 1
-            return {"kind": "finalization_requested", "response_intent": "missing_grounding", "reason": "selector_checked_wiki_miss", "llm_trace": []}
+    class Calendar:
+        def lookup(self, **kwargs) -> dict:
+            return {"status": "ready", "summary": "25.09.2026 — пятница, будний день; 26.09.2026 — суббота, выходной.", "structured": {"dates": []}}
 
-    model = TurnModel()
-    turn = UnifiedTurnService(model=model, wiki_lookup=NotFoundWikiLookup(), calendar_lookup=RecordingCalendarLookup())
+    class Wiki:
+        def lookup(self, **kwargs) -> dict:
+            return migrate_fixture({"grounding_status": "ready", "grounded_facts": ["Обычные прыжки проходят по выходным."], "answer_basis": "Расписание обычных прыжков."})
 
-    result = turn.run(text="Где получить нашу запись?", context={})
+    result = UnifiedTurnService(model=Model(), wiki_lookup=Wiki(), calendar_lookup=Calendar()).run(
+        text="можно ли прыгнуть 25 и 26 сентября?", context={"recent_messages": []},
+    )
 
-    assert model.continuation_calls == 1
-    assert result["finalization_requested"] == {
-        "response_intent": "missing_grounding",
-        "reason": "selector_checked_wiki_miss",
-    }
+    assert result["trace"]["actions"] == ["calendar_lookup", "wiki_lookup"]
+    assert result["final_result"]["route"] == "answer"
+    assert "26 сентября — суббота" in result["final_result"]["response_text"]
+    assert "втор" not in result["final_result"]["response_text"].casefold()
+
+
+
+
 
 
 def test_unified_turn_runs_calendar_after_model_requests_its_tool() -> None:
@@ -198,46 +172,6 @@ def test_unified_turn_runs_calendar_after_model_requests_its_tool() -> None:
     }]
 
 
-def test_unified_turn_returns_final_response_after_calendar_observation() -> None:
-    class TurnModel:
-        def __init__(self) -> None:
-            self.contexts: list[dict] = []
-
-        def begin_turn(self, *, text: str, context: dict) -> dict:
-            self.contexts.append(context)
-            if len(self.contexts) == 1:
-                return {
-                    "kind": "calendar_lookup",
-                "tool_call_id": "calendar-1",
-                    "tool_request": {"date_expression": "послезавтра", "requested_calendar_fact": "день недели"},
-                    "llm_trace": [],
-                }
-            return {
-                "kind": "finalization_requested",
-                "response_intent": "answer",
-                "reason": "calendar_evidence",
-                "llm_trace": [],
-            }
-
-    class Calendar:
-        def lookup(self, *, text: str, context: dict, tool_request: dict[str, str]) -> dict:
-            _ = (text, context, tool_request)
-            return {"status": "ready", "summary": "Дата 2026-09-02 приходится на среда.", "structured": {"weekday_ru": "среда"}}
-
-    model = TurnModel()
-    result = UnifiedTurnService(model=model, wiki_lookup=RecordingWikiLookup(), calendar_lookup=Calendar()).run(
-        text="Какой день недели будет послезавтра?", context={"recent_messages": []}
-    )
-
-    assert len(model.contexts) == 2
-    assert model.contexts[1]["tool_observations"] == [{
-        "tool": "calendar_lookup",
-        "status": "ready",
-        "summary": "Дата 2026-09-02 приходится на среда.",
-        "structured": {"weekday_ru": "среда"},
-    }]
-    assert result["finalization_requested"]["response_intent"] == "answer"
-    assert result["trace"]["actions"] == ["calendar_lookup"]
 
 
 def test_calendar_lookup_tool_resolves_relative_date_against_message_context() -> None:

@@ -7,7 +7,7 @@ from typing import Any
 import yaml
 
 from app.core.config import settings
-from app.services.final_response_validation import clean_customer_text
+from app.services.agent_response_validation import clean_customer_text
 
 
 class PolicyService:

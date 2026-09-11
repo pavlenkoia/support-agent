@@ -266,27 +266,6 @@ def test_telegram_gateway_keeps_provider_failures_retryable_after_multiple_attem
             due_at = event.available_at
 
 
-def test_telegram_gateway_restart_retries_due_transport_event_without_queue_state(tmp_path: Path) -> None:
-    sender = RecordingSender()
-    routing = make_test_routing_service(tmp_path)
-    service = TelegramGatewayService(routing=routing, sender=sender)
-    inbound = InboundMessage(
-        channel="telegram",
-        external_user_id="777",
-        external_chat_id="12345",
-        text="проверка",
-        external_message_id="13",
-        external_event_type="message",
-        external_event_id="telegram:message:12345:13",
-        received_at=datetime.now(UTC),
-        raw_event={"message": {"message_id": 13, "text": "проверка", "chat": {"id": 12345}, "from": {"id": 777}}},
-    )
-    service._mark_retry_pending(inbound, "temporary_failure")
-
-    processed = service.process_due_retries(now=datetime.now(UTC) + timedelta(days=1))
-
-    assert processed == 1
-    assert [call for call in sender.calls if call[0] == "message"]
 
 
 def test_telegram_gateway_suppresses_stale_retry_when_newer_inbound_exists(tmp_path: Path) -> None:

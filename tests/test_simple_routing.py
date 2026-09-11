@@ -154,40 +154,6 @@ class MaliciousPromptService:
         return "Свяжитесь с офисом по https://evil.example и оплатите 12 000 ₽"
 
 
-def test_agent_tool_loop_routes_social_reply_without_legacy_kb_dependencies(tmp_path: Path) -> None:
-    session_factory = make_session_factory(f"sqlite+pysqlite:///{tmp_path / 'agent-loop.db'}")
-    Base.metadata.create_all(bind=session_factory.kw["bind"])
-    loop = RecordingAgentLoop(
-        {
-            "kb_result": {},
-            "finalization_requested": {"response_intent": "social_reply", "reason": "social_reply"},
-            "trace": {"actions": []},
-            "llm_trace": [{"entry_kind": "model_call", "usage": {"total_tokens": 17}, "attempts": 2}],
-            "tool_observations": [],
-        }
-    )
-    finalizer = RecordingGroundedFinalizer(route="social_reply", response_text="Пожалуйста!")
-    routing = RoutingService(
-        session_factory=session_factory,
-        answer_engine_mode="agent_tool_loop",
-        turn_service=loop,
-        kb_agent=ForbiddenLegacyDependency(),
-        direct_llm=finalizer,
-        retrieval=ForbiddenLegacyDependency(),
-    )
-
-    result = routing.handle_inbound(
-        InboundMessage(channel="internal_test", external_user_id="igor", external_chat_id="igor", text="Спасибо")
-    )
-
-    assert result["route"]["answer_engine"] == "agent_tool_loop"
-    assert result["route"]["route"] == "answer"
-    assert result["outcome"]["outcome_payload"]["response_text"] == "Здравствуйте! Пожалуйста!"
-    assert loop.calls[0]["text"] == "Спасибо"
-    assert result["audit"]["agent_actions"] == ["final_response"]
-    assert result["audit"]["logical_llm_call_count"] == 2
-    assert result["audit"]["provider_attempt_count"] == 3
-    assert len(finalizer.calls) == 1
 
 
 def test_agent_tool_loop_sends_direct_social_reply_without_second_finalizer_call(tmp_path: Path) -> None:
@@ -231,38 +197,6 @@ def test_agent_tool_loop_audits_actual_wiki_lookup_status(tmp_path: Path) -> Non
     assert result["audit"]["kb_status"] == "not_found"
 
 
-def test_agent_tool_loop_never_passes_nonready_extraction_to_finalizer(tmp_path: Path) -> None:
-    session_factory = make_session_factory(f"sqlite+pysqlite:///{tmp_path / 'agent-loop-extracted-facts.db'}")
-    Base.metadata.create_all(bind=session_factory.kw["bind"])
-    facts = ["Условия записи на дату указаны в закреплённом посте или анонсе на эту дату."]
-    loop = RecordingAgentLoop(
-        {
-            "kb_result": {
-                "grounding_status": "not_found",
-                "answer_basis": facts[0],
-                "grounded_facts": facts,
-                "source_refs": ["compiled/concepts/booking.md"],
-            },
-            "trace": {"actions": ["wiki_lookup"]},
-            "tool_observations": [{"tool": "wiki_lookup", "status": "not_found", "grounded_facts": facts}],
-        }
-    )
-    finalizer = RecordingGroundedFinalizer(response_text="Условия записи указаны в закреплённом посте на эту дату.")
-    routing = RoutingService(session_factory=session_factory, answer_engine_mode="agent_tool_loop", turn_service=loop, direct_llm=finalizer)
-
-    routing.handle_inbound(
-        InboundMessage(channel="internal_test", external_user_id="igor", external_chat_id="igor", text="Записаться можно на 29?")
-    )
-
-    assert finalizer.calls[0]["knowledge_mode"] == "prompt_only"
-    assert finalizer.calls[0]["response_intent"] == "missing_grounding"
-    assert finalizer.calls[0]["kb_result"] == {
-        "grounding_status": "not_found",
-        "answer_basis": "",
-        "grounded_facts": [],
-        "source_refs": ["compiled/concepts/booking.md"],
-        "answer_evidence": None,
-    }
 
 
 def test_agent_tool_loop_wiki_outage_schedules_retry_without_customer_text(tmp_path: Path) -> None:

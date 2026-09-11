@@ -17,7 +17,14 @@ class UnifiedTurnModel(Protocol):
 
 
 class UnifiedTurnService:
-    """Collect bounded native tool evidence; never write customer text."""
+    """Run one agent-owned, sequential native-tool turn.
+
+    The model owns the semantic task: it may call tools repeatedly and returns
+    the finished customer response only when it considers the evidence enough.
+    This service only validates the wire protocol and executes registered tools.
+    """
+
+    MAX_SEQUENTIAL_TOOL_CALLS = 6
 
     def __init__(self, *, model: UnifiedTurnModel, wiki_lookup: WikiLookup, calendar_lookup: CalendarLookup) -> None:
         self.model = model
@@ -42,20 +49,19 @@ class UnifiedTurnService:
             return {**packet(), "final_result": {"route": "retry_pending", "response_text": "", "confidence": None, "reason": reason}}
 
         current = self.model.begin_turn(text=text, context=context)
-        for decision_index in range(3):
+        for decision_index in range(self.MAX_SEQUENTIAL_TOOL_CALLS + 1):
             if not isinstance(current, dict):
                 return failure("invalid_selector_output")
             trace.extend(item for item in current.get("llm_trace", []) if isinstance(item, dict))
             kind = current.get("kind")
             if kind == "direct_response":
                 result = current.get("result")
-                if isinstance(result, dict) and result.get("route") == "social_reply":
+                if isinstance(result, dict) and result.get("route") in {
+                    "answer", "social_reply", "cannot_answer", "out_of_scope", "clarification_requested",
+                } and (actions or result.get("route") == "social_reply"):
                     return {**packet(), "final_result": result}
                 return failure("invalid_direct_response")
-            if kind == "finalization_requested":
-                if current.get("response_intent") not in {"answer", "social_reply", "clarification", "missing_grounding"}:
-                    return failure("invalid_selector_output")
-                return {**packet(), "finalization_requested": {"response_intent": current["response_intent"], "reason": current.get("reason", "")}}
+
             if kind == "final":
                 result = current.get("result")
                 if isinstance(result, dict) and result.get("route") == "retry_pending":
@@ -63,10 +69,8 @@ class UnifiedTurnService:
                 return failure("invalid_selector_output")
             if kind not in {"wiki_lookup", "calendar_lookup"}:
                 return failure("tool_request_invalid")
-            if decision_index == 2:
+            if decision_index >= self.MAX_SEQUENTIAL_TOOL_CALLS:
                 return failure("tool_budget_exceeded")
-            if kind in actions:
-                return failure("tool_duplicate_call")
             request = current.get("tool_request")
             if DirectLLMService._validated_legacy_tool_request(kind, request) is None:
                 return failure("tool_request_invalid")

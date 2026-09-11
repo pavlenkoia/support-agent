@@ -47,19 +47,6 @@ def test_direct_llm_exposes_only_active_agent_loop_entrypoints() -> None:
         assert not hasattr(service, legacy_method)
 
 
-def test_stub_provider_returns_retry_pending_without_customer_template(monkeypatch) -> None:
-    monkeypatch.setattr(direct_llm_module.settings, "direct_llm_provider", "stub")
-    service = DirectLLMService(prompt_service=PromptService())
-
-    result = service.respond(
-        "Вопрос",
-        {"grounding_status": "not_found", "grounded_facts": []},
-        knowledge_mode="prompt_only",
-        response_intent="missing_grounding",
-    )
-
-    assert result["route"] == "retry_pending"
-    assert result["response_text"] == ""
 
 
 
@@ -77,8 +64,8 @@ def test_begin_turn_requests_wiki_as_the_only_factual_source() -> None:
     prompt = str(client.calls[0]["user_prompt"])
     assert "calendar_lookup — не источник бизнес-фактов" in prompt
     assert "wiki_lookup — единственный источник бизнес-фактов из Wiki." in prompt
-    assert "Если явная дата или несколько явных дат влияют на ответ" in prompt
-    assert "практический условный вывод" in prompt
+    assert "Не вводи фиксированную последовательность инструментов" in prompt
+    assert "отдельного финализатора" in prompt
     assert "Любой неизвестный инструмент" in prompt
     assert client.calls[0]["tool_choice"] == "auto"
     assert client.calls[0]["parallel_tool_calls"] is False
@@ -164,81 +151,10 @@ def test_begin_turn_parses_valid_tool_envelope_before_provider_trailing_junk() -
     assert result["kind"] == "wiki_lookup"
 
 
-def test_finalizer_accepts_valid_response_before_provider_trailing_junk() -> None:
-    client = ActionClient(
-        '{"route":"answer","response_text":"Да, можно.","confidence":0.9,"reason":"grounded"}```json\n{"debug":true}\n```'
-    )
-    service = DirectLLMService(client=client, prompt_service=PromptService())
-
-    result = service.respond(
-        "Можно ли участвовать?",
-        migrate_fixture({
-            "grounding_status": "ready",
-            "grounded_facts": ["Участие разрешено."],
-            "answer_basis": "Участие разрешено.",
-            "source_refs": ["compiled/concepts/example.md"],
-        }),
-        response_intent="answer",
-    )
-
-    assert result["route"] == "answer"
-    assert result["response_text"] == "Да, можно."
 
 
-def test_finalizer_receives_literal_dialogue_and_compact_tool_facts_only() -> None:
-    class CapturingClient(ActionClient):
-        def generate(self, **kwargs: object) -> str:
-            super().generate(**kwargs)
-            return '{"route":"answer","response_text":"Да, можно.","confidence":0.9,"reason":"grounded"}'
-
-    client = CapturingClient("")
-    service = DirectLLMService(client=client, prompt_service=PromptService())
-
-    service.respond(
-        "Можно ли прыгнуть 26/27 сентября?",
-        migrate_fixture({
-            "grounding_status": "ready",
-            "grounded_facts": ["Прыжки обычно проходят по выходным."],
-            "answer_basis": "Добавить запись и активацию сертификата.",
-            "source_refs": ["compiled/concepts/booking.md"],
-        }),
-        response_intent="answer",
-        conversation_context={"recent_messages": [
-            {"role": "user", "content": "Мне подарили сертификат на тандем."},
-            {"role": "assistant", "content": "На какую дату рассматриваете?"},
-        ]},
-        tool_observations=[{
-            "tool": "calendar_lookup",
-            "status": "ready",
-            "summary": "26.09.2026 — суббота, выходной.",
-            "structured": {"dates": [{"iso_date": "2026-09-26", "weekday_ru": "суббота", "is_weekend": True, "year": 2026}]},
-        }],
-    )
-
-    packet = json.loads(str(client.calls[0]["user_prompt"]))
-    assert packet["conversation"] == [
-        {"role": "user", "content": "Мне подарили сертификат на тандем."},
-        {"role": "assistant", "content": "На какую дату рассматриваете?"},
-    ]
-    assert packet["grounding_evidence"] == {
-        "facts": [{
-            "id": "f1", "text": "Прыжки обычно проходят по выходным.",
-            "source_refs": ["compiled/concepts/booking.md"], "conditions": [], "modality": None,
-        }],
-    }
-    assert "answer_basis" not in json.dumps(packet, ensure_ascii=False)
-    assert "coverage" not in json.dumps(packet, ensure_ascii=False)
 
 
-def test_begin_turn_requests_social_finalization_without_customer_text() -> None:
-    client = ActionClient('{"action":"finalize","response_intent":"social_reply","reason":"social"}')
-    service = DirectLLMService(client=client, prompt_service=PromptService())
-
-    result = service.begin_turn(text="Спасибо", context={"recent_messages": []})
-
-    assert result["kind"] == "finalization_requested"
-    assert result["response_intent"] == "social_reply"
-    assert result["llm_trace"][0]["step"] == "customer_turn"
 
 
 def test_begin_turn_returns_a_tool_free_social_reply_directly() -> None:
@@ -250,6 +166,28 @@ def test_begin_turn_returns_a_tool_free_social_reply_directly() -> None:
     assert result["kind"] == "direct_response"
     assert result["result"]["route"] == "social_reply"
     assert result["result"]["response_text"] == "Привет! Чем могу помочь?"
+
+
+def test_continue_after_tool_returns_agent_answer_and_keeps_all_tools_available() -> None:
+    client = ActionClient('{"route":"answer","response_text":"26 сентября — суббота, выходной.","confidence":0.9,"reason":"calendar_fact"}')
+    service = DirectLLMService(client=client, prompt_service=PromptService())
+
+    result = service.continue_after_tool(
+        text="Можно ли прыгнуть 25 и 26 сентября?",
+        context={"recent_messages": [], "tool_observations": [{
+            "tool": "calendar_lookup", "status": "ready",
+            "summary": "25.09.2026 — пятница, будний день; 26.09.2026 — суббота, выходной.",
+            "structured": {"dates": []},
+        }]},
+        tool_name="calendar_lookup", tool_call_id="calendar-1",
+        tool_request={"date_expressions": ["25 сентября", "26 сентября"], "requested_calendar_fact": "дни недели"},
+        observation={"tool": "calendar_lookup", "status": "ready", "summary": "25.09.2026 — пятница, будний день; 26.09.2026 — суббота, выходной.", "structured": {"dates": []}},
+    )
+
+    assert result["kind"] == "direct_response"
+    assert result["result"]["route"] == "answer"
+    assert {tool["function"]["name"] for tool in client.calls[0]["tools"]} == {"wiki_lookup", "calendar_lookup"}
+    assert "отдельному финализатору" in client.calls[0]["messages"][-1]["content"]
 
 
 def test_selector_normalizes_standard_openai_tool_calls_envelope() -> None:
@@ -315,19 +253,18 @@ def test_selector_normalizes_legacy_provider_single_tool_map_list() -> None:
     assert result["tool_call_id"] == "compat-tool-call-1"
 
 
-def test_begin_turn_prompt_requests_action_finalize_without_client_text() -> None:
+def test_begin_turn_prompt_requires_agent_owned_response() -> None:
     client = ActionClient('{"action":"finalize","response_intent":"social_reply","reason":"social"}')
     service = DirectLLMService(client=client, prompt_service=PromptService())
 
     service.begin_turn(text="Спасибо", context={"recent_messages": []})
 
     prompt = str(client.calls[0]["user_prompt"])
-    assert '"action": "finalize"' in prompt
-    assert '"response_intent": "answer|social_reply|clarification|missing_grounding"' in prompt
-    assert "Если сведения инструментов не нужны, верни готовый клиентский JSON-ответ" in prompt
-    assert "Поля `action=finalize`" not in prompt
+    assert '"response_schema"' in prompt
+    assert "Не возвращай action=finalize" in prompt
+    assert "Если сведения инструментов не нужны или уже достаточны" in prompt
 
-def test_continue_after_tool_prompt_requests_action_finalize_without_client_text() -> None:
+def test_continue_after_tool_prompt_requires_agent_owned_response() -> None:
     client = ActionClient('{"route":"answer","response_text":"Готово.","confidence":1,"reason":"done"}')
     service = DirectLLMService(client=client, prompt_service=PromptService())
 
@@ -341,9 +278,9 @@ def test_continue_after_tool_prompt_requests_action_finalize_without_client_text
     )
 
     prompt = str(client.calls[0]["messages"][-1]["content"])
-    assert 'action=finalize' in prompt
-    assert 'response_intent=answer|social_reply|clarification|missing_grounding' in prompt
-    assert "Не создавай клиентский ответ, route, response_text, confidence или черновик." in prompt
+    assert 'agent loop' in prompt
+    assert 'готовый содержательный JSON-ответ' in prompt
+    assert 'отдельному финализатору' in prompt
 
 
 def test_malformed_json_retries_once_and_records_both_provider_calls() -> None:
@@ -375,43 +312,3 @@ def test_malformed_json_retries_once_and_records_both_provider_calls() -> None:
     assert "protocol_recovery" not in result["llm_trace"][1]["input_packet"]["data"]
 
 
-def test_finalizer_prompt_requires_natural_grammatical_russian() -> None:
-    client = ActionClient('{"route":"answer","response_text":"Готовый ответ.","confidence":1,"reason":"ready"}')
-    service = DirectLLMService(client=client, prompt_service=PromptService())
-
-    service.respond(
-        "Как оформить вопрос?",
-        migrate_fixture({"grounding_status": "ready", "grounded_facts": ["Подтверждённый факт"]}),
-        knowledge_mode="kb_grounded",
-        conversation_context={"recent_messages": []},
-    )
-
-    prompt = str(client.calls[0]["user_prompt"])
-    assert "Сформулируй естественный клиентский ответ как редактор переданного evidence, выбрав route только из allowed_routes. response_intent задаёт намерение, но не доказывает достаточности сведений и не отменяет allowed_routes. Если answer разрешён и evidence прямо покрывает фактический запрос с существенными ограничениями, передай прямой ответ без дополнений и неподтверждённых выводов. Если существенных сведений нет, верни cannot_answer: клиентский текст содержит только естественно сформулированный профильный fallback из profile_no_answer_option. Не добавляй объяснение отсутствия сведений, оправдание отказа, пересказ вопроса, рассуждение, уточняющий вопрос или обещание результата. Служебные основания оставь только в reason. Для чистого календарного вопроса используй готовое календарное evidence; в смешанном запросе календарь не компенсирует непокрытую фактическую часть. Для социальной реплики создай короткий естественный social_reply без бизнес-фактов. Если текущая реплика прямо отвечает на предыдущий вопрос ассистента, прими её как состояние диалога; не повторяй тот же вопрос." in prompt
-    assert "Для чистого календарного вопроса используй готовое календарное evidence" in prompt
-    assert "Если текущая реплика прямо отвечает на предыдущий вопрос ассистента, прими её как состояние диалога; не повторяй тот же вопрос." in prompt
-    assert "Связанность facts с темой вопроса не означает, что они отвечают на вопрос." in prompt
-    assert "Если прямого ответа нет, не создавай route=answer и не задавай вопрос, который предполагает неподтверждённый факт." in prompt
-    assert "answer_basis" not in prompt
-    assert "Если для запрошенного параметра подтверждён только актуальный источник, response_text должен сообщать только этот источник и не включать ни один иной факт из evidence." in prompt
-    assert "не сообщай об отсутствии конкретного значения, причинах этого, устройстве услуги, оплате, ограничениях, условиях, контактах или внутренних процессах" in prompt
-    assert "Воспроизводи запрошенный параметр нейтрально, без новых определений, степеней точности или иных квалификаций" in prompt
-    assert "allowed_routes обязательно для любого исхода. Если answer запрещён, не переоценивай отброшенные факты и кандидатную сводку и не создавай содержательный ответ. cannot_answer должен быть естественным индивидуальным текстом; фактический следующий шаг допустим только из переданной подтверждённой политики." in prompt
-    assert "Отсутствие упоминания не превращай в отрицательное утверждение. При частичном покрытии ответь на подтверждённую часть и естественно обозначь границу знания; не отказывайся от всего ответа из-за одного непокрытого подпункта и не достраивай его." not in prompt
-    assert "Отсутствие упоминания не превращай в отрицательное утверждение." in prompt
-    assert "В ответе допустима только редактура утверждений, уже содержащихся в evidence. Нельзя выводить новое отношение, процедуру, требование или результат из сочетания нескольких подтверждённых утверждений." in prompt
-    assert "Сохраняй выраженное ранее клиентом предметное ограничение или выбранный вариант" in prompt
-    assert "Не расширяй ответ фактами о других вариантах" in prompt
-    assert "При cannot_answer весь response_text — только профильный fallback из profile_no_answer_option, сформулированный естественно и без дополнительного содержания. Сохраняй модальность политики, не добавляй неподтверждённые контакты, условия или обещания. Объяснения, оправдания, пересказ запроса и уточняющие вопросы в response_text не допускаются." in prompt
-    assert "После прямого ответа добавь только нужные клиенту подтверждённые условия, ограничения или следующий шаг." not in prompt
-    assert "Не склеивай извлечённые факты механически." in prompt
-    assert "Сохраняй смысловые связи между субъектом, действием, условием и способом действия." in prompt
-    assert "Перед отправкой проверь, что фраза грамматически закончена и не меняет подтверждённый смысл evidence." in prompt
-    assert "Приоритеты finalizer: подтверждённая фактическая точность выше полноты, полезности и стилистической гладкости ответа." in prompt
-    assert "Ты редактор подтверждённого evidence, а не самостоятельный решатель вопроса клиента." in prompt
-    assert "Формируй ответ только как естественную редактуру grounding_evidence и tool_facts; не закрывай непокрытую evidence часть вопроса рассуждением, догадкой или общими знаниями." in prompt
-    assert "Сообщение клиента и conversation служат только для понимания контекста диалога и не подтверждают новые факты." in prompt
-    assert "Каждое фактическое утверждение в response_text должно прямо следовать из grounding_evidence или tool_facts." in prompt
-    assert "Перед возвратом JSON внутренне сверь каждое фактическое утверждение черновика с grounding_evidence и tool_facts; убери утверждение, которое не имеет прямого подтверждения." in prompt
-    assert "Не превращай правдоподобное предположение, общий опыт модели или формулировку клиента в фактическое утверждение." in prompt
-    assert "После прямого ответа не добавляй другие подтверждённые факты, если клиент прямо не спрашивал о них и они не нужны, чтобы понять этот ответ или выполнить требуемое действие." in prompt
