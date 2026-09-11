@@ -361,7 +361,7 @@ class DirectLLMService:
         # The runtime permits sequential reuse. When the technical cap is
         # reached it removes tool capability, so this same agent must return
         # its own customer response from the facts it has already collected.
-        remaining = max(0, 4 - len(context.get("tool_observations", [])))
+        remaining = max(0, 3 - len(context.get("tool_observations", [])))
         selection_options: dict[str, Any] = (
             {"tools": self._native_tools(), "tool_choice": "auto", "parallel_tool_calls": False}
             if remaining else {"response_format": {"type": "json_object"}}
