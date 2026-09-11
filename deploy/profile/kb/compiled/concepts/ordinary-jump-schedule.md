@@ -1,10 +1,10 @@
 ---
 title: Ordinary Jump Schedule
 created: 2026-08-25
-updated: 2026-09-09
+updated: 2026-08-25
 type: concept
 tags: [schedule, solo-jump, weather]
-sources: [raw/documents/faq-main-source.md, raw/documents/general-info-source.md, raw/documents/operator-case-vk-994-flight-schedule.md]
+sources: [raw/documents/faq-main-source.md, raw/documents/general-info-source.md]
 confidence: high
 contested: false
 contradictions: []
@@ -23,11 +23,5 @@ contradictions: []
 - Подтверждение конкретной даты публикуется в анонсах группы за несколько дней до выходных.
 - Для группы около 20 человек возможна отдельная договорённость о другом дне.
 
-## Не применять к полётам
-- Эта страница относится к прыжкам, а не к прогулочным полётам и высшему пилотажу.
-- Если клиент спрашивает про прогулочный полёт, высший пилотаж или сертификат на полёт, нужно использовать сведения о полётах.
-- Расписание полётов на ближайшие выходные размещается в закреплённом посте группы.
-
 ## Related
 - [[booking-and-schedule]]
-- [[flight-services]]

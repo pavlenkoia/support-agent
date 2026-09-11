@@ -1,10 +1,10 @@
 ---
 title: Skydiving Services
 created: 2026-06-29
-updated: 2026-09-09
+updated: 2026-08-17
 type: concept
 tags: [services, tandem, solo-jump, safety, restrictions]
-sources: [raw/documents/general-info-source.md, raw/documents/faq-main-source.md, raw/documents/faq-short-source.md, raw/documents/legacy-approved-policy-source.md, raw/documents/operator-case-vk-999-prices-and-tandem-flow.md]
+sources: [raw/documents/general-info-source.md, raw/documents/faq-main-source.md, raw/documents/faq-short-source.md, raw/documents/legacy-approved-policy-source.md]
 confidence: high
 contested: false
 contradictions: []
@@ -25,8 +25,8 @@ contradictions: []
 
 ## Тандем
 - Высота — 2500 м.
-- На вопрос «как проходит прыжок в тандеме с инструктором» отвечать: все необходимые приготовления займут до 30 минут; клиент прослушает инструктаж о том, как вести себя в полёте и при приземлении; после инструктажа всех пригласят на борт.
-- Не нужно начинать такой ответ с эмоций, общих впечатлений или неподтверждённых описаний вроде «мягкий спуск».
+- Инструктаж занимает примерно 15–30 минут.
+- Точное время начала инструктажа и приезда заранее в Wiki не фиксируется; его уточняют при записи.
 - Видеосъёмка доступна только при прыжке в тандеме и заказывается при предварительной записи.
 - Тандем указан в материалах как наиболее безопасный формат первого прыжка.
 

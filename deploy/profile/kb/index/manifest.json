@@ -1,12 +1,10 @@
 {
   "bundle_version": 1,
   "catalog_path": "index/catalog.json",
-  "page_count": 14,
+  "page_count": 12,
   "page_identities": [
     "compiled/concepts/booking-and-schedule.md",
-    "compiled/concepts/booking-flight-services.md",
-    "compiled/concepts/booking-solo-jump.md",
-    "compiled/concepts/booking-tandem-jump.md",
+    "compiled/concepts/booking-channels.md",
     "compiled/concepts/certificates.md",
     "compiled/concepts/equipment-and-rental.md",
     "compiled/concepts/flight-services.md",

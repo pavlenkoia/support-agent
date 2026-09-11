@@ -1,10 +1,10 @@
 ---
 title: Certificates
 created: 2026-06-29
-updated: 2026-09-09
+updated: 2026-09-03
 type: concept
 tags: [services, certificates, booking, office]
-sources: [raw/documents/certificates-source.md, raw/documents/faq-main-source.md, raw/documents/faq-short-source.md, raw/documents/legacy-approved-policy-source.md, raw/documents/operator-case-vk-841-certificate-printing.md, raw/documents/payment-methods-governor-2026-09-03.md, raw/documents/operator-case-vk-994-flight-schedule.md]
+sources: [raw/documents/certificates-source.md, raw/documents/faq-main-source.md, raw/documents/faq-short-source.md, raw/documents/legacy-approved-policy-source.md, raw/documents/operator-case-vk-841-certificate-printing.md, raw/documents/payment-methods-governor-2026-09-03.md]
 confidence: high
 contested: false
 contradictions: []
@@ -29,13 +29,10 @@ contradictions: []
 - Подарочный сертификат можно распечатать в любом размере.
 - Ламинировать подарочный сертификат не следует.
 - Для использования необходима предварительная запись по каналу соответствующей услуги.
-- Сертификат можно активировать круглогодично; фактическая дата зависит от расписания и погоды.
-- Если сертификат куплен на прогулочный полёт или высший пилотаж, отвечать нужно про расписание полётов, а не про расписание прыжков.
-- Для прогулочного полёта / высшего пилотажа расписание полётов на ближайшие выходные размещается в закреплённом посте группы.
+- Сертификат можно активировать круглогодично; фактическая дата прыжка или полёта зависит от расписания и погоды.
 - Вопросы продления и возврата решает офис в будние дни по телефону `+7 (351) 214-30-30`.
 
 ## Related
 - [[booking-and-schedule]]
 - [[office-chelyabinsk]]
 - [[skydiving-services]]
-- [[flight-services]]
