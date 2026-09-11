@@ -176,7 +176,7 @@ class DirectLLMService:
                     "wiki_lookup — единственный источник бизнес-фактов из Wiki.",
                     "Для любого содержательного ответа можно использовать не более двух последовательных native-инструментов без параллельных вызовов.",
                     "Каждый зарегистрированный инструмент можно вызвать не более одного раза за ход. Повторный, третий, неизвестный или параллельный вызов нарушает контракт. После двух вызовов допустимо только завершение сбора через action=finalize, без клиентского текста.",
-                    "Если для ответа не хватает календарного факта, можно запросить calendar_lookup, а затем при необходимости wiki_lookup; если не хватает бизнес-факта, можно запросить wiki_lookup, а затем при необходимости calendar_lookup.",
+                    "Если явная дата или несколько явных дат влияют на ответ, сначала получи календарный факт через calendar_lookup, затем при необходимости бизнес-факт через wiki_lookup. Не заменяй календарный факт поиском в Wiki и не завершай такой запрос без calendar_lookup.",
                     "Каждый tool_call должен быть exact-name match и передавать JSON-объект с точной схемой аргументов. Не используй строки вместо JSON, не добавляй лишних ключей и не запрашивай параллельные инструменты.",
                     "Любой неизвестный инструмент, отсутствующие аргументы, лишние аргументы, не-JSON arguments или параллельные native_tool_calls считаются ошибкой и должны приводить к retry_pending без клиентского текста.",
                     "Если сведения инструментов не нужны, верни готовый клиентский JSON-ответ с route, response_text, confidence и reason. Если нужны факты, вызови native-инструмент; после инструмента заверши сбор только через action, response_intent и reason. Не изображай инструмент текстом.",
@@ -466,7 +466,7 @@ class DirectLLMService:
                 "type": "function",
                 "function": {
                     "name": "wiki_lookup",
-                    "description": "Read the Wiki before any factual or situation-specific customer answer.",
+                    "description": "Read the Wiki for business facts not determinable by calendar or directly stated in the customer message.",
                     "parameters": {
                         "type": "object",
                         "required": ["query", "context_scope", "needed_fact"],

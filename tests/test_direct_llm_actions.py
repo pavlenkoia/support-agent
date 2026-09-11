@@ -77,13 +77,20 @@ def test_begin_turn_requests_wiki_as_the_only_factual_source() -> None:
     prompt = str(client.calls[0]["user_prompt"])
     assert "calendar_lookup — не источник бизнес-фактов" in prompt
     assert "wiki_lookup — единственный источник бизнес-фактов из Wiki." in prompt
-    assert "Если для ответа не хватает календарного факта" in prompt
+    assert "Если явная дата или несколько явных дат влияют на ответ" in prompt
     assert "Любой неизвестный инструмент" in prompt
     assert client.calls[0]["tool_choice"] == "auto"
     assert client.calls[0]["parallel_tool_calls"] is False
     assert "response_format" not in client.calls[0]
     assert client.calls[0]["tools"][0]["function"]["name"] == "wiki_lookup"
 
+
+
+def test_native_tool_descriptions_keep_calendar_facts_separate_from_wiki_facts() -> None:
+    tools = {tool["function"]["name"]: tool["function"]["description"] for tool in DirectLLMService._native_tools()}
+
+    assert "not determinable by calendar" in tools["wiki_lookup"]
+    assert "current customer message" in tools["calendar_lookup"]
 
 
 def test_begin_turn_accepts_provider_native_tool_call_with_valid_arguments() -> None:
