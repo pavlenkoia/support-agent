@@ -44,9 +44,18 @@ class PolicyService:
         text = str(evidence.get("text") or "").strip() if isinstance(evidence, dict) else ""
         return [{"source_ref": source_ref, "text": text}] if source_ref and text else []
 
+    _INTERNAL_TRAILER_PATTERN = re.compile(
+        r"(?:\n\s*)?(?:source_refs|evidence|grounding_evidence|tool_observations)\s*:\s*.*$",
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+
     def finalize_customer_text(self, text: str, *, first_reply_in_dialogue: bool) -> str:
-        """Preserve content; routing validates channel length after greeting."""
+        """Apply deterministic presentation cleanup without composing meaning."""
         cleaned = clean_customer_text(text)
+        # Reasoning-capable compatible models sometimes append their required
+        # internal audit fields after the customer text. They are never client
+        # content. Markdown code delimiters are likewise presentation noise.
+        cleaned = self._INTERNAL_TRAILER_PATTERN.sub("", cleaned).replace("`", "").strip()
         if not cleaned:
             return ""
         if first_reply_in_dialogue:
