@@ -410,7 +410,15 @@ class OpenAICompatibleClient(BaseLLMClient):
             message = data["choices"][0]["message"]
             if isinstance(message, dict) and isinstance(message.get("tool_calls"), list):
                 return json.dumps({"_native_tool_calls": message["tool_calls"]}, ensure_ascii=False)
-            return message["content"]
+            content = message.get("content") if isinstance(message, dict) else None
+            if isinstance(content, str) and content.strip():
+                return content
+            # Ollama/OpenAI-compatible reasoning models may put their entire
+            # structured completion in reasoning_content and leave content empty.
+            reasoning_content = message.get("reasoning_content") or message.get("reasoning")
+            if isinstance(reasoning_content, str) and reasoning_content.strip():
+                return reasoning_content
+            raise RuntimeError("LLM response has neither content nor reasoning_content")
         except (KeyError, IndexError, TypeError) as exc:  # pragma: no cover - malformed response path
             raise RuntimeError(f"Malformed LLM response: {data}") from exc
 
