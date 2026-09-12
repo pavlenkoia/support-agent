@@ -73,8 +73,8 @@ def test_removed_prompt_facts_are_preserved_in_canonical_wiki() -> None:
             "+7 (351) 214-30-30",
             "звонок повторяют в рабочее время",
             "Вопросы продления и возврата сертификата",
-            "потеря скачанных фото- или видеоматериалов",
-            "Условия фотосессии или фотосъёмки",
+            "потеря фото- или видеоматериалов",
+            "Фотосессия или фотосъёмка",
         ],
         "kb/concepts/pricing-and-addons.md": [
             "https://vk.cc/cYzS5j",
@@ -115,7 +115,7 @@ def test_removed_prompt_facts_are_preserved_in_canonical_wiki() -> None:
         "kb/concepts/ordinary-jump-schedule.md": [
             "Обычные прыжки обычно проходят по субботам и воскресеньям",
             "Для группы около 20 человек",
-            "Обычный выходной день не подтверждает проведение прыжков",
+            "Проведение на конкретную дату подтверждается анонсом и записью",
             "Будний день возможен только по отдельной групповой договорённости",
             "Проведение и перенос зависят от погодных условий",
         ],
@@ -127,7 +127,7 @@ def test_removed_prompt_facts_are_preserved_in_canonical_wiki() -> None:
             "паспорт, закрытая одежда и обувь с фиксацией голеностопа",
             "Высота — 2500 м",
             "15–30 минут",
-            "наиболее безопасный формат первого прыжка",
+            "Для первого прыжка тандем — наиболее безопасный формат",
         ],
         "kb/concepts/flight-services.md": [
             "в кабине на месте второго пилота или в салоне",
@@ -145,13 +145,13 @@ def test_removed_prompt_facts_are_preserved_in_canonical_wiki() -> None:
             "Самостоятельный прыжок доступен с 14 лет",
             "Для тандем-прыжка минимальный возраст — 14 лет",
             "До 18 лет требуется разрешение родителей",
-            "По меньшему возрасту нужно уточнить вопрос по телефону офиса.",
+            "Для возраста меньше 14 лет возможность прыжка можно узнать в офисе.",
             "Для прыжка нужен паспорт",
             "Самостоятельный прыжок: вес 45–90 кг",
             "Тандем: вес до 85 кг",
-            "Пограничные случаи и превышение ограничения уточняют в офисе",
+            "При весе за пределами указанных ограничений возможность прыжка можно узнать в офисе.",
             "Полёты на самолётах: вес пассажира до 120 кг",
-            "астме, нарушениях слуха",
+            "Ограничения по здоровью: астма, нарушения слуха",
             "ветер более 5 м/с",
             "Зимой прыжки возможны",
             "Прыжки с собственной камерой не допускаются",
@@ -204,6 +204,7 @@ def test_profile_source_rejects_scenario_instruction_in_wiki(tmp_path: Path) -> 
     source = tmp_path / "source"
     (source / "kb" / "concepts").mkdir(parents=True)
     (source / "SYSTEM_PROMPT.md").write_text("Generic contract.\n", encoding="utf-8")
+    (source / "SIMPLE_ANSWER_PROMPT.md").write_text("Customer answer contract.\n", encoding="utf-8")
     (source / "KB_AGENT_PROMPT.md").write_text("Generic reader.\n", encoding="utf-8")
     (source / "kb" / "concepts" / "facts.md").write_text(
         "# Facts\n\nЕсли клиент спросил, ответь готовой фразой.\n", encoding="utf-8"
@@ -218,6 +219,7 @@ def test_build_runtime_profile_produces_valid_bundle(tmp_path: Path) -> None:
     build_runtime_profile(SOURCE, target)
 
     assert target.joinpath("SYSTEM_PROMPT.md").read_bytes() == SOURCE.joinpath("SYSTEM_PROMPT.md").read_bytes()
+    assert target.joinpath("SIMPLE_ANSWER_PROMPT.md").read_bytes() == SOURCE.joinpath("SIMPLE_ANSWER_PROMPT.md").read_bytes()
     assert target.joinpath("KB_AGENT_PROMPT.md").read_bytes() == SOURCE.joinpath("KB_AGENT_PROMPT.md").read_bytes()
     assert validate_compiled_bundle(target / "kb")["valid"] is True
 

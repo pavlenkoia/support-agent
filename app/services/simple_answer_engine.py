@@ -198,12 +198,10 @@ class SimpleAnswerEngine:
                 validated_quotes.append(quote)
             if source_ref not in normalized_refs:
                 normalized_refs.append(source_ref)
-        model_refs = parsed.get("source_refs")
-        if not isinstance(model_refs, list) or any(not isinstance(ref, str) for ref in model_refs):
-            raise ValueError("inconsistent_source_refs")
-        model_refs = [ref.strip() for ref in model_refs]
-        if any(not ref for ref in model_refs) or set(model_refs) != set(normalized_refs):
-            raise ValueError("inconsistent_source_refs")
+        # Evidence is the authoritative, validated provenance.  source_refs is
+        # redundant model metadata and may be incomplete or ordered differently;
+        # derive it from the validated evidence instead of discarding a usable
+        # customer answer.
         if self.preserve_grounded_text:
             return normalized_refs, response_text
         return normalized_refs, " ".join(validated_quotes)
@@ -261,7 +259,10 @@ class SimpleAnswerEngine:
         raise json.JSONDecodeError("unable to recover JSON object", text, 0)
 
     def _load_system_prompt(self) -> str:
-        prompt_path = self.profile_root / "SYSTEM_PROMPT.md"
+        prompt_name = "SIMPLE_ANSWER_PROMPT.md" if self.preserve_grounded_text else "SYSTEM_PROMPT.md"
+        prompt_path = self.profile_root / prompt_name
+        if not prompt_path.is_file() and self.preserve_grounded_text:
+            prompt_path = self.profile_root / "SYSTEM_PROMPT.md"
         return prompt_path.read_text(encoding="utf-8").strip()
 
     def _load_corpus(self) -> dict[str, Any]:

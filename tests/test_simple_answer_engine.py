@@ -163,6 +163,27 @@ def test_natural_full_corpus_prompt_requires_natural_text_with_exact_evidence(tm
     assert "Evidence and source_refs are required only for KB-dependent factual claims" in contract["rule"]
 
 
+def test_natural_full_corpus_uses_its_own_customer_prompt(tmp_path: Path) -> None:
+    profile_root = make_profile_root(tmp_path)
+    (profile_root / "SIMPLE_ANSWER_PROMPT.md").write_text(
+        "Отвечай клиенту коротко и только по буквальному вопросу.", encoding="utf-8"
+    )
+    engine, client = make_engine(
+        envelope(
+            "grounded_answer",
+            "Сертификат можно оформить на сайте.",
+            [CERTIFICATE_REF],
+            [{"source_ref": CERTIFICATE_REF, "quote": "Сертификат можно оформить на сайте."}],
+        ),
+        profile_root=profile_root,
+        preserve_grounded_text=True,
+    )
+
+    engine.answer(question="Как оформить сертификат?", history=[])
+
+    assert client.calls[0]["system_prompt"] == "Отвечай клиенту коротко и только по буквальному вопросу."
+
+
 def test_user_prompt_contract_includes_evidence_shape_and_exact_quote_requirement(tmp_path: Path) -> None:
     engine, client = make_engine(
         envelope(
@@ -227,7 +248,7 @@ def test_grounded_answer_rejects_missing_empty_and_too_many_evidence_items(tmp_p
         assert len(client.calls) == 1
 
 
-def test_grounded_answer_rejects_inconsistent_model_source_refs(tmp_path: Path) -> None:
+def test_grounded_answer_derives_source_refs_from_valid_evidence(tmp_path: Path) -> None:
     profile_root = make_profile_root(tmp_path)
     engine, client = make_engine(
         envelope(
@@ -245,8 +266,9 @@ def test_grounded_answer_rejects_inconsistent_model_source_refs(tmp_path: Path) 
 
     result = engine.answer(question="Что есть?", history=[])
 
-    assert result["kind"] == "cannot_answer"
-    assert result["telemetry"]["contract_error"] == "inconsistent_source_refs"
+    assert result["kind"] == "grounded_answer"
+    assert result["response_text"] == "Сертификат можно оформить на сайте. Цена прыжка на 10 прыжков — 12 000 ₽."
+    assert result["source_refs"] == [CERTIFICATE_REF, PRICE_REF]
     assert len(client.calls) == 1
 
 

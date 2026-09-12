@@ -26,7 +26,7 @@ class ProfileSourceError(ValueError):
 
 def validate_profile_source(source_root: Path) -> None:
     source_root = Path(source_root)
-    for name in ("SYSTEM_PROMPT.md", "KB_AGENT_PROMPT.md"):
+    for name in ("SYSTEM_PROMPT.md", "SIMPLE_ANSWER_PROMPT.md", "KB_AGENT_PROMPT.md"):
         path = source_root / name
         if not path.is_file():
             raise ProfileSourceError(f"missing profile source artifact: {name}")
@@ -58,7 +58,7 @@ def build_runtime_profile(source_root: Path, target_root: Path) -> None:
     if target_root.exists():
         raise ProfileSourceError(f"target runtime profile already exists: {target_root}")
     target_root.mkdir(parents=True)
-    for name in ("SYSTEM_PROMPT.md", "KB_AGENT_PROMPT.md", "profile.yaml"):
+    for name in ("SYSTEM_PROMPT.md", "SIMPLE_ANSWER_PROMPT.md", "KB_AGENT_PROMPT.md", "profile.yaml"):
         source = source_root / name
         if source.is_file():
             shutil.copy2(source, target_root / name)

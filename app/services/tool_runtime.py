@@ -27,7 +27,9 @@ TEXT_DATE_RE = re.compile(
     r"(?<!\d)(?P<day>\d{1,2})\s+(?P<month_name>января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)(?:\s+(?P<year>\d{4}))?(?!\d)",
     flags=re.IGNORECASE,
 )
-DAY_ONLY_RE = re.compile(r"(?<!\d)(?P<day>\d{1,2})(?:-?го|\s*числа)?(?!\d)", flags=re.IGNORECASE)
+# A bare number is often a quantity (for example, «2 прыжка»), not a date.
+# Accept a day-only date only when the customer supplies an explicit date marker.
+DAY_ONLY_RE = re.compile(r"(?<!\d)(?P<day>\d{1,2})(?:-?го|\s*числа)(?!\d)", flags=re.IGNORECASE)
 MONTH_PERIOD_RE = re.compile(
     r"(?P<prefix>с|по|в)\s+(?P<start>январ(?:ь|я|е)?|феврал(?:ь|я|е)?|март(?:а|е)?|апрел(?:ь|я|е)?|ма(?:й|я|е)|июн(?:ь|я|е)?|июл(?:ь|я|е)?|август(?:а|е)?|сентябр(?:ь|я|е)?|октябр(?:ь|я|е)?|ноябр(?:ь|я|е)?|декабр(?:ь|я|е)?)(?:\s+(?:по|—|-|до)\s+(?P<end>январ(?:ь|я|е)?|феврал(?:ь|я|е)?|март(?:а|е)?|апрел(?:ь|я|е)?|ма(?:й|я|е)|июн(?:ь|я|е)?|июл(?:ь|я|е)?|август(?:а|е)?|сентябр(?:ь|я|е)?|октябр(?:ь|я|е)?|ноябр(?:ь|я|е)?|декабр(?:ь|я|е)?))?",
     flags=re.IGNORECASE,
