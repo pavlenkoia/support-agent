@@ -2,283 +2,173 @@
   "catalog_version": 1,
   "pages": [
     {
-      "description": "Для запроса записи, где дата названа только числом, условия записи указаны в закреплённом посте или анонсе на эту дату; день недели для этого не требуется.",
+      "description": "- Подарочный сертификат можно купить онлайн на https://dzkalachevo.ru или в офисе. - Сертификат в офисе можно оплатить наличными или безналично. - Бумажный сертификат получают в офисе по будням.",
       "linked_source_refs": [],
-      "provenance": [
-        "raw/documents/operator-case-vk-530781299.md",
-        "raw/documents/operator-case-vk-291545750-chat.md"
-      ],
-      "source_ref": "compiled/concepts/booking-and-schedule.md",
-      "tags": [
-        "booking",
-        "schedule",
-        "chat",
-        "vk"
-      ],
-      "title": "Booking Conditions for a Date",
-      "type": "concept",
-      "updated": "2026-09-01"
-    },
-    {
-      "description": "- Самостоятельный прыжок: телефон `+7 (351) 214-30-30`, добавочный 1. Запись обычно открывается в пятницу после 12:00 на субботу и в субботу после 12:00 на воскресенье. - Тандем-прыжок: форма `https://vk.cc/cMwabq` или телефон `+7 (351) 214-30-30`, добавочный 2. - После записи на тандем клиента добавляют в чат Telegram или MAX и сообщают время.",
-      "linked_source_refs": [
-        "compiled/concepts/booking-and-schedule.md",
-        "compiled/concepts/ordinary-jump-schedule.md"
-      ],
-      "provenance": [
-        "raw/documents/faq-main-source.md",
-        "raw/documents/faq-short-source.md",
-        "raw/documents/general-info-source.md",
-        "raw/documents/legacy-approved-policy-source.md",
-        "raw/documents/operator-case-vk-291545750-chat.md"
-      ],
-      "source_ref": "compiled/concepts/booking-channels.md",
-      "tags": [
-        "booking",
-        "tandem",
-        "solo-jump",
-        "flights",
-        "vk",
-        "chat"
-      ],
-      "title": "Booking Channels",
-      "type": "concept",
-      "updated": "2026-09-01"
-    },
-    {
-      "description": "Подарочный сертификат можно купить онлайн или в офисе. Сертификат не именной и действует 6 месяцев с даты покупки.",
-      "linked_source_refs": [
-        "compiled/concepts/booking-and-schedule.md",
-        "compiled/entities/office-chelyabinsk.md",
-        "compiled/concepts/skydiving-services.md"
-      ],
       "provenance": [
         "raw/documents/certificates-source.md",
         "raw/documents/faq-main-source.md",
         "raw/documents/faq-short-source.md",
+        "raw/documents/general-info-source.md",
         "raw/documents/legacy-approved-policy-source.md",
+        "raw/documents/operator-case-vk-291545750-chat.md",
         "raw/documents/operator-case-vk-841-certificate-printing.md",
         "raw/documents/payment-methods-governor-2026-09-03.md"
       ],
       "source_ref": "compiled/concepts/certificates.md",
       "tags": [
-        "services",
-        "certificates",
-        "booking",
-        "office"
+        "services"
       ],
-      "title": "Certificates",
+      "title": "Подарочные сертификаты",
       "type": "concept",
-      "updated": "2026-09-03"
+      "updated": "2026-09-12"
     },
     {
-      "description": "Для прыжка требуется закрытая одежда и обувь с фиксацией голеностопа. Берцы доступны в прокате на месте.",
-      "linked_source_refs": [
-        "compiled/concepts/pricing-and-addons.md",
-        "compiled/concepts/skydiving-services.md",
-        "compiled/concepts/restrictions-and-safety.md"
-      ],
+      "description": "- Для прыжка требуется закрытая одежда и обувь с фиксацией голеностопа. - Зимой прыжки возможны; требуется более тёплая одежда. - Очки, шлем, комбинезон и перчатки не выдаются. Их отсутствие само по себе не препятствует прыжку.",
+      "linked_source_refs": [],
       "provenance": [
-        "raw/documents/faq-main-source.md",
-        "raw/documents/faq-short-source.md"
-      ],
-      "source_ref": "compiled/concepts/equipment-and-rental.md",
-      "tags": [
-        "equipment",
-        "rental",
-        "solo-jump"
-      ],
-      "title": "Equipment and Rental",
-      "type": "concept",
-      "updated": "2026-08-17"
-    },
-    {
-      "description": "Доступны прогулочные полёты на АН-2 и полёты с лётчиком-инструктором на Як-52.",
-      "linked_source_refs": [
-        "compiled/concepts/booking-and-schedule.md",
-        "compiled/concepts/pricing-and-addons.md",
-        "compiled/concepts/restrictions-and-safety.md"
-      ],
-      "provenance": [
-        "raw/documents/general-info-source.md",
+        "raw/documents/age-restrictions-governor-2026-09-07.md",
         "raw/documents/faq-main-source.md",
         "raw/documents/faq-short-source.md",
-        "raw/documents/legacy-approved-policy-source.md"
-      ],
-      "source_ref": "compiled/concepts/flight-services.md",
-      "tags": [
-        "services",
-        "flights",
-        "restrictions"
-      ],
-      "title": "Flight Services",
-      "type": "concept",
-      "updated": "2026-08-17"
-    },
-    {
-      "description": "Обычные прыжки обычно проходят по субботам и воскресеньям и зависят от погоды и анонсов.",
-      "linked_source_refs": [
-        "compiled/concepts/booking-and-schedule.md"
-      ],
-      "provenance": [
-        "raw/documents/faq-main-source.md",
-        "raw/documents/general-info-source.md"
-      ],
-      "source_ref": "compiled/concepts/ordinary-jump-schedule.md",
-      "tags": [
-        "schedule",
-        "solo-jump",
-        "weather"
-      ],
-      "title": "Ordinary Jump Schedule",
-      "type": "concept",
-      "updated": "2026-08-25"
-    },
-    {
-      "description": "Оплата услуг возможна в офисе, на аэродроме и на сайте `https://dzkalachevo.ru`. Для фото- и видеосъёмки действует отдельное правило: эта услуга оплачивается только наличными в кассе аэродрома.",
-      "linked_source_refs": [
-        "compiled/concepts/certificates.md",
-        "compiled/concepts/pricing-and-addons.md",
-        "compiled/entities/office-chelyabinsk.md"
-      ],
-      "provenance": [
-        "raw/documents/faq-short-source.md",
-        "raw/documents/faq-main-source.md",
-        "raw/documents/payment-methods-governor-2026-09-03.md"
-      ],
-      "source_ref": "compiled/concepts/payment-methods.md",
-      "tags": [
-        "payment",
-        "certificates",
-        "office"
-      ],
-      "title": "Payment Methods",
-      "type": "concept",
-      "updated": "2026-09-03"
-    },
-    {
-      "description": "Актуальный прайс: `https://vk.cc/cYzS5j`.",
-      "linked_source_refs": [
-        "compiled/concepts/certificates.md",
-        "compiled/concepts/skydiving-services.md",
-        "compiled/concepts/flight-services.md",
-        "compiled/concepts/equipment-and-rental.md"
-      ],
-      "provenance": [
-        "raw/documents/general-info-source.md",
-        "raw/documents/faq-main-source.md",
-        "raw/documents/faq-short-source.md",
-        "raw/documents/legacy-approved-policy-source.md"
-      ],
-      "source_ref": "compiled/concepts/pricing-and-addons.md",
-      "tags": [
-        "pricing",
-        "add-ons",
-        "certificates",
-        "flights",
-        "tandem"
-      ],
-      "title": "Pricing and Add-ons",
-      "type": "concept",
-      "updated": "2026-08-23"
-    },
-    {
-      "description": "Для прыжков и полётов действуют возрастные, весовые, медицинские и погодные ограничения.",
-      "linked_source_refs": [
-        "compiled/concepts/skydiving-services.md",
-        "compiled/concepts/flight-services.md",
-        "compiled/entities/office-chelyabinsk.md",
-        "compiled/concepts/equipment-and-rental.md"
-      ],
-      "provenance": [
-        "raw/documents/general-info-source.md",
-        "raw/documents/faq-main-source.md",
-        "raw/documents/faq-short-source.md",
-        "raw/documents/age-restrictions-governor-2026-09-07.md"
-      ],
-      "source_ref": "compiled/concepts/restrictions-and-safety.md",
-      "tags": [
-        "restrictions",
-        "safety",
-        "tandem",
-        "solo-jump",
-        "flights"
-      ],
-      "title": "Restrictions and Safety",
-      "type": "concept",
-      "updated": "2026-09-07"
-    },
-    {
-      "description": "Первый прыжок можно выполнить самостоятельно или в тандеме с инструктором.",
-      "linked_source_refs": [
-        "compiled/concepts/booking-and-schedule.md",
-        "compiled/concepts/restrictions-and-safety.md",
-        "compiled/concepts/pricing-and-addons.md",
-        "compiled/concepts/equipment-and-rental.md"
-      ],
-      "provenance": [
-        "raw/documents/general-info-source.md",
-        "raw/documents/faq-main-source.md",
-        "raw/documents/faq-short-source.md",
-        "raw/documents/legacy-approved-policy-source.md"
-      ],
-      "source_ref": "compiled/concepts/skydiving-services.md",
-      "tags": [
-        "services",
-        "tandem",
-        "solo-jump",
-        "safety",
-        "restrictions"
-      ],
-      "title": "Skydiving Services",
-      "type": "concept",
-      "updated": "2026-08-17"
-    },
-    {
-      "description": "Прыжки, полёты и использование подарочных сертификатов доступны только на аэродроме Калачево в Челябинске; в других городах эти услуги не оказываются.",
-      "linked_source_refs": [
-        "compiled/concepts/booking-and-schedule.md",
-        "compiled/concepts/certificates.md",
-        "compiled/concepts/skydiving-services.md"
-      ],
-      "provenance": [
-        "raw/documents/faq-main-source.md",
         "raw/documents/general-info-source.md",
         "raw/documents/legacy-approved-policy-source.md"
       ],
-      "source_ref": "compiled/entities/kalachevo-airfield.md",
+      "source_ref": "compiled/concepts/equipment.md",
       "tags": [
-        "airfield",
-        "logistics",
-        "flights",
-        "solo-jump",
-        "tandem"
+        "services"
       ],
-      "title": "Kalachevo Airfield",
-      "type": "entity",
-      "updated": "2026-08-17"
+      "title": "Одежда и прокат для прыжков",
+      "type": "concept",
+      "updated": "2026-09-12"
     },
     {
-      "description": "Офис используется для покупки бумажных сертификатов, очной оплаты и решения нестандартных вопросов.",
-      "linked_source_refs": [
-        "compiled/concepts/certificates.md",
-        "compiled/concepts/booking-and-schedule.md",
-        "compiled/concepts/restrictions-and-safety.md"
+      "description": "- Доступны прогулочные полёты на АН-2 и полёты с лётчиком-инструктором на Як-52. - На АН-2 возможен полёт в кабине на месте второго пилота или в салоне; полёт проходит без фигур высшего пилотажа. - Полёты с детьми проводятся только на АН-2. Возраст для места в кабине — с 16 лет.",
+      "linked_source_refs": [],
+      "provenance": [
+        "raw/documents/age-restrictions-governor-2026-09-07.md",
+        "raw/documents/faq-main-source.md",
+        "raw/documents/faq-short-source.md",
+        "raw/documents/general-info-source.md",
+        "raw/documents/legacy-approved-policy-source.md",
+        "raw/documents/operator-case-vk-291545750-chat.md"
       ],
+      "source_ref": "compiled/concepts/flights.md",
+      "tags": [
+        "services"
+      ],
+      "title": "Полёты на самолётах",
+      "type": "concept",
+      "updated": "2026-09-12"
+    },
+    {
+      "description": "- Первый прыжок можно выполнить самостоятельно после подготовки и при соблюдении ограничений или в тандеме с инструктором. - Для первого прыжка тандем — наиболее безопасный формат. - Высота самостоятельного прыжка — 800–900 м; также указан ориентир 850 м.",
+      "linked_source_refs": [],
+      "provenance": [
+        "raw/documents/age-restrictions-governor-2026-09-07.md",
+        "raw/documents/certificates-source.md",
+        "raw/documents/faq-main-source.md",
+        "raw/documents/faq-short-source.md",
+        "raw/documents/general-info-source.md",
+        "raw/documents/legacy-approved-policy-source.md",
+        "raw/documents/operator-case-vk-291545750-chat.md"
+      ],
+      "source_ref": "compiled/concepts/jumps.md",
+      "tags": [
+        "services"
+      ],
+      "title": "Прыжки с парашютом",
+      "type": "concept",
+      "updated": "2026-09-12"
+    },
+    {
+      "description": "- Прыжки, полёты и использование подарочных сертификатов доступны только на аэродроме Калачево в Челябинске; в других городах эти услуги не оказываются. - Прыжки и полёты проходят на аэродроме круглый год; конкретные даты зависят от расписания и погоды. - Маршрут проходит по Троицкому тракту через развязку на Еткуль; въезд на аэродром находится ещё примерно через 5 км.",
+      "linked_source_refs": [],
       "provenance": [
         "raw/documents/certificates-source.md",
         "raw/documents/faq-main-source.md",
+        "raw/documents/general-info-source.md",
         "raw/documents/legacy-approved-policy-source.md"
       ],
-      "source_ref": "compiled/entities/office-chelyabinsk.md",
+      "source_ref": "compiled/concepts/location-office.md",
       "tags": [
-        "office",
-        "booking",
-        "certificates"
+        "services"
       ],
-      "title": "Office in Chelyabinsk",
-      "type": "entity",
-      "updated": "2026-08-17"
+      "title": "Аэродром и офис",
+      "type": "concept",
+      "updated": "2026-09-12"
+    },
+    {
+      "description": "- Актуальный прайс: https://vk.cc/cYzS5j. - Покупку услуги можно оплатить наличными в кассе аэродрома и в офисе; безналично — в кассе аэродрома, в офисе и на https://dzkalachevo.ru. Для фото- и видеосъёмки действует отдельное правило оплаты. - Скидки предусмотрены только для школьников и студентов очной формы обучения при наличии действующего, своевременно продлённого студенческого билета.",
+      "linked_source_refs": [],
+      "provenance": [
+        "raw/documents/certificates-source.md",
+        "raw/documents/faq-main-source.md",
+        "raw/documents/faq-short-source.md",
+        "raw/documents/general-info-source.md",
+        "raw/documents/legacy-approved-policy-source.md",
+        "raw/documents/payment-methods-governor-2026-09-03.md"
+      ],
+      "source_ref": "compiled/concepts/payments.md",
+      "tags": [
+        "services"
+      ],
+      "title": "Оплата и цены",
+      "type": "concept",
+      "updated": "2026-09-12"
+    },
+    {
+      "description": "- Видеосъёмка прыжка доступна только для тандема и заказывается при предварительной записи. - Видеосъёмка прыжка оплачивается наличными на территории аэродрома перед прыжком. - Видеосъёмка полёта доступна как дополнительная услуга.",
+      "linked_source_refs": [],
+      "provenance": [
+        "raw/documents/faq-main-source.md",
+        "raw/documents/faq-short-source.md",
+        "raw/documents/general-info-source.md",
+        "raw/documents/legacy-approved-policy-source.md",
+        "raw/documents/payment-methods-governor-2026-09-03.md"
+      ],
+      "source_ref": "compiled/concepts/photo-video.md",
+      "tags": [
+        "services"
+      ],
+      "title": "Фото- и видеосъёмка",
+      "type": "concept",
+      "updated": "2026-09-12"
+    },
+    {
+      "description": "- Обычные прыжки обычно проходят по субботам и воскресеньям; стандартная запись доступна на выходные. Проведение и перенос зависят от погоды. - В будние дни обычные прыжки не проводятся. Будний день возможен только по отдельной групповой договорённости; для группы около 20 человек возможна отдельная договорённость о другом дне. - Проведение прыжков на конкретную дату подтверждается анонсом и записью и зависит от погоды. Подтверждение даты публикуется в анонсах группы за несколько дней до выходных.",
+      "linked_source_refs": [],
+      "provenance": [
+        "raw/documents/age-restrictions-governor-2026-09-07.md",
+        "raw/documents/faq-main-source.md",
+        "raw/documents/faq-short-source.md",
+        "raw/documents/general-info-source.md",
+        "raw/documents/legacy-approved-policy-source.md",
+        "raw/documents/operator-case-vk-291545750-chat.md",
+        "raw/documents/operator-case-vk-530781299.md"
+      ],
+      "source_ref": "compiled/concepts/schedule.md",
+      "tags": [
+        "services"
+      ],
+      "title": "Расписание и условия проведения",
+      "type": "concept",
+      "updated": "2026-09-12"
+    },
+    {
+      "description": "- Для прыжков и полётов действуют возрастные, весовые, медицинские и погодные ограничения. - Ограничения по здоровью: астма, нарушения слуха, некоторые сердечно-сосудистые заболевания, высокое давление, свежие переломы и состояние опьянения.",
+      "linked_source_refs": [],
+      "provenance": [
+        "raw/documents/age-restrictions-governor-2026-09-07.md",
+        "raw/documents/faq-main-source.md",
+        "raw/documents/faq-short-source.md",
+        "raw/documents/general-info-source.md"
+      ],
+      "source_ref": "compiled/concepts/shared-restrictions.md",
+      "tags": [
+        "services"
+      ],
+      "title": "Общие ограничения",
+      "type": "concept",
+      "updated": "2026-09-12"
     }
   ]
 }

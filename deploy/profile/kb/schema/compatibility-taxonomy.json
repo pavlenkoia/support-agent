@@ -1,7 +1,3 @@
 {
-  "legacy_undeclared_tags": [
-    "chat",
-    "vk",
-    "weather"
-  ]
+  "legacy_undeclared_tags": []
 }
