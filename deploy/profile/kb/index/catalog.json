@@ -157,7 +157,7 @@
       "updated": "2026-09-03"
     },
     {
-      "description": "Официальный источник действующих цен — `https://vk.cc/cYzS5j`. Суммы из исходных материалов могут устаревать и не являются каноническими.",
+      "description": "Актуальный прайс: `https://vk.cc/cYzS5j`.",
       "linked_source_refs": [
         "compiled/concepts/certificates.md",
         "compiled/concepts/skydiving-services.md",
