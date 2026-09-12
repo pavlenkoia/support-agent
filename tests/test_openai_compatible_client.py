@@ -494,3 +494,4 @@ def test_openai_compatible_client_can_request_litellm_drop_params(monkeypatch) -
     ) == "ok"
     assert captured_payloads[0]["drop_params"] is True
     assert captured_payloads[0]["parallel_tool_calls"] is False
+    assert captured_payloads[0]["think"] is False

@@ -211,6 +211,9 @@ class OpenAICompatibleClient(BaseLLMClient):
             "model": self.model,
             "temperature": temperature,
             "stream": False,
+            # Keep customer turns bounded: the provider must return the
+            # requested compact response rather than an unbounded reasoning run.
+            "think": False,
             "messages": messages if messages is not None else [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
