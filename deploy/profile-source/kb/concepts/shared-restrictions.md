@@ -1,0 +1,18 @@
+---
+title: Общие ограничения
+created: '2026-09-12'
+updated: '2026-09-12'
+type: concept
+tags:
+- services
+sources:
+- raw/documents/age-restrictions-governor-2026-09-07.md
+- raw/documents/faq-main-source.md
+- raw/documents/faq-short-source.md
+- raw/documents/general-info-source.md
+---
+# Общие ограничения
+
+## Возраст, вес, здоровье и погода
+- Для прыжков и полётов действуют возрастные, весовые, медицинские и погодные ограничения.
+- Ограничения по здоровью: астма, нарушения слуха, некоторые сердечно-сосудистые заболевания, высокое давление, свежие переломы и состояние опьянения.

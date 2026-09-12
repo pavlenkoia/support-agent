@@ -1,15 +1,11 @@
-# Wiki Index
+# База знаний
 
-## Entities
-- [[kalachevo-airfield]] — место проведения прыжков и полётов, маршрут и условия на месте.
-- [[office-chelyabinsk]] — адрес, режим работы, контакты и функции офиса.
-
-## Concepts
-- [[booking-and-schedule]] — каналы записи, расписание и зависимость проведения от погоды.
-- [[certificates]] — покупка, получение, срок действия и использование сертификатов.
-- [[equipment-and-rental]] — одежда, обувь, выдача и прокат экипировки.
-- [[flight-services]] — прогулочные и пилотажные полёты.
-- [[payment-methods]] — подтверждённые способы оплаты.
-- [[pricing-and-addons]] — прайс, скидки и дополнительные услуги.
-- [[restrictions-and-safety]] — возрастные, весовые, медицинские и погодные ограничения.
-- [[skydiving-services]] — самостоятельные и тандемные прыжки.
+- [[certificates]]
+- [[jumps]]
+- [[shared-restrictions]]
+- [[equipment]]
+- [[flights]]
+- [[schedule]]
+- [[payments]]
+- [[photo-video]]
+- [[location-office]]
