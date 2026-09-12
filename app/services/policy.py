@@ -58,8 +58,8 @@ class PolicyService:
         cleaned = self._INTERNAL_TRAILER_PATTERN.sub("", cleaned).replace("`", "").strip()
         if not cleaned:
             return ""
+        cleaned = self._LEADING_GREETING_PATTERN.sub("", cleaned).strip()
         if first_reply_in_dialogue:
-            cleaned = self._LEADING_GREETING_PATTERN.sub("", cleaned).strip()
             cleaned = "Здравствуйте!" if not cleaned else f"Здравствуйте! {cleaned}"
         return cleaned
 

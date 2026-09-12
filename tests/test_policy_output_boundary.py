@@ -24,7 +24,16 @@ def test_output_boundary_replaces_model_greeting_on_first_reply() -> None:
     assert policy.finalize_simple_customer_text("Привет! Ответ.", first_reply_in_dialogue=True) == "Здравствуйте! Ответ."
 
 
-def test_output_boundary_preserves_model_greeting_on_follow_up() -> None:
+def test_output_boundary_removes_model_greeting_on_follow_up() -> None:
     policy = PolicyService()
 
-    assert policy.finalize_simple_customer_text("Привет! Ответ.", first_reply_in_dialogue=False) == "Привет! Ответ."
+    for greeting in ("Здравствуйте!", "Привет!", "Добрый день!"):
+        assert policy.finalize_simple_customer_text(f"{greeting} Ответ.", first_reply_in_dialogue=False) == "Ответ."
+
+
+def test_output_boundary_preserves_follow_up_body_and_internal_greeting() -> None:
+    policy = PolicyService()
+    body = 'Если вы точно не пойдёте, сертификат можно использовать в течение 6 месяцев с даты покупки.'
+    assert policy.finalize_simple_customer_text('Здравствуйте! ' + body, first_reply_in_dialogue=False) == body
+    body = 'В сообщении написано «Здравствуйте!», затем ответ.'
+    assert policy.finalize_simple_customer_text(body, first_reply_in_dialogue=False) == body
