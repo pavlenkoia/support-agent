@@ -109,7 +109,7 @@ def test_removed_prompt_facts_are_preserved_in_canonical_wiki() -> None:
             "https://vk.cc/cMwabq",
             "добавочный 2",
             "чат Telegram или MAX",
-            "Текущий набор группы и наличие мест",
+            "Наличие мест на конкретную дату подтверждают при записи",
             "+7 (951) 440-94-77",
         ],
         "kb/concepts/ordinary-jump-schedule.md": [
@@ -166,7 +166,7 @@ def test_removed_prompt_facts_are_preserved_in_canonical_wiki() -> None:
             "Отсутствие этих предметов само по себе не препятствует прыжку",
             "Берцы можно взять в прокате на месте",
             "прокатные берцы не обязательны",
-            "Опубликованной цены проката берцев нет",
+            "Стоимость проката берцев можно узнать",
         ],
     }
     missing: list[str] = []
