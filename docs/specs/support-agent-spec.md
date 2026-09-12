@@ -1,14 +1,14 @@
 # Support Agent Runtime Spec
 
-## Current runtime — one-call full-corpus experiment
+## Current runtime — one-call full-corpus mode
 
 > Current production configuration is `ANSWER_ENGINE_MODE=simple_full_corpus_natural`. One model call receives the literal customer turn, up to ten prior `user|assistant` messages, deterministic calendar observations where applicable, and the complete mounted compiled Wiki. It returns the customer text directly; no selector, native Wiki call, KB navigation/extraction, or second finalizer is in the active path.
 
-The output boundary adds the first-response greeting and removes provider reasoning metadata (`source_refs`, `evidence`, tool fields) and Markdown code delimiters. It never composes business content.
+Customer language is controlled by the external `SIMPLE_ANSWER_PROMPT.md`; factual language is controlled by authored KB pages compiled into the mounted Wiki. The output boundary adds the first-response greeting and removes provider metadata (`source_refs`, `evidence`, tool fields) and Markdown code delimiters. It never composes business content.
 
-The OpenAI-compatible provider-default reasoning mode may return ready customer text rather than JSON. The runtime accepts that text only in `simple_full_corpus_natural`; JSON responses retain source/evidence validation. Provider inference can still reach the bounded 300-second retry deadline and becomes textless `retry_pending`; this is a provider/runtime failure, not `cannot_answer`.
+The OpenAI-compatible payload explicitly sets `think: false`. This keeps the one-call path bounded and avoids provider-default reasoning latency. JSON replies retain source/evidence validation; provider failure remains a textless `retry_pending`, never `cannot_answer`.
 
-This is a live, operator-approved experiment. Literal no-send tests showed good direct answers but also overlong/adjacent facts and intermittent 300-second provider timeouts. Do not characterize it as fully accepted or stable until these issues are resolved.
+The active profile has been checked by a ten-question transport-free corpus replay: every turn returned customer text in one short provider call without calendar misclassification, empty replies, `retry_pending`, or customer-channel delivery. The remaining sections that describe native tools, selective Wiki navigation, coverage, and a common finalizer are historical/rollback contracts and do not govern this active mode.
 
 It is not a ticket router and not an escalation-first bot.
 
