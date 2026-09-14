@@ -10,8 +10,10 @@ from app.integrations.llm.openai_compatible import LLMRecoveryExhausted
 from app.services.simple_answer_engine import CorpusTooLargeError, SimpleAnswerEngine
 
 FIXTURE_ROOT = Path(__file__).parent / "fixtures" / "simple_answer_profile"
-PRICE_REF = "compiled/concepts/pricing.md"
-CERTIFICATE_REF = "compiled/concepts/certificates.md"
+PRICE_REF = "price.basic"
+CERTIFICATE_REF = "certificate.website"
+PRICE_PAGE_PATH = "compiled/concepts/pricing.md"
+CERTIFICATE_PAGE_PATH = "compiled/concepts/certificates.md"
 PRICE_PAGE = "Цена прыжка на 10 прыжков — 12 000 ₽."
 CERTIFICATE_PAGE = "Сертификат можно оформить на сайте."
 
@@ -19,30 +21,39 @@ CERTIFICATE_PAGE = "Сертификат можно оформить на сай
 def make_profile_root(tmp_path: Path) -> Path:
     profile_root = tmp_path / "profile"
     (profile_root / "kb" / "index").mkdir(parents=True)
-    (profile_root / "kb" / PRICE_REF).parent.mkdir(parents=True, exist_ok=True)
-    (profile_root / "kb" / PRICE_REF).write_text(PRICE_PAGE, encoding="utf-8")
-    (profile_root / "kb" / CERTIFICATE_REF).write_text(CERTIFICATE_PAGE, encoding="utf-8")
+    (profile_root / "kb" / PRICE_PAGE_PATH).parent.mkdir(parents=True, exist_ok=True)
+    (profile_root / "kb" / PRICE_PAGE_PATH).write_text(PRICE_PAGE, encoding="utf-8")
+    (profile_root / "kb" / CERTIFICATE_PAGE_PATH).write_text(CERTIFICATE_PAGE, encoding="utf-8")
     (profile_root / "kb" / "index" / "catalog.json").write_text(
         json.dumps(
             {
                 "pages": [
-                    {"source_ref": PRICE_REF, "title": "Pricing", "summary": "Prices"},
-                    {"source_ref": CERTIFICATE_REF, "title": "Certificates", "summary": "Certificates"},
+                    {"source_ref": PRICE_PAGE_PATH, "title": "Pricing", "summary": "Prices"},
+                    {"source_ref": CERTIFICATE_PAGE_PATH, "title": "Certificates", "summary": "Certificates"},
                 ]
             }
         ),
         encoding="utf-8",
     )
+    write_runtime_artifact(profile_root)
     (profile_root / "SYSTEM_PROMPT.md").write_text(FIXTURE_ROOT.joinpath("SYSTEM_PROMPT.md").read_text(encoding="utf-8"), encoding="utf-8")
     return profile_root
+
+
+def write_runtime_artifact(profile_root: Path, *, price_text: str = PRICE_PAGE, certificate_text: str = CERTIFICATE_PAGE) -> None:
+    facts = [
+        {"id": PRICE_REF, "text": price_text, "conditions": [], "source_refs": ["price:01"]},
+        {"id": CERTIFICATE_REF, "text": certificate_text, "conditions": [], "source_refs": ["certificate:01"]},
+    ]
+    artifact = {"schema_version": 1, "facts": facts}
+    (profile_root / "kb" / "knowledge-base.v1.json").write_text(json.dumps(artifact), encoding="utf-8")
 
 
 def test_simple_answer_engine_sends_only_runtime_knowledge_artifact(tmp_path: Path) -> None:
     profile_root = make_profile_root(tmp_path)
     artifact = {
-        "version": 1,
-        "char_count": 25,
-        "facts": [{"id": "fact-1", "text": PRICE_PAGE, "conditions": [], "source_refs": ["raw/pricing.md"]}],
+        "schema_version": 1,
+        "facts": [{"id": "price.basic", "text": PRICE_PAGE, "conditions": [], "source_refs": ["price:01"]}],
     }
     (profile_root / "kb" / "knowledge-base.v1.json").write_text(json.dumps(artifact), encoding="utf-8")
     engine, client = make_engine(envelope("social_reply", "Спасибо!"), profile_root=profile_root)
@@ -52,6 +63,28 @@ def test_simple_answer_engine_sends_only_runtime_knowledge_artifact(tmp_path: Pa
     payload = json.loads(str(client.calls[0]["user_prompt"]))
     assert payload["knowledge_base"] == artifact
     assert "compiled_corpus" not in payload
+
+
+def test_simple_answer_engine_requires_generated_runtime_knowledge_artifact(tmp_path: Path) -> None:
+    profile_root = make_profile_root(tmp_path)
+    (profile_root / "kb" / "knowledge-base.v1.json").unlink()
+    engine, client = make_engine(envelope("social_reply", "Спасибо!"), profile_root=profile_root)
+
+    with pytest.raises(ValueError, match="runtime knowledge artifact"):
+        engine.answer(question="Привет", history=[])
+
+    assert client.calls == []
+
+
+def test_grounded_evidence_rejects_legacy_page_corpus(tmp_path: Path) -> None:
+    engine, _ = make_engine(envelope("grounded_answer", "ignored"), profile_root=make_profile_root(tmp_path))
+
+    with pytest.raises(ValueError, match="invalid runtime knowledge facts"):
+        engine._finalize_grounded_answer(
+            {"evidence": [{"fact_id": PRICE_REF, "quote": PRICE_PAGE}]},
+            {"corpus": {"pages": [{"source_ref": PRICE_REF, "content": PRICE_PAGE}]}},
+            "Цена указана.",
+        )
 
 
 class CapturingClient:
@@ -140,7 +173,8 @@ def test_natural_full_corpus_preserves_grounded_customer_text_after_evidence_val
 def test_natural_full_corpus_accepts_evidence_with_only_markdown_presentation_difference(tmp_path: Path) -> None:
     profile_root = make_profile_root(tmp_path)
     source_text = "Онлайн-покупка доступна на `https://example.test`; электронный сертификат приходит на почту.\n- Бумажный сертификат можно получить в офисе."
-    (profile_root / "kb" / CERTIFICATE_REF).write_text(source_text, encoding="utf-8")
+    (profile_root / "kb" / CERTIFICATE_PAGE_PATH).write_text(source_text, encoding="utf-8")
+    write_runtime_artifact(profile_root, certificate_text=source_text)
     natural_text = "Сертификат можно купить онлайн; он придёт на почту."
     engine, _ = make_engine(
         envelope(
@@ -215,7 +249,7 @@ def test_user_prompt_contract_includes_evidence_shape_and_exact_quote_requiremen
     engine.answer(question="Сколько стоит прыжок?", history=[])
 
     payload = json.loads(str(client.calls[0]["user_prompt"]))
-    assert payload["output_contract"]["evidence"] == [{"source_ref": "compiled path", "quote": "exact source substring"}]
+    assert payload["output_contract"]["evidence"] == [{"fact_id": "fact ID", "quote": "exact fact text substring"}]
     assert "exact source substring" in str(payload["output_contract"])
 
 
@@ -492,7 +526,7 @@ def test_provider_exhaustion_returns_retry_pending_without_customer_text(tmp_pat
     assert len(client.calls) == 1
 
 
-def test_input_projection_loads_entire_catalog_and_bounds_role_labelled_history(tmp_path: Path) -> None:
+def test_input_projection_loads_runtime_artifact_and_bounds_role_labelled_history(tmp_path: Path) -> None:
     engine, _ = make_engine(envelope("social_reply", "Здравствуйте"), profile_root=make_profile_root(tmp_path))
     history = [
         {"role": "user", "content": f"message-{index}"}
@@ -503,8 +537,7 @@ def test_input_projection_loads_entire_catalog_and_bounds_role_labelled_history(
 
     assert packet["question"] == "new question"
     assert packet["history"] == history[-11:-1]
-    assert [page["source_ref"] for page in packet["corpus"]["pages"]] == [PRICE_REF, CERTIFICATE_REF]
-    assert packet["corpus"]["char_count"] == sum(len(page["content"]) for page in packet["corpus"]["pages"])
+    assert [fact["id"] for fact in packet["corpus"]["facts"]] == [PRICE_REF, CERTIFICATE_REF]
 
 
 def test_date_observations_are_projected_before_the_one_model_call(tmp_path: Path) -> None:
@@ -582,10 +615,11 @@ def test_public_period_observation_still_blocks_exact_dates_in_validated_custome
 
     exact_date_quote = "Дата календарного ориентира — 01.08.2026."
     profile_root = make_profile_root(tmp_path)
-    (profile_root / "kb" / PRICE_REF).write_text(
+    (profile_root / "kb" / PRICE_PAGE_PATH).write_text(
         f"{PRICE_PAGE}\n{exact_date_quote}",
         encoding="utf-8",
     )
+    write_runtime_artifact(profile_root, price_text=f"{PRICE_PAGE}\n{exact_date_quote}")
     observations = ToolRuntimeService().collect(text="Можно прыгнуть в августе?", kb_hits=[])["tool_results"]
     engine, client = make_engine(
         envelope(
@@ -674,13 +708,13 @@ def test_relative_date_and_period_observations_are_projected_before_one_call(tmp
     assert len(client.calls) == 1
 
 
-def test_catalog_source_ref_outside_compiled_kb_fails_closed_without_call(tmp_path: Path) -> None:
+def test_invalid_runtime_knowledge_artifact_fails_closed_without_call(tmp_path: Path) -> None:
     profile_root = make_profile_root(tmp_path)
-    (profile_root / "kb" / "index" / "catalog.json").write_text(json.dumps({"pages": [{"source_ref": "../SYSTEM_PROMPT.md"}]}), encoding="utf-8")
+    (profile_root / "kb" / "knowledge-base.v1.json").write_text('{"version": 1, "facts": []}', encoding="utf-8")
     client = CapturingClient(envelope("grounded_answer", "Не должен быть вызван.", [PRICE_REF]))
     engine = SimpleAnswerEngine(client=client, profile_root=profile_root)
 
-    with pytest.raises(ValueError, match="source_ref outside compiled KB"):
+    with pytest.raises(ValueError, match="runtime knowledge artifact"):
         engine.answer(question="Сколько стоит?", history=[])
 
     assert client.calls == []

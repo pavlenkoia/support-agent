@@ -281,6 +281,8 @@ class SimpleAnswerEngine:
         try:
             validate_runtime_knowledge_artifact(artifact, max_chars=self.max_corpus_chars)
         except BundleValidationError as exc:
+            if "invalid size" in str(exc):
+                raise CorpusTooLargeError("runtime knowledge artifact exceeds configured limit") from exc
             raise ValueError(str(exc)) from exc
         return artifact
 
