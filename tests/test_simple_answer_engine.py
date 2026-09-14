@@ -210,7 +210,9 @@ def test_natural_full_corpus_prompt_requires_natural_text_with_exact_evidence(tm
 
     contract = json.loads(str(client.calls[0]["user_prompt"]))["output_contract"]
     assert contract["response_text"] == "non-empty natural customer response"
-    assert "Do not classify the turn" in contract["rule"]
+    assert "Reply directly to every turn without classifying it" in contract["rule"]
+    assert "requires no new information or action" in contract["rule"]
+    assert "do not introduce or repeat facts from the knowledge base or dialogue history" in contract["rule"]
     assert "Evidence and source_refs are required only for KB-dependent factual claims" in contract["rule"]
 
 
