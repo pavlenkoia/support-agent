@@ -5,10 +5,10 @@
 ## Актуальная архитектура знаний
 
 ```text
-Авторская KB / support-governor
+Авторская Wiki с `runtime_facts`
         ↓
-курируемый реестр facts
-        ↓ валидация и candidate-сборка
+валидация и candidate-сборка
+        ↓
 knowledge-base.v1.json
         ↓ атомарная публикация
 /data/profile/kb/knowledge-base.v1.json
@@ -64,6 +64,21 @@ Governor работает через ограниченный tool `support_kb_b
 
 Обычная авторская Wiki — единственный источник facts и provenance-слой: никакого отдельного редактируемого JSON-реестра нет.
 
+## Контракт one-call ответа
+
+В режиме `simple_full_corpus_natural` один provider call получает текущий буквальный вопрос, ограниченную историю диалога и полный compact runtime KB. Промежуточный semantic selector не используется: прошлые эксперименты показывали, что он чаще теряет нужную часть многосоставного вопроса, чем устраняет лишние детали.
+
+Активный `SIMPLE_ANSWER_PROMPT.md` требует:
+
+- выделить все самостоятельные части вопроса и покрыть каждую подтверждёнными facts;
+- не заменять одну часть тематически близким, но нерелевантным фактом;
+- использовать историю для контекста и не повторять ранее сообщённое без прямой просьбы;
+- не добавлять неподтверждённые сведения или внутренние объяснения.
+
+Фактическая корректность и покрытие частей вопроса обязательны. Подтверждённый связанный факт может иногда оказаться лишним; не следует возвращать selector или добавлять domain/keyword-правила только ради косметического сокращения такого ответа.
+
+`SYSTEM_PROMPT.md` и `KB_AGENT_PROMPT.md` относятся к legacy agent-tool-loop и не участвуют в active one-call path.
+
 ## Компоненты
 
 - `app/` — FastAPI и логика агента;
@@ -78,7 +93,6 @@ Governor работает через ограниченный tool `support_kb_b
 uv run ruff check .
 uv run pytest -q
 python scripts/build_runtime_profile.py --source deploy/profile-source --target /tmp/support-profile
-python scripts/publish_kb.py --dry-run
 ```
 
 ## Health check
