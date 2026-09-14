@@ -443,6 +443,21 @@ def test_valid_non_grounded_envelopes_use_one_call(tmp_path: Path, kind: str, te
     assert len(client.calls) == 1
 
 
+def test_plain_text_provider_fallback_is_explicitly_tagged(tmp_path: Path) -> None:
+    engine, client = make_engine(
+        "Короткий ответ.",
+        profile_root=make_profile_root(tmp_path),
+        preserve_grounded_text=True,
+    )
+
+    result = engine.answer(question="Вопрос", history=[])
+
+    assert result["kind"] == "final_response"
+    assert result["response_text"] == "Короткий ответ."
+    assert result["telemetry"]["contract_error"] == "provider_plain_text"
+    assert len(client.calls) == 1
+
+
 def test_final_response_without_classification_is_a_natural_dialogue_reply(tmp_path: Path) -> None:
     engine, client = make_engine(
         json.dumps({"response_text": "Пожалуйста! Обращайтесь, если появятся вопросы.", "source_refs": [], "evidence": []}, ensure_ascii=False),

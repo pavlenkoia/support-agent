@@ -148,12 +148,11 @@ class SimpleAnswerEngine:
                 return self._result("cannot_answer", "", [], telemetry)
             return self._result(kind, response_text, source_refs, telemetry)
         except json.JSONDecodeError as exc:
-            # Provider-default reasoning returns a customer-ready final text in
-            # content rather than the requested JSON envelope. In natural
-            # full-corpus mode it is still the sole model output; preserve it
-            # instead of converting a valid answer into a blank refusal.
+            # Some OpenAI-compatible providers return customer text instead of
+            # the requested JSON envelope. Preserve that single model output
+            # rather than turning a usable reply into a blank retry.
             if self.preserve_grounded_text and isinstance(raw, str) and raw.strip():
-                telemetry["contract_error"] = "reasoning_plain_text"
+                telemetry["contract_error"] = "provider_plain_text"
                 return self._result("final_response", raw.strip(), [], telemetry)
             telemetry["contract_error"] = str(exc)
             return self._result("cannot_answer", "", [], telemetry)
