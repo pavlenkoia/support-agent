@@ -12,6 +12,43 @@ sources:
 - raw/documents/general-info-source.md
 - raw/documents/legacy-approved-policy-source.md
 - raw/documents/operator-case-vk-291545750-chat.md
+runtime_facts:
+- id: flight.available
+  text: Доступны прогулочные полёты на АН-2 и полёты с лётчиком-инструктором на Як-52.
+  conditions: []
+  source_refs:
+  - flight:01
+- id: flight.an2.restrictions
+  text: На АН-2 возможен полёт в кабине на месте второго пилота или в салоне; полёт проходит без фигур высшего пилотажа.
+  conditions:
+  - 'Для пассажира АН-2: вес не более 120 кг и рост до 192 см.'
+  source_refs:
+  - flight:02
+- id: flight.an2.children
+  text: Полёты с детьми проводятся только на АН-2; для места в кабине возраст — с 16 лет.
+  conditions: []
+  source_refs:
+  - flight:02
+- id: flight.an2.purchase
+  text: Прогулочный полёт на АН-2 можно приобрести в офисе по будням, в кассе аэродрома или на сайте https://dzkalachevo.ru.
+  conditions:
+  - Условия, дату и время согласуют заранее.
+  - Прогулочные полёты обычно проходят по выходным.
+  source_refs:
+  - flight:03
+- id: flight.yak52
+  text: Як-52 — двухместный спортивный самолёт; полёт проходит с лётчиком-инструктором и возможен с фигурами высшего пилотажа
+    или без них.
+  conditions:
+  - Максимальный вес пассажира Як-52 — 120 кг.
+  source_refs:
+  - flight:05
+- id: flight.yak52.booking
+  text: На полёт Як-52 записываются напрямую у пилота по телефону +7 (951) 440-94-77.
+  conditions:
+  - Полёты обычно проходят по выходным; ориентир начала вылетов — 12:00, а конкретные дату и время согласуют с пилотом.
+  source_refs:
+  - flight:06
 ---
 # Полёты на самолётах
 

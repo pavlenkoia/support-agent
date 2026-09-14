@@ -15,6 +15,31 @@ sources:
 - raw/documents/operator-case-vk-530781299.md
 - raw/documents/jump-schedule-governor-2026-09-14.md
 - raw/documents/operator-case-vk-1240-tandem-online-form.md
+runtime_facts:
+- id: jump.schedule.weekends
+  text: Прыжки обычно проходят по субботам и воскресеньям.
+  conditions:
+  - Проведение и перенос зависят от погоды.
+  - Конкретная дата подтверждается анонсом и записью.
+  source_refs:
+  - schedule:01
+- id: jump.schedule.weekdays
+  text: В будние дни прыжки не проводятся.
+  conditions:
+  - Будний день возможен только по отдельной групповой договорённости примерно для группы около 20 человек.
+  source_refs:
+  - schedule:01
+- id: jump.schedule.announcement
+  text: Подтверждение даты публикуется в анонсах группы за несколько дней до выходных; условия записи на конкретную дату публикуются
+    в закреплённом посте или анонсе.
+  conditions: []
+  source_refs:
+  - schedule:01
+- id: jump.solo.weather
+  text: Для самостоятельных прыжков препятствиями являются ветер более 5 м/с, сильные осадки и облачность ниже высоты выброски.
+  conditions: []
+  source_refs:
+  - schedule:03
 ---
 # Расписание и условия проведения
 

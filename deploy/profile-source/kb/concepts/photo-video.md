@@ -11,6 +11,19 @@ sources:
 - raw/documents/general-info-source.md
 - raw/documents/legacy-approved-policy-source.md
 - raw/documents/payment-methods-governor-2026-09-03.md
+runtime_facts:
+- id: photo-video.jump-video
+  text: Видеосъёмка прыжка доступна только для тандема и заказывается при предварительной записи.
+  conditions:
+  - Видеосъёмка прыжка оплачивается наличными на территории аэродрома перед прыжком.
+  source_refs:
+  - photo-video:01
+- id: photo-video.order-payment
+  text: 'Фото- и видеосъёмку не оформляют онлайн вместе с услугой: её оформляют в офисе или кассе аэродрома и оплачивают наличными
+    в кассе аэродрома.'
+  conditions: []
+  source_refs:
+  - photo-video:03
 ---
 # Фото- и видеосъёмка
 

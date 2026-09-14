@@ -15,6 +15,80 @@ sources:
 - raw/documents/operator-case-vk-291545750-chat.md
 - raw/documents/jump-schedule-governor-2026-09-14.md
 - raw/documents/operator-case-vk-1240-tandem-online-form.md
+runtime_facts:
+- id: jump.formats.first
+  text: Первый прыжок можно выполнить самостоятельно после подготовки и при соблюдении ограничений или в тандеме с инструктором.
+  conditions: []
+  source_refs:
+  - jumps:01
+- id: jump.tandem.safety
+  text: Для первого прыжка тандем является наиболее безопасным форматом.
+  conditions: []
+  source_refs:
+  - jumps:01
+- id: jump.solo.height
+  text: Высота самостоятельного прыжка составляет 800–900 метров; также указан ориентир 850 метров.
+  conditions: []
+  source_refs:
+  - jumps:02
+- id: jump.solo.training
+  text: Подготовка к самостоятельному прыжку проходит в день прыжка и занимает 3–4 часа.
+  conditions:
+  - Время подготовки и приезда согласуют при записи.
+  source_refs:
+  - jumps:02
+- id: jump.solo.age-weight
+  text: Самостоятельный прыжок доступен с 14 лет при весе от 45 до 90 килограммов.
+  conditions: []
+  source_refs:
+  - jumps:03
+- id: jump.solo.booking
+  text: На самостоятельный прыжок записываются по телефону +7 (351) 214-30-30, добавочный 1.
+  conditions: []
+  source_refs:
+  - jumps:04
+- id: jump.solo.booking-window
+  text: Запись на самостоятельный прыжок обычно открывается в пятницу после 12:00 на субботу и в субботу после 12:00 на воскресенье.
+  conditions: []
+  source_refs:
+  - jumps:04
+- id: jump.tandem.height-briefing
+  text: Высота прыжка в тандеме составляет 2500 метров, а инструктаж перед ним занимает примерно 15–30 минут.
+  conditions:
+  - Время инструктажа и приезда согласуют при записи.
+  source_refs:
+  - jumps:05
+- id: jump.tandem.age-weight
+  text: Тандем доступен с 14 лет при весе до 85 килограммов.
+  conditions: []
+  source_refs:
+  - jumps:06
+- id: jump.tandem.booking
+  text: На тандем записываются через форму https://vk.cc/cMwabq или по телефону +7 (351) 214-30-30, добавочный 2.
+  conditions:
+  - Наличие мест на конкретную дату подтверждают при записи.
+  source_refs:
+  - jumps:07
+- id: jump.minor-consent
+  text: Для прыжка до 18 лет требуется разрешение родителей и обычно присутствие одного из родителей.
+  conditions: []
+  source_refs:
+  - jumps:09
+- id: jump.outside-limits
+  text: Возможность прыжка для возраста младше 14 лет или веса вне указанных ограничений можно узнать в офисе.
+  conditions: []
+  source_refs:
+  - jumps:09
+- id: jump.passport
+  text: Для прыжка нужен паспорт.
+  conditions: []
+  source_refs:
+  - jumps:09
+- id: jump.personal-camera
+  text: Прыжки с собственной камерой не допускаются.
+  conditions: []
+  source_refs:
+  - jumps:10
 ---
 # Прыжки с парашютом
 

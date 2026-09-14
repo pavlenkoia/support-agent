@@ -11,6 +11,19 @@ sources:
 - raw/documents/faq-short-source.md
 - raw/documents/general-info-source.md
 - raw/documents/legacy-approved-policy-source.md
+runtime_facts:
+- id: equipment.clothes
+  text: Для прыжка требуется закрытая одежда и обувь с фиксацией голеностопа.
+  conditions:
+  - Зимой требуется более тёплая одежда.
+  source_refs:
+  - equipment:01
+- id: equipment.rental-boots
+  text: Берцы можно взять в прокате на месте.
+  conditions:
+  - При наличии собственной обуви с фиксацией голеностопа прокатные берцы не обязательны.
+  source_refs:
+  - equipment:03
 ---
 # Одежда и прокат для прыжков
 

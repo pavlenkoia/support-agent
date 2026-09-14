@@ -42,29 +42,27 @@ knowledge-base.v1.json
 
 В KB допустимы только явные курируемые факты: семантический `id`, клиентский текст, условия применимости и логические ссылки на источник. В runtime запрещены Markdown, YAML/frontmatter, пути файлов, raw-документы, журналы, редакторские инструкции, навигация и автоматически извлечённые из Wiki фразы.
 
-Канонический реестр facts находится в:
+### Единственный authoring source
 
-```text
-deploy/profile-source/kb/runtime-facts.v1.json
-```
+Каноническими являются явные `runtime_facts` в YAML-frontmatter тематических Wiki-страниц под `deploy/profile-source/kb/`. Компилятор читает только эти blocks и собирает из всех страниц один `kb/knowledge-base.v1.json`; отдельного редактируемого реестра facts нет.
 
-`scripts/build_runtime_profile.py` собирает из него `kb/knowledge-base.v1.json`. Факты не выводятся regex-разбором Markdown.
+`scripts/build_runtime_profile.py` не выводит факты из Markdown regex-разбором.
 
 ## Работа support-governor
 
 Governor работает через ограниченный tool `support_kb_bundle` и не получает доступа к коду приложения, Docker, Git, промптам или секретам.
 
-Поддерживаемый безопасный цикл изменения фактов:
+Поддерживаемый безопасный цикл изменения facts:
 
-1. `read_facts` — читает актуальный реестр и его `content_sha256`.
-2. Governor готовит полный обновлённый массив `facts`.
-3. `apply_facts` передаёт `facts`, `reason`, `expected_sha256`; сначала допускается `dry_run: true`.
-4. Publisher валидирует схему, собирает candidate и атомарно заменяет runtime KB.
+1. `read` — Governor читает актуальную тематическую Wiki-страницу вместе с её `runtime_facts` и SHA-256.
+2. Governor меняет обычный текст и соответствующие `runtime_facts` в одной полной странице.
+3. `apply` передаёт страницу, `reason`, `expected_sha256`; сначала допускается `dry_run: true`.
+4. Publisher валидирует Wiki, компилирует facts из её же snapshot и атомарно заменяет runtime KB.
 5. Следующий запрос воркера читает новый JSON без перезапуска контейнеров.
 
 `expected_sha256` защищает от перезаписи более свежей правки. При ошибке валидации или сборки текущий production KB остаётся прежним. Receipt и backup создаются publisher-ом; rollback возможен заменой KB из его backup.
 
-Обычная авторская Wiki сохраняет назначение редакторского и provenance-слоя. Правка Markdown сама по себе не должна считаться изменением model-facing факта: для этого Governor меняет curated facts через `apply_facts`.
+Обычная авторская Wiki — единственный источник facts и provenance-слой: никакого отдельного редактируемого JSON-реестра нет.
 
 ## Компоненты
 

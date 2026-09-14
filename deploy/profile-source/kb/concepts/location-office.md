@@ -10,6 +10,34 @@ sources:
 - raw/documents/faq-main-source.md
 - raw/documents/general-info-source.md
 - raw/documents/legacy-approved-policy-source.md
+runtime_facts:
+- id: service.location.kalachevo
+  text: Прыжки, полёты и использование подарочных сертификатов доступны только на аэродроме Калачево в Челябинске; в других
+    городах эти услуги не оказываются.
+  conditions: []
+  source_refs:
+  - location:01
+- id: office.address
+  text: 'Офис находится в Челябинске по адресу: улица 8 Марта, дом 108, офис 411.'
+  conditions: []
+  source_refs:
+  - location:04
+- id: office.hours
+  text: Офис работает с понедельника по пятницу с 09:00 до 17:00.
+  conditions: []
+  source_refs:
+  - location:05
+- id: office.phone
+  text: 'Телефон офиса: +7 (351) 214-30-30.'
+  conditions: []
+  source_refs:
+  - location:06
+- id: office.no-answer
+  text: Если по телефону офиса не отвечают, звонок повторяют в рабочее время.
+  conditions:
+  - Офис работает с понедельника по пятницу с 09:00 до 17:00.
+  source_refs:
+  - location:06
 ---
 # Аэродром и офис
 

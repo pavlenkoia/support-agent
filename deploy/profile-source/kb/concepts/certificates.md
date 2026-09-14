@@ -14,6 +14,34 @@ sources:
 - raw/documents/operator-case-vk-291545750-chat.md
 - raw/documents/operator-case-vk-841-certificate-printing.md
 - raw/documents/payment-methods-governor-2026-09-03.md
+runtime_facts:
+- id: certificate.purchase
+  text: Подарочный сертификат можно купить онлайн на https://dzkalachevo.ru или в офисе.
+  conditions: []
+  source_refs:
+  - certificate:01
+- id: certificate.delivery
+  text: Электронный сертификат приходит на электронную почту в течение суток после онлайн-покупки; доставка и курьерская отправка
+    не предусмотрены.
+  conditions: []
+  source_refs:
+  - certificate:03
+- id: certificate.validity
+  text: Подарочный сертификат не именной и действует 6 месяцев с даты покупки.
+  conditions: []
+  source_refs:
+  - certificate:04
+- id: certificate.use
+  text: Для использования сертификата нужна предварительная запись по каналу соответствующей услуги.
+  conditions:
+  - Фактическая дата прыжка или полёта зависит от расписания и погоды.
+  source_refs:
+  - certificate:04
+- id: certificate.extension-refund
+  text: Вопросы продления и возврата сертификата решает офис в будние дни по телефону +7 (351) 214-30-30.
+  conditions: []
+  source_refs:
+  - certificate:05
 ---
 # Подарочные сертификаты
 

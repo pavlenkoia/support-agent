@@ -42,9 +42,6 @@ def compile_legacy_bundle(legacy_root: Path, target_root: Path) -> dict[str, Any
 
     identities = _build_page_identities(legacy_root, source_pages)
     target_root.mkdir(parents=True)
-    runtime_facts = legacy_root / "runtime-facts.v1.json"
-    if runtime_facts.is_file():
-        shutil.copy2(runtime_facts, target_root / "runtime-facts.v1.json")
     shutil.copytree(legacy_root / "raw", target_root / "raw")
     (target_root / "schema").mkdir()
     shutil.copy2(legacy_root / "SCHEMA.md", target_root / "schema" / "SCHEMA.md")
@@ -148,11 +145,16 @@ def validate_compiled_bundle(bundle_root: Path) -> dict[str, Any]:
 
 
 def build_runtime_knowledge_artifact(bundle_root: Path, output_path: Path, max_chars: int = 50_000) -> dict[str, Any]:
-    """Promote only explicitly curated Wiki facts; never infer them from prose."""
-    source_path = Path(bundle_root) / "runtime-facts.v1.json"
-    if not source_path.is_file():
-        raise BundleValidationError("missing curated runtime facts registry")
-    artifact = _read_json(source_path)
+    """Compile explicitly curated facts embedded in authored Wiki pages only."""
+    bundle_root = Path(bundle_root)
+    facts: list[dict[str, Any]] = []
+    for page in _discover_pages(bundle_root / "compiled"):
+        metadata, _ = _read_frontmatter(page)
+        page_facts = metadata.get("runtime_facts", [])
+        if not isinstance(page_facts, list):
+            raise BundleValidationError(f"runtime_facts must be a list: {page}")
+        facts.extend(page_facts)
+    artifact = {"schema_version": 1, "facts": facts}
     validate_runtime_knowledge_artifact(artifact, max_chars=max_chars)
     Path(output_path).write_text(json.dumps(artifact, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return artifact

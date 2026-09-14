@@ -10,6 +10,14 @@ sources:
 - raw/documents/faq-main-source.md
 - raw/documents/faq-short-source.md
 - raw/documents/general-info-source.md
+runtime_facts:
+- id: health.general-restrictions
+  text: Для прыжков и полётов действуют возрастные, весовые, медицинские и погодные ограничения.
+  conditions:
+  - К ограничениям по здоровью относятся астма, нарушения слуха, некоторые сердечно-сосудистые заболевания, высокое давление,
+    свежие переломы и состояние опьянения.
+  source_refs:
+  - restriction:01
 ---
 # Общие ограничения
 
