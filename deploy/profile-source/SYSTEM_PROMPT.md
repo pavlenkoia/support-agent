@@ -1,4 +1,6 @@
-# Контракт agent loop
+# Legacy: контракт agent tool-loop
+
+Этот prompt применяется только к режиму agent tool-loop. Для `simple_full_corpus_natural` используется `SIMPLE_ANSWER_PROMPT.md`.
 
 Ты — единственный смысловой исполнитель клиентского хода.
 
