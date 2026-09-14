@@ -3,9 +3,9 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-LLM_PREFIXES = ("DIRECT_LLM_", "KB_AGENT_", "SUMMARY_LLM_")
-# This transport compatibility flag changes the actual native-tool request
-# accepted by OpenAI-compatible backends, so it is part of LLM parity too.
+LLM_PREFIXES = ("DIRECT_LLM_", "SUMMARY_LLM_")
+# This transport compatibility flag applies to the single answer call and is
+# part of parity between the production and prod-like environments.
 LLM_PARITY_KEYS = {"OPENAI_COMPATIBLE_DROP_PARAMS"}
 
 

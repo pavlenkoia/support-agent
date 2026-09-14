@@ -548,7 +548,7 @@ class VKGatewayService:
             recovered = recover_expired_turns(
                 session,
                 now=current,
-                retry_delay_seconds=settings.kb_agent_deferred_retry_delay_seconds,
+                retry_delay_seconds=settings.deferred_retry_delay_seconds,
             )
             session.commit()
         return {"recovered": recovered}
@@ -680,7 +680,7 @@ class VKGatewayService:
                 turn.status, turn.reason = status, reason
                 turn.claim_token = turn.claim_until = None
                 if due_at is not None:
-                    turn.due_at = due_at + timedelta(seconds=settings.kb_agent_deferred_retry_delay_seconds)
+                    turn.due_at = due_at + timedelta(seconds=settings.deferred_retry_delay_seconds)
                 session.commit()
 
     def process_due_retries(self, *, now: datetime | None = None) -> dict[str, int]:
@@ -990,7 +990,7 @@ class VKGatewayService:
             session,
             event,
             error_text=reason,
-            available_at=(now or datetime.now(UTC)) + timedelta(seconds=settings.kb_agent_deferred_retry_delay_seconds),
+            available_at=(now or datetime.now(UTC)) + timedelta(seconds=settings.deferred_retry_delay_seconds),
         )
 
     @staticmethod

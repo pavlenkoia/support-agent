@@ -7,10 +7,7 @@ services:
     env_file:
       - ${SUPPORT_AGENT_TEST_RUNTIME_ROOT_HOST:-/home/tian/support-agent-runtime-prodlike-test}/app.env
     environment:
-      ANSWER_ENGINE_MODE: ${SUPPORT_AGENT_TEST_ANSWER_ENGINE_MODE:-simple_llm_wiki}
-      KB_AGENT_DETERMINISTIC_NAVIGATION: "false"
-      KB_AGENT_SKIP_COVERAGE_REVIEW: "false"
-      KB_AGENT_MINIMAL_EXTRACTION_SCHEMA: "false"
+      ANSWER_ENGINE_MODE: ${SUPPORT_AGENT_TEST_ANSWER_ENGINE_MODE:-simple_full_corpus_natural}
     depends_on:
       db:
         condition: service_healthy
@@ -40,10 +37,7 @@ services:
     env_file:
       - ${SUPPORT_AGENT_TEST_RUNTIME_ROOT_HOST:-/home/tian/support-agent-runtime-prodlike-test}/app.env
     environment:
-      ANSWER_ENGINE_MODE: ${SUPPORT_AGENT_TEST_ANSWER_ENGINE_MODE:-simple_llm_wiki}
-      KB_AGENT_DETERMINISTIC_NAVIGATION: "false"
-      KB_AGENT_SKIP_COVERAGE_REVIEW: "false"
-      KB_AGENT_MINIMAL_EXTRACTION_SCHEMA: "false"
+      ANSWER_ENGINE_MODE: ${SUPPORT_AGENT_TEST_ANSWER_ENGINE_MODE:-simple_full_corpus_natural}
     depends_on:
       db:
         condition: service_healthy
@@ -60,10 +54,7 @@ services:
     env_file:
       - ${SUPPORT_AGENT_TEST_RUNTIME_ROOT_HOST:-/home/tian/support-agent-runtime-prodlike-test}/app.env
     environment:
-      ANSWER_ENGINE_MODE: ${SUPPORT_AGENT_TEST_ANSWER_ENGINE_MODE:-simple_llm_wiki}
-      KB_AGENT_DETERMINISTIC_NAVIGATION: "false"
-      KB_AGENT_SKIP_COVERAGE_REVIEW: "false"
-      KB_AGENT_MINIMAL_EXTRACTION_SCHEMA: "false"
+      ANSWER_ENGINE_MODE: ${SUPPORT_AGENT_TEST_ANSWER_ENGINE_MODE:-simple_full_corpus_natural}
     depends_on:
       db:
         condition: service_healthy
@@ -80,10 +71,7 @@ services:
     env_file:
       - ${SUPPORT_AGENT_TEST_RUNTIME_ROOT_HOST:-/home/tian/support-agent-runtime-prodlike-test}/app.env
     environment:
-      ANSWER_ENGINE_MODE: ${SUPPORT_AGENT_TEST_ANSWER_ENGINE_MODE:-simple_llm_wiki}
-      KB_AGENT_DETERMINISTIC_NAVIGATION: "false"
-      KB_AGENT_SKIP_COVERAGE_REVIEW: "false"
-      KB_AGENT_MINIMAL_EXTRACTION_SCHEMA: "false"
+      ANSWER_ENGINE_MODE: ${SUPPORT_AGENT_TEST_ANSWER_ENGINE_MODE:-simple_full_corpus_natural}
     depends_on:
       db:
         condition: service_healthy

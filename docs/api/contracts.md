@@ -91,13 +91,14 @@ The normalized application inbound contract is transport-neutral and currently a
 - `outcome`
 - `audit`
 
-`audit.response_strategy` is the canonical per-turn trace for the bounded loop. It records the final action and, when applicable, the loop step sequence / tool trace that led to the final outcome.
+The per-turn `audit.response_strategy` records the supported answer engine, one-call telemetry, and deterministic tool observations. It contains no selector, retrieval, KB-agent, or finalizer trace because those runtime paths do not exist.
 
-Current audit fields of interest:
-- `audit.response_strategy.loop_mode` — expected runtime family identifier (for the current architecture: `agentic_bounded_loop_with_kb_agent`)
-- `audit.response_strategy.steps` — compact step sequence such as `read_kb -> kb_agent_read -> answer`
-- `audit.response_strategy.loop_trace` — per-iteration planner/action trace
-- `audit.response_strategy.tool_trace` — structured runtime-tool trace for date/math/live-fact checks; for relative-date requests this trace must reflect the runtime-resolved `iso_date` (`сегодня`/`завтра`/`послезавтра`) rather than a clock-time number accidentally parsed from the same sentence
+Current fields of interest:
+- `audit.response_strategy.answer_engine` — always `simple_full_corpus_natural`.
+- `audit.response_strategy.logical_llm_call_count` — one logical provider call per answer turn.
+- `audit.response_strategy.history_message_count` — number of bounded prior `user|assistant` messages passed to the provider.
+- `audit.response_strategy.kb_page_count` / `kb_char_count` — the generated runtime-fact KB supplied to the provider.
+- `audit.response_strategy.tool_observation_kinds` — deterministic runtime observations, for example a calendar fact.
 - `audit.response_strategy.llm_trace` — per-role LLM call metadata including provider/model/duration/attempts/usage and failover fields such as `api_key_index`, `used_failover`, `failover_count`, and `failover_events`
 
 Transport workers may also keep transport-level journal state outside the API response envelope; for VK this includes raw event processing, send reconciliation, and override suppression state.
@@ -169,7 +170,7 @@ These are internal persistence contracts rather than public HTTP endpoints, but 
 ## LLM observability side-contracts
 
 These are internal observability contracts, but they are part of the shipped repository behavior:
-- Mistral/openai-compatible roles may be configured with ordered CSV key pools via `DIRECT_LLM_API_KEYS`, `KB_AGENT_API_KEYS`, and `SUMMARY_LLM_API_KEYS`
+- The answer and summary roles may be configured with ordered CSV key pools via `DIRECT_LLM_API_KEYS` and `SUMMARY_LLM_API_KEYS`.
 - successful LLM calls preserve `api_key_index`, `used_failover`, `failover_count`, and `failover_events` in `last_call_info` / `llm_trace`
 - failover warning logs identify only provider/model/key-slot transition/status/reason class and must not print raw API keys
 - aggregated LLM usage summaries also expose `failover_count` and `failover_calls` per role and overall

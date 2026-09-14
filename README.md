@@ -77,7 +77,7 @@ Governor работает через ограниченный tool `support_kb_b
 
 Фактическая корректность и покрытие частей вопроса обязательны. Подтверждённый связанный факт может иногда оказаться лишним; не следует возвращать selector или добавлять domain/keyword-правила только ради косметического сокращения такого ответа.
 
-`SYSTEM_PROMPT.md` и `KB_AGENT_PROMPT.md` относятся к legacy agent-tool-loop и не участвуют в active one-call path.
+В runtime-профиль входят только `SIMPLE_ANSWER_PROMPT.md`, `profile.yaml` и generated `kb/knowledge-base.v1.json`.
 
 ## Компоненты
 

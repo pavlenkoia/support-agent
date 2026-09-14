@@ -295,7 +295,7 @@ class TelegramGatewayService:
     def _retry_available_at(self, received_at: datetime | None, retry_attempts: int) -> datetime:
         base = self._normalized_dt(received_at)
         _ = retry_attempts
-        return base + timedelta(seconds=settings.kb_agent_deferred_retry_delay_seconds)
+        return base + timedelta(seconds=settings.deferred_retry_delay_seconds)
 
     def _conversation_state(self, session, external_chat_id: str):
         conversation = ensure_conversation(session, channel="telegram", external_chat_id=external_chat_id)

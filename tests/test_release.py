@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
 
 from scripts.release import (
@@ -85,11 +83,9 @@ def test_verify_profile_artifacts_accepts_exact_canonical_tree(tmp_path) -> None
     canonical = tmp_path / "canonical"
     runtime = tmp_path / "runtime"
     for root in (canonical, runtime):
-        (root / "kb" / "compiled" / "concepts").mkdir(parents=True)
-        (root / "SYSTEM_PROMPT.md").write_text("generic support contract\n", encoding="utf-8")
-        (root / "KB_AGENT_PROMPT.md").write_text("generic wiki reader contract\n", encoding="utf-8")
-        (root / "kb" / "index.json").write_text('{"pages": []}\n', encoding="utf-8")
-        (root / "kb" / "compiled" / "concepts" / "facts.md").write_text("facts\n", encoding="utf-8")
+        (root / "kb").mkdir(parents=True)
+        (root / "SIMPLE_ANSWER_PROMPT.md").write_text("generic answer contract\n", encoding="utf-8")
+        (root / "kb" / "knowledge-base.v1.json").write_text('{"schema_version": 1, "facts": []}\n', encoding="utf-8")
 
     verify_profile_artifacts(runtime, canonical)
 
@@ -99,11 +95,10 @@ def test_verify_profile_artifacts_rejects_runtime_prompt_drift(tmp_path) -> None
     runtime = tmp_path / "runtime"
     for root in (canonical, runtime):
         (root / "kb").mkdir(parents=True)
-        (root / "SYSTEM_PROMPT.md").write_text("generic support contract\n", encoding="utf-8")
-        (root / "KB_AGENT_PROMPT.md").write_text("generic wiki reader contract\n", encoding="utf-8")
-    (runtime / "SYSTEM_PROMPT.md").write_text("scenario patch\n", encoding="utf-8")
+        (root / "SIMPLE_ANSWER_PROMPT.md").write_text("generic answer contract\n", encoding="utf-8")
+    (runtime / "SIMPLE_ANSWER_PROMPT.md").write_text("scenario patch\n", encoding="utf-8")
 
-    with pytest.raises(ReleaseVerificationError, match=r"profile artifact mismatch: SYSTEM_PROMPT\.md"):
+    with pytest.raises(ReleaseVerificationError, match=r"profile artifact mismatch: SIMPLE_ANSWER_PROMPT\.md"):
         verify_profile_artifacts(runtime, canonical)
 
 

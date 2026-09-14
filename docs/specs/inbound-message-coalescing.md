@@ -267,7 +267,7 @@ flush_reason: quiet_window|max_wait
 
 - анализ смысла частей сообщения до объединения;
 - списки фраз и keyword-routing;
-- изменения `SYSTEM_PROMPT.md` и `KB_AGENT_PROMPT.md`;
+- изменения `SIMPLE_ANSWER_PROMPT.md`;
 - изменение KB;
 - обработка вложений;
 - полноценная персистентная coalescing-очередь с сохранением пакета как отдельной сущности;

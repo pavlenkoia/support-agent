@@ -1,5 +1,3 @@
-from pathlib import Path
-
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -36,21 +34,7 @@ class Settings(BaseSettings):
     direct_llm_retry_deadline_seconds: float = 45.0
     openai_compatible_drop_params: bool = False
 
-    kb_agent_provider: str | None = None
-    kb_agent_base_url: str | None = None
-    kb_agent_api_key: str | None = None
-    kb_agent_api_keys: str = ""
-    kb_agent_model: str | None = None
-    kb_agent_temperature: float = 0.0
-    kb_agent_timeout_seconds: int | None = None
-    kb_agent_max_retries: int | None = None
-    kb_agent_retry_backoff_seconds: float | None = None
-    kb_agent_retry_deadline_seconds: float | None = None
-    kb_agent_skip_coverage_review: bool = False
-    kb_agent_merge_coverage_extraction: bool = False
-    kb_agent_deterministic_navigation: bool = False
-    kb_agent_minimal_extraction_schema: bool = False
-    kb_agent_deferred_retry_delay_seconds: int = 5
+    deferred_retry_delay_seconds: int = 5
 
     summary_llm_provider: str = "stub"
     summary_llm_base_url: str | None = None
@@ -66,11 +50,7 @@ class Settings(BaseSettings):
     hermes_backend_enabled: bool = False
     hermes_backend_mode: str = "stub"
     support_agent_profile_root: str = "/data/profile"
-    support_agent_system_prompt_path: str | None = None
-    kb_agent_system_prompt_path: str | None = None
-    knowledge_backend: str = "filesystem"
-    knowledge_root: str | None = None
-    answer_engine_mode: str = "legacy"
+    answer_engine_mode: str = "simple_full_corpus_natural"
     simple_answer_max_corpus_chars: int = 50_000
     telegram_bot_token: str | None = None
     telegram_allowed_chats: str = ""
@@ -120,12 +100,6 @@ class Settings(BaseSettings):
             return [self.direct_llm_api_key, *keys]
         return keys
 
-    @property
-    def kb_agent_api_key_list(self) -> list[str]:
-        keys = parse_csv_list(self.kb_agent_api_keys)
-        if self.kb_agent_api_key and self.kb_agent_api_key not in keys:
-            return [self.kb_agent_api_key, *keys]
-        return keys
 
     @property
     def summary_llm_api_key_list(self) -> list[str]:
@@ -135,41 +109,12 @@ class Settings(BaseSettings):
         return keys
 
     def model_post_init(self, __context) -> None:
-        if not self.support_agent_system_prompt_path:
-            self.support_agent_system_prompt_path = str(Path(self.support_agent_profile_root) / "SYSTEM_PROMPT.md")
-
-        if not self.kb_agent_system_prompt_path:
-            self.kb_agent_system_prompt_path = str(Path(self.support_agent_profile_root) / "KB_AGENT_PROMPT.md")
-
-        if not self.knowledge_root:
-            self.knowledge_root = str(Path(self.support_agent_profile_root) / "kb")
-
-        if not self.kb_agent_provider:
-            self.kb_agent_provider = self.direct_llm_provider
-        if not self.kb_agent_base_url:
-            self.kb_agent_base_url = self.direct_llm_base_url
         if not self.direct_llm_api_key and self.direct_llm_api_key_list:
             self.direct_llm_api_key = self.direct_llm_api_key_list[0]
-        if not self.kb_agent_api_keys:
-            self.kb_agent_api_keys = self.direct_llm_api_keys
-        if not self.kb_agent_api_key:
-            self.kb_agent_api_key = self.direct_llm_api_key
-        if not self.kb_agent_model:
-            self.kb_agent_model = self.direct_llm_model
-        if self.kb_agent_timeout_seconds is None:
-            self.kb_agent_timeout_seconds = self.direct_llm_timeout_seconds
-        if self.kb_agent_max_retries is None:
-            self.kb_agent_max_retries = self.direct_llm_max_retries
-        if self.kb_agent_retry_backoff_seconds is None:
-            self.kb_agent_retry_backoff_seconds = self.direct_llm_retry_backoff_seconds
-        if self.kb_agent_retry_deadline_seconds is None:
-            self.kb_agent_retry_deadline_seconds = self.direct_llm_retry_deadline_seconds
 
         if not self.direct_llm_base_url and self.direct_llm_provider == "mistral":
             self.direct_llm_base_url = "https://api.mistral.ai/v1"
 
-        if not self.kb_agent_base_url and self.kb_agent_provider == "mistral":
-            self.kb_agent_base_url = "https://api.mistral.ai/v1"
 
         if not self.summary_llm_api_key and self.summary_llm_api_key_list:
             self.summary_llm_api_key = self.summary_llm_api_key_list[0]

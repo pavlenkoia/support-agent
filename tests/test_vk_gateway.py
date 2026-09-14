@@ -1344,7 +1344,7 @@ def test_vk_gateway_does_not_recover_an_active_generation_as_a_second_turn(tmp_p
 
 def test_vk_gateway_recovers_expired_received_event_by_retrying_automatically(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr("app.services.vk_gateway.settings.vk_received_event_timeout_seconds", 1)
-    monkeypatch.setattr("app.services.vk_gateway.settings.kb_agent_deferred_retry_delay_seconds", 0)
+    monkeypatch.setattr("app.services.vk_gateway.settings.deferred_retry_delay_seconds", 0)
     sender = RecordingVKSender()
     service, session_factory = make_service(tmp_path, sender=sender)
     service.queue = InboundQueue(service._process_generation, quiet_seconds=60, max_wait_seconds=60)
