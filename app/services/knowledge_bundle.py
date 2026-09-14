@@ -144,6 +144,30 @@ def validate_compiled_bundle(bundle_root: Path) -> dict[str, Any]:
     return {"valid": not errors, "errors": errors}
 
 
+def build_runtime_knowledge_artifact(bundle_root: Path, output_path: Path, max_chars: int = 50_000) -> dict[str, Any]:
+    """Build the sole runtime knowledge payload from compiled facts."""
+    facts: list[dict[str, Any]] = []
+    for page in _discover_pages(Path(bundle_root) / "compiled"):
+        metadata, body = _read_frontmatter(page)
+        source_ref = page.relative_to(bundle_root).as_posix()
+        for index, raw_line in enumerate(body.splitlines(), start=1):
+            text = re.sub(r"^\s{0,3}[-*+]\s+", "", raw_line).strip()
+            text = re.sub(r"\s+", " ", text)
+            if not text or text.startswith("#") or text.startswith("```"):
+                continue
+            if text.casefold().startswith(("если клиент", "готовый ответ", "пример ответа")):
+                continue
+            fact_id = hashlib.sha256(f"{source_ref}:{index}:{text}".encode()).hexdigest()[:16]
+            facts.append({"id": f"fact-{fact_id}", "text": text, "conditions": [], "source_refs": list(metadata["sources"])})
+    facts.sort(key=lambda fact: fact["id"])
+    char_count = sum(len(fact["text"]) for fact in facts)
+    if char_count > max_chars or len({fact["id"] for fact in facts}) != len(facts):
+        raise BundleValidationError("runtime knowledge artifact exceeds budget or has duplicate fact IDs")
+    artifact = {"version": 1, "char_count": char_count, "facts": facts}
+    Path(output_path).write_text(json.dumps(artifact, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return artifact
+
+
 def _discover_pages(root: Path) -> list[Path]:
     pages: list[Path] = []
     for directory in PAGE_DIRS:

@@ -37,6 +37,23 @@ def make_profile_root(tmp_path: Path) -> Path:
     return profile_root
 
 
+def test_simple_answer_engine_sends_only_runtime_knowledge_artifact(tmp_path: Path) -> None:
+    profile_root = make_profile_root(tmp_path)
+    artifact = {
+        "version": 1,
+        "char_count": 25,
+        "facts": [{"id": "fact-1", "text": PRICE_PAGE, "conditions": [], "source_refs": ["raw/pricing.md"]}],
+    }
+    (profile_root / "kb" / "knowledge-base.v1.json").write_text(json.dumps(artifact), encoding="utf-8")
+    engine, client = make_engine(envelope("social_reply", "Спасибо!"), profile_root=profile_root)
+
+    engine.answer(question="Привет", history=[])
+
+    payload = json.loads(str(client.calls[0]["user_prompt"]))
+    assert payload["knowledge_base"] == artifact
+    assert "compiled_corpus" not in payload
+
+
 class CapturingClient:
     def __init__(self, response: str | Exception) -> None:
         self.response = response

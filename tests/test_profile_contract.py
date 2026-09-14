@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import json
 
 import pytest
 
@@ -222,6 +223,24 @@ def test_build_runtime_profile_produces_valid_bundle(tmp_path: Path) -> None:
     assert target.joinpath("SIMPLE_ANSWER_PROMPT.md").read_bytes() == SOURCE.joinpath("SIMPLE_ANSWER_PROMPT.md").read_bytes()
     assert target.joinpath("KB_AGENT_PROMPT.md").read_bytes() == SOURCE.joinpath("KB_AGENT_PROMPT.md").read_bytes()
     assert validate_compiled_bundle(target / "kb")["valid"] is True
+
+
+def test_build_runtime_profile_produces_validated_runtime_knowledge_artifact(tmp_path: Path) -> None:
+    target = tmp_path / "runtime-profile"
+    build_runtime_profile(SOURCE, target)
+
+    artifact_path = target / "kb" / "knowledge-base.v1.json"
+    artifact = json.loads(artifact_path.read_text(encoding="utf-8"))
+    assert artifact["version"] == 1
+    assert artifact["facts"]
+    assert len({fact["id"] for fact in artifact["facts"]}) == len(artifact["facts"])
+    assert all(set(fact) == {"id", "text", "conditions", "source_refs"} for fact in artifact["facts"])
+    serialized = artifact_path.read_text(encoding="utf-8").casefold()
+    assert "frontmatter" not in serialized
+    assert "raw/" not in serialized
+    assert "compiled/" not in serialized
+    assert all("#" not in fact["text"] for fact in artifact["facts"])
+    assert artifact["char_count"] <= 50_000
 
 
 def test_application_runtime_contains_no_profile_business_literals() -> None:

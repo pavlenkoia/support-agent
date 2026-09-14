@@ -13,6 +13,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from app.services.knowledge_bundle import (
     compile_legacy_bundle,
     validate_compiled_bundle,
+    build_runtime_knowledge_artifact,
 )
 
 URL_RE = re.compile(r"https?://|www\.", re.IGNORECASE)
@@ -66,6 +67,7 @@ def build_runtime_profile(source_root: Path, target_root: Path) -> None:
     report = validate_compiled_bundle(target_root / "kb")
     if not report["valid"]:
         raise ProfileSourceError("compiled runtime profile is invalid: " + "; ".join(report["errors"]))
+    build_runtime_knowledge_artifact(target_root / "kb", target_root / "kb" / "knowledge-base.v1.json")
 
 
 def main() -> int:

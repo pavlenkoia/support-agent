@@ -61,7 +61,7 @@ class SimpleAnswerEngine:
             "provider_attempt_count": 0,
             "used_failover": False,
             "failover_count": 0,
-            "kb_page_count": packet["corpus"]["page_count"],
+            "kb_page_count": packet["corpus"].get("page_count", len(packet["corpus"].get("facts", []))),
             "kb_char_count": packet["corpus"]["char_count"],
             "history_message_count": len(packet["history"]),
             "tool_observation_kinds": [item["kind"] for item in packet["tool_observations"]],
@@ -70,8 +70,8 @@ class SimpleAnswerEngine:
         output_contract = (
             {
                 "response_text": "non-empty natural customer response",
-                "source_refs": ["compiled path"],
-                "evidence": [{"source_ref": "compiled path", "quote": "exact source substring"}],
+                "source_refs": ["fact ID"],
+                "evidence": [{"fact_id": "fact ID", "quote": "exact fact text substring"}],
                 "rule": (
                     "Reply naturally to every turn, including acknowledgements and follow-ups. "
                     "Do not classify the turn. Evidence and source_refs are required only for KB-dependent factual claims; "
@@ -82,8 +82,8 @@ class SimpleAnswerEngine:
             else {
                 "kind": "grounded_answer|social_reply|clarification_requested|cannot_answer|out_of_scope",
                 "response_text": "string",
-                "source_refs": ["compiled path"],
-                "evidence": [{"source_ref": "compiled path", "quote": "exact source substring"}],
+                "source_refs": ["fact ID"],
+                "evidence": [{"fact_id": "fact ID", "quote": "exact fact text substring"}],
                 "grounded_answer": "Use exact quotes only; response_text must be built exclusively from exact source substrings copied from evidence.",
                 "grounded_answer_evidence_rule": "For grounded_answer, include 1 to 3 exact evidence items; otherwise choose a non-grounded kind.",
             }
@@ -94,7 +94,7 @@ class SimpleAnswerEngine:
                 "output_contract": output_contract,
                 "question": packet["question"],
                 "history": packet["history"],
-                "compiled_corpus": packet["corpus"],
+                "knowledge_base": packet["corpus"],
                 "tool_observations": packet["tool_observations"],
             },
             ensure_ascii=False,
@@ -176,14 +176,18 @@ class SimpleAnswerEngine:
         evidence = parsed.get("evidence")
         if not isinstance(evidence, list) or not evidence or len(evidence) > 3:
             raise ValueError("invalid_evidence_count")
-        pages_by_ref = {page["source_ref"]: page for page in packet["corpus"]["pages"]}
+        if "facts" in packet["corpus"]:
+            facts_by_id = {fact["id"]: fact for fact in packet["corpus"]["facts"]}
+            pages_by_ref = {fact_id: {"source_ref": fact_id, "content": fact["text"]} for fact_id, fact in facts_by_id.items()}
+        else:
+            pages_by_ref = {page["source_ref"]: page for page in packet["corpus"]["pages"]}
         validated_quotes: list[str] = []
         normalized_refs: list[str] = []
         seen_quotes: set[str] = set()
         for item in evidence:
             if not isinstance(item, dict):
                 raise ValueError("invalid_evidence_item")
-            source_ref_value = item.get("source_ref")
+            source_ref_value = item.get("fact_id", item.get("source_ref"))
             quote_value = item.get("quote")
             if not isinstance(source_ref_value, str) or not isinstance(quote_value, str):
                 raise ValueError("invalid_evidence_types")
@@ -266,6 +270,12 @@ class SimpleAnswerEngine:
         return prompt_path.read_text(encoding="utf-8").strip()
 
     def _load_corpus(self) -> dict[str, Any]:
+        artifact_path = self.profile_root / "kb" / "knowledge-base.v1.json"
+        if artifact_path.is_file():
+            artifact = json.loads(artifact_path.read_text(encoding="utf-8"))
+            if artifact.get("version") != 1 or not isinstance(artifact.get("facts"), list):
+                raise ValueError("invalid runtime knowledge artifact")
+            return artifact
         catalog_path = self.profile_root / "kb" / "index" / "catalog.json"
         catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
         declarations = catalog.get("pages") if isinstance(catalog, dict) else None
