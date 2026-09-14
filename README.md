@@ -37,7 +37,8 @@ Reviewed prompts and factual Wiki source live under `deploy/profile-source/`. `s
 Current runtime shape:
 - generic `SYSTEM_PROMPT.md` for role and communication behavior only
 - generic `KB_AGENT_PROMPT.md` for semantic wiki navigation and grounded extraction only
-- compiled external KB pages used as the factual source of truth
+- curated `deploy/profile-source/kb/runtime-facts.v1.json` is the sole source for the one-call runtime KB; it contains semantic IDs, fact text, applicability conditions, and logical source references
+- `scripts/build_runtime_profile.py` validates and promotes that registry as `kb/knowledge-base.v1.json`; it never infers customer facts by splitting Wiki Markdown
 - optional runtime tools (for example weekday/date checks) before final answer generation
 - provider key pools via `DIRECT_LLM_API_KEYS`, `KB_AGENT_API_KEYS`, and `SUMMARY_LLM_API_KEYS` (CSV, first key primary, later keys reserve/failover)
 

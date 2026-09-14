@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from app.integrations.llm.openai_compatible import LLMRecoveryExhausted
+from app.services.knowledge_bundle import BundleValidationError, validate_runtime_knowledge_artifact
 from app.services.tool_runtime import ToolRuntimeService
 
 
@@ -62,7 +63,7 @@ class SimpleAnswerEngine:
             "used_failover": False,
             "failover_count": 0,
             "kb_page_count": packet["corpus"].get("page_count", len(packet["corpus"].get("facts", []))),
-            "kb_char_count": packet["corpus"]["char_count"],
+            "kb_char_count": sum(len(fact["text"]) for fact in packet["corpus"]["facts"]),
             "history_message_count": len(packet["history"]),
             "tool_observation_kinds": [item["kind"] for item in packet["tool_observations"]],
             "contract_error": None,
@@ -94,7 +95,7 @@ class SimpleAnswerEngine:
                 "output_contract": output_contract,
                 "question": packet["question"],
                 "history": packet["history"],
-                "knowledge_base": packet["corpus"],
+                "knowledge_base": self._project_runtime_knowledge(packet["corpus"]),
                 "tool_observations": packet["tool_observations"],
             },
             ensure_ascii=False,
@@ -176,11 +177,13 @@ class SimpleAnswerEngine:
         evidence = parsed.get("evidence")
         if not isinstance(evidence, list) or not evidence or len(evidence) > 3:
             raise ValueError("invalid_evidence_count")
-        if "facts" in packet["corpus"]:
-            facts_by_id = {fact["id"]: fact for fact in packet["corpus"]["facts"]}
-            pages_by_ref = {fact_id: {"source_ref": fact_id, "content": fact["text"]} for fact_id, fact in facts_by_id.items()}
-        else:
-            pages_by_ref = {page["source_ref"]: page for page in packet["corpus"]["pages"]}
+        facts = packet["corpus"].get("facts")
+        if not isinstance(facts, list):
+            raise ValueError("invalid runtime knowledge facts")
+        facts_by_id = {fact["id"]: fact for fact in facts if isinstance(fact, dict) and isinstance(fact.get("id"), str) and isinstance(fact.get("text"), str)}
+        if not facts_by_id:
+            raise ValueError("invalid runtime knowledge facts")
+        pages_by_ref = {fact_id: {"source_ref": fact_id, "content": fact["text"]} for fact_id, fact in facts_by_id.items()}
         validated_quotes: list[str] = []
         normalized_refs: list[str] = []
         seen_quotes: set[str] = set()
@@ -271,45 +274,19 @@ class SimpleAnswerEngine:
 
     def _load_corpus(self) -> dict[str, Any]:
         artifact_path = self.profile_root / "kb" / "knowledge-base.v1.json"
-        if artifact_path.is_file():
-            artifact = json.loads(artifact_path.read_text(encoding="utf-8"))
-            if artifact.get("version") != 1 or not isinstance(artifact.get("facts"), list):
-                raise ValueError("invalid runtime knowledge artifact")
-            return artifact
-        catalog_path = self.profile_root / "kb" / "index" / "catalog.json"
-        catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
-        declarations = catalog.get("pages") if isinstance(catalog, dict) else None
-        if not isinstance(declarations, list):
-            raise ValueError("invalid compiled KB catalog")
+        if not artifact_path.is_file():
+            raise ValueError("missing runtime knowledge artifact")
+        artifact = json.loads(artifact_path.read_text(encoding="utf-8"))
 
-        kb_root = (self.profile_root / "kb").resolve()
-        pages: list[dict[str, str]] = []
-        refs: set[str] = set()
-        for declared in declarations:
-            if not isinstance(declared, dict):
-                raise ValueError("invalid catalog page declaration")
-            source_ref = str(declared.get("source_ref") or "").strip()
-            if not source_ref or source_ref in refs:
-                raise ValueError("missing or duplicate compiled source_ref")
-            page_path = (kb_root / source_ref).resolve()
-            if page_path == kb_root or kb_root not in page_path.parents:
-                raise ValueError("source_ref outside compiled KB")
-            if not page_path.is_file():
-                raise ValueError(f"catalog page missing: {source_ref}")
-            refs.add(source_ref)
-            pages.append(
-                {
-                    "source_ref": source_ref,
-                    "title": str(declared.get("title") or "").strip(),
-                    "summary": str(declared.get("summary") or "").strip(),
-                    "content": page_path.read_text(encoding="utf-8"),
-                }
-            )
+        try:
+            validate_runtime_knowledge_artifact(artifact, max_chars=self.max_corpus_chars)
+        except BundleValidationError as exc:
+            raise ValueError(str(exc)) from exc
+        return artifact
 
-        char_count = sum(len(page["content"]) for page in pages)
-        if char_count > self.max_corpus_chars:
-            raise CorpusTooLargeError(f"kb_corpus_too_large:{char_count}>{self.max_corpus_chars}")
-        return {"pages": pages, "page_count": len(pages), "char_count": char_count}
+    @staticmethod
+    def _project_runtime_knowledge(artifact: dict[str, Any]) -> dict[str, Any]:
+        return artifact
 
     @staticmethod
     def _project_history(history: list[dict[str, Any]]) -> list[dict[str, str]]:

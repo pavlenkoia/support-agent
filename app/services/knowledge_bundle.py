@@ -42,6 +42,9 @@ def compile_legacy_bundle(legacy_root: Path, target_root: Path) -> dict[str, Any
 
     identities = _build_page_identities(legacy_root, source_pages)
     target_root.mkdir(parents=True)
+    runtime_facts = legacy_root / "runtime-facts.v1.json"
+    if runtime_facts.is_file():
+        shutil.copy2(runtime_facts, target_root / "runtime-facts.v1.json")
     shutil.copytree(legacy_root / "raw", target_root / "raw")
     (target_root / "schema").mkdir()
     shutil.copy2(legacy_root / "SCHEMA.md", target_root / "schema" / "SCHEMA.md")
@@ -145,27 +148,70 @@ def validate_compiled_bundle(bundle_root: Path) -> dict[str, Any]:
 
 
 def build_runtime_knowledge_artifact(bundle_root: Path, output_path: Path, max_chars: int = 50_000) -> dict[str, Any]:
-    """Build the sole runtime knowledge payload from compiled facts."""
-    facts: list[dict[str, Any]] = []
-    for page in _discover_pages(Path(bundle_root) / "compiled"):
-        metadata, body = _read_frontmatter(page)
-        source_ref = page.relative_to(bundle_root).as_posix()
-        for index, raw_line in enumerate(body.splitlines(), start=1):
-            text = re.sub(r"^\s{0,3}[-*+]\s+", "", raw_line).strip()
-            text = re.sub(r"\s+", " ", text)
-            if not text or text.startswith("#") or text.startswith("```"):
-                continue
-            if text.casefold().startswith(("если клиент", "готовый ответ", "пример ответа")):
-                continue
-            fact_id = hashlib.sha256(f"{source_ref}:{index}:{text}".encode()).hexdigest()[:16]
-            facts.append({"id": f"fact-{fact_id}", "text": text, "conditions": [], "source_refs": list(metadata["sources"])})
-    facts.sort(key=lambda fact: fact["id"])
-    char_count = sum(len(fact["text"]) for fact in facts)
-    if char_count > max_chars or len({fact["id"] for fact in facts}) != len(facts):
-        raise BundleValidationError("runtime knowledge artifact exceeds budget or has duplicate fact IDs")
-    artifact = {"version": 1, "char_count": char_count, "facts": facts}
+    """Promote only explicitly curated Wiki facts; never infer them from prose."""
+    source_path = Path(bundle_root) / "runtime-facts.v1.json"
+    if not source_path.is_file():
+        raise BundleValidationError("missing curated runtime facts registry")
+    artifact = _read_json(source_path)
+    validate_runtime_knowledge_artifact(artifact, max_chars=max_chars)
     Path(output_path).write_text(json.dumps(artifact, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return artifact
+
+
+def validate_runtime_knowledge_artifact(artifact: dict[str, Any], max_chars: int = 50_000) -> None:
+    """Reject a runtime KB that leaks Wiki/editor material or loses fact integrity."""
+    if artifact.get("schema_version") != 1 or set(artifact) != {"schema_version", "facts"} or not isinstance(artifact.get("facts"), list):
+        raise BundleValidationError("invalid runtime knowledge artifact")
+    facts = artifact["facts"]
+    fact_ids: set[str] = set()
+    fact_texts: set[str] = set()
+    char_count = 0
+    for fact in facts:
+        if not isinstance(fact, dict) or set(fact) != {"id", "text", "conditions", "source_refs"}:
+            raise BundleValidationError("runtime knowledge artifact has invalid fact shape")
+        fact_id = fact["id"]
+        text = fact["text"]
+        conditions = fact["conditions"]
+        source_refs = fact["source_refs"]
+        if not isinstance(fact_id, str) or not re.fullmatch(r"[a-z0-9]+(?:[.-][a-z0-9]+)+", fact_id) or not isinstance(text, str) or not text:
+            raise BundleValidationError("runtime knowledge artifact has invalid fact identity")
+        if not isinstance(conditions, list) or not all(isinstance(item, str) for item in conditions):
+            raise BundleValidationError("runtime knowledge artifact has invalid conditions")
+        if not isinstance(source_refs, list) or not source_refs or not all(isinstance(item, str) and re.fullmatch(r"[a-z-]+:\d+", item) for item in source_refs):
+            raise BundleValidationError("runtime knowledge artifact has invalid provenance")
+        if fact_id in fact_ids or text in fact_texts:
+            raise BundleValidationError("runtime knowledge artifact has duplicate facts")
+        if "#" in text or text.casefold().startswith(("если клиент", "клиент может спросить", "готовый ответ", "пример ответа")):
+            raise BundleValidationError("runtime knowledge artifact contains Wiki/editor material")
+        fact_ids.add(fact_id)
+        fact_texts.add(text)
+        char_count += len(text)
+    if not facts or char_count > max_chars:
+        raise BundleValidationError("runtime knowledge artifact has invalid size")
+
+
+def _runtime_source_id(source_ref: str) -> str:
+    return "source-" + hashlib.sha256(source_ref.encode("utf-8")).hexdigest()[:16]
+
+
+def _runtime_fact_text(raw_line: str) -> str | None:
+    """Keep customer-safe prose only; never infer facts from Wiki mechanics."""
+    text = re.sub(r"^\s{0,3}[-*+]\s+", "", raw_line).strip()
+    text = re.sub(r"\s+", " ", text)
+    if not text or not text.endswith((".", "!", "?", "…")) or text.startswith(("#", "```", ">", "<!--", "[[", "|", "---")):
+        return None
+    if text.casefold().startswith(
+        ("если клиент", "клиент может спросить", "готовый ответ", "пример ответа", "источник:", "связанные:")
+    ):
+        return None
+    return text
+
+
+def _runtime_conditions(text: str) -> list[str]:
+    """Retain an explicitly conditional fact verbatim rather than guessing a clause."""
+    if text.casefold().startswith(("если ", "при ", "в случае ", "только ", "для ")):
+        return [text]
+    return []
 
 
 def _discover_pages(root: Path) -> list[Path]:
