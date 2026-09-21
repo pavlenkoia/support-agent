@@ -74,10 +74,9 @@ class SimpleAnswerEngine:
                 "source_refs": ["fact ID"],
                 "evidence": [{"fact_id": "fact ID", "quote": "exact fact text substring"}],
                 "rule": (
-                    "Reply directly to every turn without classifying it. When the latest turn requires no new information or action, "
-                    "reply only to that turn and do not introduce or repeat facts from the knowledge base or dialogue history. "
-                    "Evidence and source_refs are required only for KB-dependent factual claims; for social dialogue, clarification, "
-                    "or an honest absence of information, return empty evidence and source_refs."
+                    "Верни один короткий ответ клиенту, используя только факты из базы, которые прямо отвечают на буквальное последнее сообщение. "
+                    "Не добавляй приветствия, эмоции, оценки, вопросы, предложения, следующие шаги и даже подтверждённые факты, "
+                    "если клиент о них не спрашивал."
                 ),
             }
             if self.preserve_grounded_text

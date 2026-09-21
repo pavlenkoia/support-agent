@@ -10,6 +10,7 @@ from app.integrations.llm.openai_compatible import LLMRecoveryExhausted
 from app.services.simple_answer_engine import CorpusTooLargeError, SimpleAnswerEngine
 
 FIXTURE_ROOT = Path(__file__).parent / "fixtures" / "simple_answer_profile"
+REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 PRICE_REF = "price.basic"
 CERTIFICATE_REF = "certificate.website"
 PRICE_PAGE_PATH = "compiled/concepts/pricing.md"
@@ -210,10 +211,10 @@ def test_natural_full_corpus_prompt_requires_natural_text_with_exact_evidence(tm
 
     contract = json.loads(str(client.calls[0]["user_prompt"]))["output_contract"]
     assert contract["response_text"] == "non-empty natural customer response"
-    assert "Reply directly to every turn without classifying it" in contract["rule"]
-    assert "requires no new information or action" in contract["rule"]
-    assert "do not introduce or repeat facts from the knowledge base or dialogue history" in contract["rule"]
-    assert "Evidence and source_refs are required only for KB-dependent factual claims" in contract["rule"]
+    assert contract["rule"] == (
+        "Верни один короткий ответ клиенту, используя только факты из базы, которые прямо отвечают на буквальное последнее сообщение. "
+        "Не добавляй приветствия, эмоции, оценки, вопросы, предложения, следующие шаги и даже подтверждённые факты, если клиент о них не спрашивал."
+    )
 
 
 def test_natural_full_corpus_uses_its_own_customer_prompt(tmp_path: Path) -> None:
@@ -235,6 +236,20 @@ def test_natural_full_corpus_uses_its_own_customer_prompt(tmp_path: Path) -> Non
     engine.answer(question="Как оформить сертификат?", history=[])
 
     assert client.calls[0]["system_prompt"] == "Отвечай клиенту коротко и только по буквальному вопросу."
+
+
+def test_production_customer_prompt_prohibits_unsolicited_questions_and_evaluations() -> None:
+    source_prompt = (REPOSITORY_ROOT / "deploy" / "profile-source" / "SIMPLE_ANSWER_PROMPT.md").read_text(encoding="utf-8")
+    runtime_prompt = (REPOSITORY_ROOT / "deploy" / "profile" / "SIMPLE_ANSWER_PROMPT.md").read_text(encoding="utf-8")
+
+    required_contract = (
+        "Не добавляй даже подтверждённые сведения, если клиент о них не спрашивал.",
+        "Не задавай вопросов, не запрашивай дату или другие детали, не предлагай действий и не веди диалог дальше.",
+        "Не добавляй приветствия, эмоции, оценку, похвалу, рекламу, благодарность или прощание.",
+    )
+    for clause in required_contract:
+        assert clause in source_prompt
+        assert clause in runtime_prompt
 
 
 def test_user_prompt_contract_includes_evidence_shape_and_exact_quote_requirement(tmp_path: Path) -> None:
