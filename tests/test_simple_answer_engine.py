@@ -66,6 +66,19 @@ def test_simple_answer_engine_sends_only_runtime_knowledge_artifact(tmp_path: Pa
     assert "compiled_corpus" not in payload
 
 
+@pytest.mark.parametrize("message", ["Спасибо!", "Поняла, спасибо)", "Благодарю) хорошего дня)", "Я поняла"])
+def test_simple_answer_engine_replies_to_social_acknowledgement_without_llm_or_kb(tmp_path: Path, message: str) -> None:
+    engine, client = make_engine(envelope("social_reply", "unused"), profile_root=make_profile_root(tmp_path), preserve_grounded_text=True)
+
+    result = engine.answer(question=message, history=[{"role": "assistant", "content": "Предыдущий фактический ответ."}])
+
+    assert result["kind"] == "social_reply"
+    assert result["response_text"] == "Пожалуйста!"
+    assert result["source_refs"] == []
+    assert result["telemetry"]["logical_llm_call_count"] == 0
+    assert client.calls == []
+
+
 def test_simple_answer_engine_requires_generated_runtime_knowledge_artifact(tmp_path: Path) -> None:
     profile_root = make_profile_root(tmp_path)
     (profile_root / "kb" / "knowledge-base.v1.json").unlink()
@@ -480,7 +493,7 @@ def test_plain_text_provider_fallback_is_explicitly_tagged(tmp_path: Path) -> No
     assert len(client.calls) == 1
 
 
-def test_final_response_without_classification_is_a_natural_dialogue_reply(tmp_path: Path) -> None:
+def test_social_acknowledgement_skips_plain_text_provider_fallback(tmp_path: Path) -> None:
     engine, client = make_engine(
         json.dumps({"response_text": "Пожалуйста! Обращайтесь, если появятся вопросы.", "source_refs": [], "evidence": []}, ensure_ascii=False),
         profile_root=make_profile_root(tmp_path),
@@ -489,10 +502,10 @@ def test_final_response_without_classification_is_a_natural_dialogue_reply(tmp_p
 
     result = engine.answer(question="Спасибо, я поняла.", history=[])
 
-    assert result["kind"] == "final_response"
-    assert result["response_text"] == "Пожалуйста! Обращайтесь, если появятся вопросы."
+    assert result["kind"] == "social_reply"
+    assert result["response_text"] == "Пожалуйста!"
     assert result["source_refs"] == []
-    assert len(client.calls) == 1
+    assert client.calls == []
 
 
 def test_greeting_plus_factual_question_remains_one_grounded_turn(tmp_path: Path) -> None:

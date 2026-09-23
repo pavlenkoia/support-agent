@@ -55,6 +55,24 @@ class SimpleAnswerEngine:
         internal_context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         _ = internal_context
+        if self._is_social_acknowledgement(question):
+            return self._result(
+                "social_reply",
+                "Пожалуйста!",
+                [],
+                {
+                    "answer_engine": "simple_social_acknowledgement",
+                    "logical_llm_call_count": 0,
+                    "provider_attempt_count": 0,
+                    "used_failover": False,
+                    "failover_count": 0,
+                    "kb_page_count": 0,
+                    "kb_char_count": 0,
+                    "history_message_count": 0,
+                    "tool_observation_kinds": [],
+                    "contract_error": None,
+                },
+            )
         packet = self.build_input(question=question, history=history, tool_observations=tool_observations)
         telemetry = {
             "answer_engine": "simple_full_corpus_natural" if self.preserve_grounded_text else "simple_full_corpus",
@@ -168,6 +186,34 @@ class SimpleAnswerEngine:
     @staticmethod
     def _result(kind: str, response_text: str, source_refs: list[str], telemetry: dict[str, Any]) -> dict[str, Any]:
         return {"kind": kind, "response_text": response_text, "source_refs": source_refs, "telemetry": telemetry}
+
+    @staticmethod
+    def _is_social_acknowledgement(message: str) -> bool:
+        if "?" in message:
+            return False
+        words = re.findall(r"[а-яё]+", message.casefold())
+        return bool(words) and set(words) <= {
+            "благодарю",
+            "благодарим",
+            "всего",
+            "да",
+            "дня",
+            "добрый",
+            "доброго",
+            "до",
+            "понял",
+            "поняла",
+            "понятно",
+            "пожалуйста",
+            "принято",
+            "рада",
+            "рад",
+            "спасибо",
+            "хорошего",
+            "хорошо",
+            "ясно",
+            "я",
+        }
 
     def _finalize_grounded_answer(
         self,
