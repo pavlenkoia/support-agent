@@ -34,6 +34,11 @@ kb/
 !deploy/profile/kb/
 !deploy/profile/kb/**
 
+# Governor operational state; KB source and runtime artifact remain tracked.
+deploy/.governor-publish.lock
+deploy/governor-receipts/
+deploy/profile-backups/
+
 # Editors / OS
 .DS_Store
 .idea/
