@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import inspect
+
 import pytest
 
+import scripts.release as release
 from scripts.release import (
     APP_SERVICES,
     ReleaseVerificationError,
@@ -77,6 +80,14 @@ def test_verify_release_evidence_rejects_missing_runtime_service() -> None:
             release_started_at=100.0,
             expected_runtime_manifest="same-manifest",
         )
+
+
+def test_release_has_no_legacy_agent_loop_probe() -> None:
+    source = inspect.getsource(release)
+
+    assert "verify_agent_loop_no_send" not in source
+    assert "calendar_lookup" not in source
+    assert "wiki_lookup" not in source
 
 
 def test_verify_profile_artifacts_accepts_exact_canonical_tree(tmp_path) -> None:

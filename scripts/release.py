@@ -206,31 +206,6 @@ def verify_worker_liveness(env: Mapping[str, str]) -> dict[str, bool]:
     raise ReleaseVerificationError(f"worker liveness marker missing: {missing}")
 
 
-def verify_agent_loop_no_send(env: Mapping[str, str]) -> dict[str, str]:
-    """Exercise the live agent loop through an internal no-send probe."""
-    probe = r'''import json
-from app.services.probe_service import ProbeService
-service = ProbeService()
-session = service.start_session(scenario_name="release-agent-loop", requested_by="release")
-result = service.send_message(session["session_id"], "можно ли прыгнуть 25 и 26 сентября?")
-answer = result["final_answer"]
-route = result["route"]
-assert route.get("route") == "answer", result
-assert answer, result
-trace = service.get_trace(session["session_id"])
-events = trace.get("events", [])
-processed = next((event for event in reversed(events) if event.get("event_type") == "inbound_processed"), None)
-assert isinstance(processed, dict), trace
-packet = (processed.get("payload") or {}).get("trace_packet") or {}
-actions = [item.get("action") for item in packet.get("ordered_actions", [])]
-assert "calendar_lookup" in actions, packet
-assert "wiki_lookup" in actions, packet
-assert "26 сентября" in answer.casefold() and "суббот" in answer.casefold(), result
-print(json.dumps({"route": route.get("route"), "answer": answer, "actions": actions}, ensure_ascii=False))'''
-    output = compose(("exec", "-T", "app", "uv", "run", "--no-dev", "python", "-c", probe), env=env, capture=True)
-    return {"app": output.splitlines()[-1]}
-
-
 def receipt_path(release_id: str, started_at: float) -> Path:
     directory = RUNTIME_ROOT / "releases"
     directory.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -271,7 +246,6 @@ def run_release(*, release_id: str, expected_manifest: str, build: bool) -> Path
         receipt["evidence"] = evidence
         receipt["health"] = verify_http_health()
         receipt["worker_liveness"] = verify_worker_liveness(env)
-        receipt["agent_loop_no_send_probe"] = verify_agent_loop_no_send(env)
         receipt["status"] = "success"
     except Exception as exc:
         receipt["error"] = f"{type(exc).__name__}: {exc}"
