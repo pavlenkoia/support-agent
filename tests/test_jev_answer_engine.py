@@ -1,0 +1,143 @@
+import json
+from pathlib import Path
+
+from app.services.jev_answer_engine import JevAnswerEngine
+
+
+FACTS = [
+    {"id": "jump.announcement", "text": "Подтверждение даты прыжков публикуется в анонсе группы за несколько дней до выходных.", "conditions": [], "source_refs": ["schedule:01"]},
+    {"id": "certificate.validity", "text": "Сертификат действует один год с даты покупки.", "conditions": [], "source_refs": ["certificate:01"]},
+]
+
+
+class ChoiceClient:
+    def __init__(self, choices):
+        self.choices = iter(choices)
+        self.calls = []
+
+    def choose(self, *, state, question, criteria, instructions):
+        self.calls.append({"state": state, "question": question, "criteria": criteria, "instructions": instructions})
+        return next(self.choices)
+
+
+class Writer:
+    def __init__(self, outputs):
+        self.outputs = iter(outputs)
+        self.calls = []
+
+    def generate(self, **kwargs):
+        self.calls.append(kwargs)
+        return next(self.outputs)
+
+
+def profile(tmp_path: Path):
+    root = tmp_path / "profile"
+    (root / "kb").mkdir(parents=True)
+    (root / "kb" / "knowledge-base.v1.json").write_text(json.dumps({"schema_version": 1, "facts": FACTS}, ensure_ascii=False))
+    (root / "profile.yaml").write_text('role: "Консультант"\nscope:\n  in_scope: ["прыжки"]\n  out_of_scope: ["общие темы"]\nfallback_policy:\n  no_answer:\n    evidence:\n      source_ref: "office:01"\n      text: "Для уточнения вопроса можно позвонить в офис в рабочее время."\n')
+    (root / "JEV_ANSWER_PROMPT.md").write_text("Ответь естественно только по выбранному факту.")
+    (root / "JEV_DIALOGUE_PROMPT.md").write_text("Отвечай кратко в роли консультанта по предмету поддержки без новых бизнес-фактов.")
+    return root
+
+
+def engine(tmp_path, choices, outputs=()):
+    selector = ChoiceClient(choices)
+    writer = Writer(outputs)
+    return JevAnswerEngine(selector=selector, writer=writer, profile_root=profile(tmp_path)), selector, writer
+
+
+def test_selected_fact_is_only_business_evidence_and_composite_chooses_main(tmp_path):
+    llm, selector, writer = engine(tmp_path, ["substantive", "jump.announcement"], [json.dumps({"response_text": "Дата будет подтверждена в анонсе группы за несколько дней до выходных."}, ensure_ascii=False)])
+    result = llm.answer(question="Здравствуйте, будут прыжки 26-го и сколько сертификат действует?", history=[{"role": "user", "content": "Планирую поездку"}],
+                        tool_observations=[{"kind": "calendar_weekday", "summary": "Дата 2026-10-26 приходится на понедельник.", "structured": {"year": 2026}}])
+    assert result["kind"] == "grounded_answer"
+    assert result["source_refs"] == ["jump.announcement"]
+    assert result["telemetry"]["selected_fact_id"] == "jump.announcement"
+    assert result["telemetry"]["selected_fact"] == FACTS[0]
+    assert len(result["telemetry"]["kb_sha256"]) == 64
+    assert len(selector.calls) == 2
+    assert set(selector.calls[1]["criteria"]) == {"jump.announcement", "certificate.validity", "no_answer"}
+    assert "способе подтверждения" in selector.calls[1]["instructions"]
+    packet = json.loads(writer.calls[0]["user_prompt"])
+    assert packet["selected_facts"] == [{k: FACTS[0][k] for k in ("id", "text", "conditions")}]
+    assert packet["question"] == "Здравствуйте, будут прыжки 26-го и сколько сертификат действует?"
+    assert packet["history"] == [{"role": "user", "content": "Планирую поездку"}]
+    assert "certificate.validity" not in writer.calls[0]["user_prompt"]
+    assert "calendar_weekday" not in writer.calls[0]["user_prompt"]
+    assert writer.calls[0]["system_prompt"] == "Ответь естественно только по выбранному факту."
+
+
+def test_no_answer_uses_configured_fallback_without_writer(tmp_path):
+    llm, selector, writer = engine(tmp_path, ["substantive", "no_answer"])
+    result = llm.answer(question="Есть ли неизвестная услуга?", history=[])
+    assert result["kind"] == "cannot_answer"
+    assert result["response_text"] == "Для уточнения вопроса можно позвонить в офис в рабочее время."
+    assert writer.calls == []
+
+
+def test_choice_client_rejects_unlisted_and_zero_probability_choices():
+    from unittest.mock import patch
+    from io import BytesIO
+    import pytest
+    from app.services.jev_answer_engine import JevChoiceClient
+
+    client = JevChoiceClient("test-secret")
+    criteria = {"fact.one": "One", "no_answer": "No fact"}
+    for choice, probabilities in (("not-listed", {"fact.one": 1, "no_answer": 0}),
+                                  ("fact.one", {"fact.one": 0, "no_answer": 1})):
+        raw = json.dumps({"answers": {"fact": {"choice": choice, "probabilities": probabilities}}}).encode()
+        with patch("app.services.jev_answer_engine.urlopen", return_value=BytesIO(raw)):
+            with pytest.raises(ValueError, match="invalid Jev choice"):
+                client.choose(state={"message": "test"}, question="fact", criteria=criteria, instructions="Select")
+
+
+def test_social_acknowledgement_is_not_flood_or_fact_selection(tmp_path):
+    llm, selector, writer = engine(tmp_path, ["social"], [json.dumps({"response_text": "Пожалуйста!"}, ensure_ascii=False)])
+    result = llm.answer(question="Понял, спасибо", history=[])
+    assert result["kind"] == "social_reply"
+    assert result["response_text"] == "Пожалуйста!"
+    assert len(selector.calls) == 1
+    assert "knowledge_base" not in writer.calls[0]["user_prompt"]
+
+
+def test_offtopic_and_flood_stay_distinct_from_no_answer(tmp_path):
+    for kind in ("off_topic", "flood"):
+        llm, selector, writer = engine(tmp_path / kind, [kind], [json.dumps({"response_text": "Я помогу с вопросами по услугам нашего клуба."}, ensure_ascii=False)])
+        result = llm.answer(question="Посторонний текст", history=[])
+        assert result["kind"] == "out_of_scope"
+        assert result["telemetry"]["turn_type"] == kind
+        assert writer.calls
+        assert len(selector.calls) == 1
+
+
+def test_plain_text_or_conflicting_fact_id_is_not_delivered_as_fact(tmp_path):
+    for output in ("Звоните по выдуманному номеру.", json.dumps({"response_text": "Звоните по выдуманному номеру.", "evidence": [{"fact_id": "certificate.validity", "quote": "Другое"}]}, ensure_ascii=False)):
+        llm, _, _ = engine(tmp_path / str(len(output)), ["substantive", "jump.announcement"], [output])
+        result = llm.answer(question="Будут прыжки 26-го?", history=[])
+        assert result["kind"] == "retry_pending"
+        assert result["response_text"] == ""
+        assert result["telemetry"]["selected_fact"] == FACTS[0]
+
+
+def test_selector_failure_does_not_use_no_answer_fallback(tmp_path):
+    llm, selector, writer = engine(tmp_path, ["bad_type"])
+    result = llm.answer(question="Вопрос", history=[])
+    assert result["kind"] == "retry_pending"
+    assert result["response_text"] == ""
+    assert writer.calls == []
+
+
+def test_profile_build_includes_both_jev_prompts(tmp_path):
+    from scripts.build_runtime_profile import build_runtime_profile
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "kb" / "concepts").mkdir(parents=True)
+    (source / "kb" / "concepts" / "fact.md").write_text(
+        '---\nruntime_facts:\n  - id: fact.one\n    text: Test fact.\n    conditions: []\n    source_refs: ["test:01"]\n---\n')
+    (source / "SIMPLE_ANSWER_PROMPT.md").write_text("Current contract")
+    (source / "JEV_ANSWER_PROMPT.md").write_text("Selected fact contract")
+    (source / "JEV_DIALOGUE_PROMPT.md").write_text("Social contract")
+    target = tmp_path / "built"
+    build_runtime_profile(source, target)
+    assert (target / "JEV_ANSWER_PROMPT.md").read_text() == "Selected fact contract"
+    assert (target / "JEV_DIALOGUE_PROMPT.md").read_text() == "Social contract"

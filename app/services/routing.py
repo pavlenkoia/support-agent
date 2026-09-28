@@ -13,6 +13,7 @@ from app.models.workflow_event import WorkflowEvent
 from app.schemas.message import InboundMessage
 from app.services.audit import build_audit_event, text_sha256
 from app.services.case_resolution import reset_conversation_session, resolve_case
+from app.services.jev_answer_engine import JevAnswerEngine, JevChoiceClient
 from app.services.outcome import OutcomeService
 from app.services.persistence import (
     persist_inbound_message,
@@ -38,13 +39,15 @@ class RoutingService:
     ) -> None:
         self.session_factory = session_factory
         self.answer_engine_mode = answer_engine_mode or settings.answer_engine_mode
-        if self.answer_engine_mode != "simple_full_corpus_natural":
+        if self.answer_engine_mode not in {"simple_full_corpus_natural", "jev_selected_fact"}:
             raise ValueError(f"unsupported answer engine: {self.answer_engine_mode}")
         self.outcome = outcome or OutcomeService()
         self.policy = policy or PolicyService()
         self.tool_runtime = tool_runtime or ToolRuntimeService()
-        self.simple_answer_engine = simple_answer_engine or SimpleAnswerEngine(
-            client=get_llm_client(
+        if simple_answer_engine is not None:
+            self.simple_answer_engine = simple_answer_engine
+        else:
+            client = get_llm_client(
                 provider=settings.direct_llm_provider,
                 base_url=settings.direct_llm_base_url,
                 api_key=settings.direct_llm_api_key,
@@ -55,12 +58,19 @@ class RoutingService:
                 retry_backoff_seconds=settings.direct_llm_retry_backoff_seconds,
                 retry_deadline_seconds=settings.direct_llm_retry_deadline_seconds,
                 drop_params=settings.openai_compatible_drop_params,
-            ),
-            profile_root=settings.support_agent_profile_root,
-            max_corpus_chars=settings.simple_answer_max_corpus_chars,
-            temperature=settings.direct_llm_temperature,
-            preserve_grounded_text=True,
-        )
+            )
+            if self.answer_engine_mode == "jev_selected_fact":
+                self.simple_answer_engine = JevAnswerEngine(
+                    selector=JevChoiceClient(settings.jev_api_key or "", model=settings.jev_model),
+                    writer=client, profile_root=settings.support_agent_profile_root,
+                    max_corpus_chars=settings.simple_answer_max_corpus_chars,
+                )
+            else:
+                self.simple_answer_engine = SimpleAnswerEngine(
+                    client=client, profile_root=settings.support_agent_profile_root,
+                    max_corpus_chars=settings.simple_answer_max_corpus_chars,
+                    temperature=settings.direct_llm_temperature, preserve_grounded_text=True,
+                )
 
     def reset_session(self, payload: InboundMessage) -> dict:
         with self.session_factory() as session:
@@ -127,21 +137,33 @@ class RoutingService:
         route = {
             "route": route_name,
             "reply": {"response_text": response_text},
-            "reason": "simple_full_corpus_natural",
-            "route_reason": "simple_full_corpus_natural",
+            "reason": self.answer_engine_mode,
+            "route_reason": self.answer_engine_mode,
             "route_confidence": 1.0,
             "answer_engine": self.answer_engine_mode,
             "outcome_kind": kind,
             "source_refs": engine_result["source_refs"],
         }
-        retrieval = {"kb_status": "runtime_facts", "kb_snippets": [], "kb_skip_reason": "full_runtime_facts"}
+        retrieval = ({"kb_status": "runtime_facts", "kb_snippets": [], "kb_skip_reason": "full_runtime_facts"}
+                     if self.answer_engine_mode != "jev_selected_fact" else
+                     {"kb_status": "runtime_facts" if engine_result["source_refs"] else "not_used",
+                      "kb_snippets": [], "kb_skip_reason": "selected_fact"})
         outcome = self.outcome.execute(route, case, context, retrieval, payload.text)
         support_case = session.scalar(select(SupportCase).where(SupportCase.id == case["case_id"]))
         if support_case is not None:
             support_case.status = case["case_status"]
             support_case.route_mode = route_name
         response_strategy = {"answer_engine": self.answer_engine_mode, **engine_result["telemetry"]}
-        audit = build_audit_event(case, route, retrieval, outcome, {"turn_type": "simple_full_corpus"}, response_strategy)
+        audit = build_audit_event(case, route, retrieval, outcome,
+                                  {"turn_type": "jev_classified" if self.answer_engine_mode == "jev_selected_fact" else "simple_full_corpus"}, response_strategy)
+        if self.answer_engine_mode == "jev_selected_fact" and isinstance(response_strategy.get("selected_fact"), dict):
+            persist_workflow_event(session, case["case_id"], {
+                "trace_id": audit["trace_packet"]["trace_id"],
+                "selected_fact": response_strategy["selected_fact"],
+                "kb_sha256": response_strategy["kb_sha256"],
+                "turn_type": response_strategy.get("turn_type"),
+                "outcome_kind": kind,
+            }, event_type="jev_fact_selected", actor="system:routing")
         persist_workflow_event(session, case["case_id"], audit["response_strategy"], event_type="response_strategy_selected", actor="system:routing")
         persist_workflow_event(session, case["case_id"], audit, event_type="inbound_processed", actor="system:routing")
         session.commit()

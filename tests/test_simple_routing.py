@@ -1,6 +1,12 @@
+import json
 from pathlib import Path
 
+from sqlalchemy import select
+from test_jev_answer_engine import FACTS
+from test_jev_answer_engine import engine as make_jev_engine
+
 from app.core.db import Base, make_session_factory
+from app.models.workflow_event import WorkflowEvent
 from app.schemas.message import InboundMessage
 from app.services.routing import RoutingService
 from app.workers.main import process_once
@@ -50,6 +56,52 @@ def test_routing_rejects_retired_engine_mode(tmp_path: Path) -> None:
         assert str(exc) == "unsupported answer engine: agent_tool_loop"
     else:
         raise AssertionError("retired engine mode must be rejected")
+
+
+def test_opt_in_jev_route_uses_selected_engine_and_keeps_delivery_isolated(tmp_path: Path) -> None:
+    session_factory = make_session_factory(f"sqlite+pysqlite:///{tmp_path / 'jev.db'}")
+    Base.metadata.create_all(bind=session_factory.kw["bind"])
+    engine = RecordingSimpleEngine(kind="cannot_answer", response_text="Для уточнения вопроса можно позвонить в офис в рабочее время.")
+    routing = RoutingService(session_factory=session_factory, simple_answer_engine=engine, answer_engine_mode="jev_selected_fact")
+    result = routing.handle_inbound(InboundMessage(channel="internal_test", external_user_id="igor", external_chat_id="igor", text="Неизвестный вопрос"))
+    assert result["route"]["answer_engine"] == "jev_selected_fact"
+    assert result["outcome"]["outcome_type"] == "cannot_answer"
+    assert result["outcome"]["outcome_payload"]["response_text"] == "Здравствуйте! Для уточнения вопроса можно позвонить в офис в рабочее время."
+    assert len(engine.calls) == 1
+
+
+def test_jev_selected_fact_snapshot_is_persisted_for_later_review(tmp_path: Path) -> None:
+    session_factory = make_session_factory(f"sqlite+pysqlite:///{tmp_path / 'jev-telemetry.db'}")
+    Base.metadata.create_all(bind=session_factory.kw["bind"])
+    jev, _, _ = make_jev_engine(tmp_path, ["substantive", "jump.announcement"],
+        [json.dumps({"response_text": "Дата будет подтверждена в анонсе."}, ensure_ascii=False)])
+    routing = RoutingService(session_factory=session_factory, simple_answer_engine=jev, answer_engine_mode="jev_selected_fact")
+    result = routing.handle_inbound(InboundMessage(channel="internal_test", external_user_id="igor", external_chat_id="igor", text="Когда прыжки?"))
+    with session_factory() as session:
+        events = session.scalars(select(WorkflowEvent).where(WorkflowEvent.case_id == result["case"]["case_id"])).all()
+    snapshots = [event.payload for event in events if event.event_type == "jev_fact_selected"]
+    assert len(snapshots) == 1
+    assert snapshots[0]["selected_fact"] == FACTS[0]
+    assert snapshots[0]["kb_sha256"] == result["audit"]["response_strategy"]["kb_sha256"]
+    assert snapshots[0]["trace_id"] == result["audit"]["trace_packet"]["trace_id"]
+    assert result["audit"]["response_strategy"]["turn_type"] == "substantive"
+    assert result["audit"]["trace_packet"]["source_refs"] == ["jump.announcement"]
+
+
+def test_jev_fact_snapshot_is_persisted_when_writer_fails(tmp_path: Path) -> None:
+    session_factory = make_session_factory(f"sqlite+pysqlite:///{tmp_path / 'jev-error.db'}")
+    Base.metadata.create_all(bind=session_factory.kw["bind"])
+    jev, _, _ = make_jev_engine(tmp_path, ["substantive", "jump.announcement"], ["not json"])
+    routing = RoutingService(session_factory=session_factory, simple_answer_engine=jev, answer_engine_mode="jev_selected_fact")
+    result = routing.handle_inbound(InboundMessage(channel="internal_test", external_user_id="igor", external_chat_id="igor", text="Когда прыжки?"))
+    with session_factory() as session:
+        events = session.scalars(select(WorkflowEvent).where(WorkflowEvent.case_id == result["case"]["case_id"])).all()
+    snapshots = [event.payload for event in events if event.event_type == "jev_fact_selected"]
+    assert result["route"]["route"] == "retry_pending"
+    assert len(snapshots) == 1
+    assert snapshots[0]["selected_fact"] == FACTS[0]
+    assert snapshots[0]["trace_id"] == result["audit"]["trace_packet"]["trace_id"]
+    assert result["audit"]["response_strategy"]["contract_error"].startswith("jev_engine:fact_writer:")
 
 
 def test_worker_process_once_invokes_due_retry_without_consuming_fake_gateway_state() -> None:

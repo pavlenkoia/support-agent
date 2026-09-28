@@ -31,6 +31,13 @@ def validate_profile_source(source_root: Path) -> None:
         raise ProfileSourceError("SIMPLE_ANSWER_PROMPT.md contains a URL")
     if len(prompt) > 5000:
         raise ProfileSourceError("SIMPLE_ANSWER_PROMPT.md exceeds the generic contract size limit")
+    jev_prompts = (source_root / "JEV_ANSWER_PROMPT.md", source_root / "JEV_DIALOGUE_PROMPT.md")
+    if any(path.is_file() for path in jev_prompts):
+        for path in jev_prompts:
+            if not path.is_file() or not path.read_text(encoding="utf-8").strip():
+                raise ProfileSourceError(f"missing Jev profile source artifact: {path.name}")
+            if URL_RE.search(path.read_text(encoding="utf-8")):
+                raise ProfileSourceError(f"Jev profile source prompt contains a URL: {path.name}")
 
     kb_root = source_root / "kb"
     for directory in ("concepts", "entities", "comparisons", "queries"):
@@ -53,6 +60,9 @@ def build_runtime_profile(source_root: Path, target_root: Path) -> None:
         raise ProfileSourceError(f"target runtime profile already exists: {target_root}")
     target_root.mkdir(parents=True)
     shutil.copy2(source_root / "SIMPLE_ANSWER_PROMPT.md", target_root / "SIMPLE_ANSWER_PROMPT.md")
+    for name in ("JEV_ANSWER_PROMPT.md", "JEV_DIALOGUE_PROMPT.md"):
+        if (source_root / name).is_file():
+            shutil.copy2(source_root / name, target_root / name)
     profile = source_root / "profile.yaml"
     if profile.is_file():
         shutil.copy2(profile, target_root / "profile.yaml")

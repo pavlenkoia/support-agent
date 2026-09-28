@@ -1,7 +1,7 @@
 ---
 title: Фото- и видеосъёмка
 created: '2026-09-12'
-updated: '2026-09-12'
+updated: '2026-09-28'
 type: concept
 tags:
 - services
@@ -11,6 +11,8 @@ sources:
 - raw/documents/general-info-source.md
 - raw/documents/legacy-approved-policy-source.md
 - raw/documents/payment-methods-governor-2026-09-03.md
+- raw/documents/operator-case-vk-1402-community-post-repost.md
+- raw/documents/operator-case-vk-1402-review-photo-repost.md
 runtime_facts:
 - id: photo-video.jump-video
   text: Видеосъёмка прыжка доступна только для тандема и заказывается при предварительной записи.
@@ -24,6 +26,11 @@ runtime_facts:
   conditions: []
   source_refs:
   - photo-video:03
+- id: photo-video.community-repost
+  text: Пост, отзыв или фото после прыжка для публикации в группе размещают на своей странице с отметкой группы; после отметки группа делает репост.
+  conditions: []
+  source_refs:
+  - photo-video:04
 ---
 # Фото- и видеосъёмка
 
@@ -36,6 +43,9 @@ runtime_facts:
 
 ## Оформление и оплата съёмки
 - Фото- и видеосъёмка не оформляется онлайн вместе с услугой; её оформляют в офисе или кассе аэродрома. Оплата фото- и видеосъёмки производится только наличными в кассе аэродрома.
+
+## Пост, отзыв или фото в сообществе после прыжка
+- Пост, отзыв или фото после прыжка для публикации в группе размещают на своей странице с отметкой группы; после отметки группа делает репост.
 
 ## Примеры видео
 - Примеры видео с прыжков можно посмотреть в ленте группы ВКонтакте.

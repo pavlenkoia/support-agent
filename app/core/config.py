@@ -51,6 +51,8 @@ class Settings(BaseSettings):
     hermes_backend_mode: str = "stub"
     support_agent_profile_root: str = "/data/profile"
     answer_engine_mode: str = "simple_full_corpus_natural"
+    jev_api_key: str | None = None
+    jev_model: str = "typesafe/jev-1.13"
     simple_answer_max_corpus_chars: int = 50_000
     telegram_bot_token: str | None = None
     telegram_allowed_chats: str = ""
