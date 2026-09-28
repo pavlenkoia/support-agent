@@ -239,14 +239,8 @@ def test_production_customer_prompt_prohibits_unsolicited_questions_and_evaluati
     source_prompt = (REPOSITORY_ROOT / "deploy" / "profile-source" / "SIMPLE_ANSWER_PROMPT.md").read_text(encoding="utf-8")
 
 
-    required_contract = (
-        "Не придумывай информацию.",
-        "Если только прощается, ответь прощанием.",
-        "Если лишь подтверждает, что понял ответ, ответь коротко и нейтрально.",
-    )
-    normalized_source_prompt = " ".join(source_prompt.split())
-    for clause in required_contract:
-        assert clause in normalized_source_prompt
+    approved = (REPOSITORY_ROOT / "tests" / "fixtures" / "approved_system_prompt.md").read_text(encoding="utf-8")
+    assert source_prompt == approved
 
 
 def test_approved_prompt_texts_keep_emojis_in_editor_rule_only(tmp_path: Path) -> None:
@@ -254,12 +248,11 @@ def test_approved_prompt_texts_keep_emojis_in_editor_rule_only(tmp_path: Path) -
     engine, client = make_engine("Ответ.", profile_root=make_profile_root(tmp_path), preserve_grounded_text=True)
     engine.answer(question="Вопрос", history=[])
     rule = json.loads(str(client.calls[0]["user_prompt"]))["output_contract"]["rule"]
-    assert "Не придумывай информацию" in source
-    assert "ответь прощанием" in source
+    assert "Даже короткое уточнение без вопросительного знака считай запросом" in source
+    assert "Если прямого ответа нет" in source
     assert "Не используй эмодзи" not in source
-    assert "Не придумывай информацию" in rule
+    assert rule == (REPOSITORY_ROOT / "tests" / "fixtures" / "approved_output_contract_rule.txt").read_text(encoding="utf-8").strip()
     assert "Не используй эмодзи" in rule
-    assert "если только прощается — прощанием" in rule
 
 
 def test_user_prompt_contract_includes_evidence_shape_and_exact_quote_requirement(tmp_path: Path) -> None:
