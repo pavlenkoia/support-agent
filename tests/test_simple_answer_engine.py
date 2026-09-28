@@ -211,7 +211,9 @@ def test_natural_full_corpus_prompt_requires_natural_text_with_exact_evidence(tm
 
     contract = json.loads(str(client.calls[0]["user_prompt"]))["output_contract"]
     assert contract["response_text"] == "non-empty natural customer response"
-    assert contract["rule"] == (REPOSITORY_ROOT / "tests" / "fixtures" / "approved_output_contract_rule.txt").read_text(encoding="utf-8").strip()
+    assert contract["source_refs"] == ["fact ID"]
+    assert contract["evidence"] == [{"fact_id": "fact ID", "quote": "exact fact text substring"}]
+    assert "rule" not in contract
 
 
 def test_natural_full_corpus_uses_its_own_customer_prompt(tmp_path: Path) -> None:
@@ -252,9 +254,7 @@ def test_only_mounted_prompt_owns_customer_behavior(tmp_path: Path) -> None:
     assert "Даже короткое уточнение без вопросительного знака считай запросом" in source
     assert "Если прямого ответа нет" in source
     assert "Не используй эмодзи" in source
-    assert contract["rule"] == "Заполни response_text, source_refs и evidence в указанном формате; клиенту предназначен только response_text."
-    assert "Не используй эмодзи" not in contract["rule"]
-    assert "Если база" not in contract["rule"]
+    assert set(contract) == {"response_text", "source_refs", "evidence"}
     assert payload["knowledge_base"]
 
 

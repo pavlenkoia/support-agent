@@ -1,1 +1,0 @@
-Заполни response_text, source_refs и evidence в указанном формате; клиенту предназначен только response_text.

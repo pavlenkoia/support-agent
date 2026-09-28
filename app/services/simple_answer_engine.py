@@ -73,7 +73,6 @@ class SimpleAnswerEngine:
                 "response_text": "non-empty natural customer response",
                 "source_refs": ["fact ID"],
                 "evidence": [{"fact_id": "fact ID", "quote": "exact fact text substring"}],
-                "rule": "Заполни response_text, source_refs и evidence в указанном формате; клиенту предназначен только response_text.",
             }
             if self.preserve_grounded_text
             else {
