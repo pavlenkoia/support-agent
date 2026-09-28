@@ -243,16 +243,19 @@ def test_production_customer_prompt_prohibits_unsolicited_questions_and_evaluati
     assert source_prompt == approved
 
 
-def test_approved_prompt_texts_keep_emojis_in_editor_rule_only(tmp_path: Path) -> None:
+def test_only_mounted_prompt_owns_customer_behavior(tmp_path: Path) -> None:
     source = (REPOSITORY_ROOT / "deploy" / "profile-source" / "SIMPLE_ANSWER_PROMPT.md").read_text(encoding="utf-8")
     engine, client = make_engine("Ответ.", profile_root=make_profile_root(tmp_path), preserve_grounded_text=True)
     engine.answer(question="Вопрос", history=[])
-    rule = json.loads(str(client.calls[0]["user_prompt"]))["output_contract"]["rule"]
+    payload = json.loads(str(client.calls[0]["user_prompt"]))
+    contract = payload["output_contract"]
     assert "Даже короткое уточнение без вопросительного знака считай запросом" in source
     assert "Если прямого ответа нет" in source
-    assert "Не используй эмодзи" not in source
-    assert rule == (REPOSITORY_ROOT / "tests" / "fixtures" / "approved_output_contract_rule.txt").read_text(encoding="utf-8").strip()
-    assert "Не используй эмодзи" in rule
+    assert "Не используй эмодзи" in source
+    assert contract["rule"] == "Заполни response_text, source_refs и evidence в указанном формате; клиенту предназначен только response_text."
+    assert "Не используй эмодзи" not in contract["rule"]
+    assert "Если база" not in contract["rule"]
+    assert payload["knowledge_base"]
 
 
 def test_user_prompt_contract_includes_evidence_shape_and_exact_quote_requirement(tmp_path: Path) -> None:
