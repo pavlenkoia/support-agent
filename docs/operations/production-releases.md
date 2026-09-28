@@ -12,7 +12,7 @@ python3 scripts/release.py
 
 ## KB-only maintenance (no application rollout)
 
-The active one-call `simple_full_corpus_natural` engine uses the whole compiled corpus and `SIMPLE_ANSWER_PROMPT.md`. Nine compact fact pages cover certificates, equipment, flights, jumps, location-office, payments, photo-video, schedule and shared-restrictions. Preserve subjects and conditions. `raw/fact-view-provenance/coverage-ledger.json` is an immutable migration record, not a second editable knowledge authority.
+Production currently uses `jev_selected_fact`: Jev selects one fact from the generated corpus; the answer writer receives that fact, its conditions and bounded dialogue. The former `simple_full_corpus_natural` mode remains available but is not selected in production. Nine compact fact pages cover certificates, equipment, flights, jumps, location-office, payments, photo-video, schedule and shared-restrictions. Preserve subjects and conditions. `raw/fact-view-provenance/coverage-ledger.json` is an immutable migration record, not a second editable knowledge authority.
 
 The external governor uses `support_kb_bundle`:
 1. `list` returns current pages; `read` returns content and `content_sha256`.
@@ -29,15 +29,17 @@ Compact knowledge is an incremental improvement, not a semantic guarantee. Price
 
 The application release procedure below is for code/image changes, not routine KB-only maintenance.
 
-The command verifies the mounted profile against this same tracked directory, obtains the full Git SHA, builds release-tagged images for `app`, `worker`, `vk-worker`, `viewer-web`, and `viewer-push-worker`, and force-recreates exactly those services. PostgreSQL is not recreated. The polling-liveness gate allows up to 150 seconds for an initial Telegram Long Poll plus startup.
+The command verifies the mounted profile against this same tracked directory, obtains the full Git SHA, builds release-tagged images for `app`, `worker`, `vk-worker`, `viewer-web`, and `viewer-push-worker`, and force-recreates exactly those services. PostgreSQL is not recreated. The polling-liveness gate allows up to 150 seconds for an initial Telegram Long Poll plus startup. Check the effective `ANSWER_ENGINE_MODE` in each executor after recreation; the code default alone does not establish production mode.
 
 A release is successful only when the command exits with `RELEASE SUCCESS` and writes a JSON receipt beneath `${SUPPORT_AGENT_RUNTIME_ROOT_HOST:-/home/tian/support-agent-runtime}/releases/`.
 
 ## Hard verification gate
 
-The command fails when the single tracked/mounted profile tree is empty or inconsistent, or when any application-plane service is missing, not running, was not recreated for the operation, has a mismatched OCI revision label, or (for Python runtime services) has a mismatched complete `app/**/*.py` source manifest. It additionally requires backend health, Telegram/VK polling liveness, and a controlled final-model failure probe in `app`, `worker`, and `vk-worker`; that probe must return `retry_pending` with empty customer text.
+The command fails when the single tracked/mounted profile tree is empty or inconsistent, or when any application-plane service is missing, not running, was not recreated for the operation, has a mismatched OCI revision label, or (for Python runtime services) has a mismatched complete `app/**/*.py` source manifest. It additionally requires backend health and Telegram/VK polling liveness. The current release script does **not** run a semantic no-send probe; run it separately through the production internal probe and inspect the persisted workflow events with zero customer transport sends.
 
 `docker compose ps`, a successful build, and a standalone `/health` response are insufficient evidence of a completed production release.
+
+The Jev code release `a9e0fa7` used an exceptional image build based on the preceding production image because the normal build could not fetch an unchanged build dependency. No dependencies or migrations changed: the released images include the committed `app/` tree and the same installed environment; the successful receipt is under the external runtime root. This is a historical build note, **not** a blanket replacement for the normal command. Do not use the base-image method if dependencies, migrations or entry points have changed.
 
 ## Rollback
 
