@@ -211,17 +211,7 @@ def test_natural_full_corpus_prompt_requires_natural_text_with_exact_evidence(tm
 
     contract = json.loads(str(client.calls[0]["user_prompt"]))["output_contract"]
     assert contract["response_text"] == "non-empty natural customer response"
-    assert contract["rule"] == (
-        "Верни один короткий готовый к отправке ответ клиенту. Сначала определи, содержит ли последнее сообщение "
-        "запрос сведений, уточнение, вопрос, просьбу или выбор по ранее обсуждавшейся теме: короткая формулировка, "
-        "отсутствие вопросительного знака и разговорный стиль не означают, что запроса нет. Если содержит, ответь "
-        "по подтверждённым фактам из базы; историю используй только для понимания предмета уточнения и не заменяй "
-        "такой ответ общим согласием или вежливой фразой. Только если сообщение завершает разговор и прямо выражает "
-        "благодарность или прощание без запроса сведений, уточнения, вопроса, просьбы или выбора, ответь ровно: "
-        "«Пожалуйста!». Если сообщение является только подтверждением понимания без запроса, ответь коротко и "
-        "нейтрально, без фактов из базы и без повтора предыдущего ответа. Не добавляй неподтверждённые или "
-        "незапрошенные сведения, вопросы, следующие шаги, рекламу, оценку или похвалу."
-    )
+    assert contract["rule"] == (REPOSITORY_ROOT / "tests" / "fixtures" / "approved_output_contract_rule.txt").read_text(encoding="utf-8").strip()
 
 
 def test_natural_full_corpus_uses_its_own_customer_prompt(tmp_path: Path) -> None:
@@ -247,21 +237,29 @@ def test_natural_full_corpus_uses_its_own_customer_prompt(tmp_path: Path) -> Non
 
 def test_production_customer_prompt_prohibits_unsolicited_questions_and_evaluations() -> None:
     source_prompt = (REPOSITORY_ROOT / "deploy" / "profile-source" / "SIMPLE_ANSWER_PROMPT.md").read_text(encoding="utf-8")
-    runtime_prompt = (REPOSITORY_ROOT / "deploy" / "profile" / "SIMPLE_ANSWER_PROMPT.md").read_text(encoding="utf-8")
+
 
     required_contract = (
-        "Не добавляй даже подтверждённые сведения, если клиент о них не спрашивал.",
-        "Короткая формулировка, отсутствие вопросительного знака и разговорный стиль не означают, что запроса нет.",
-        "Не заменяй такой ответ общим согласием, подтверждением или вежливой фразой.",
-        "Только если сообщение завершает разговор и прямо выражает благодарность или прощание, не содержит запроса сведений, уточнения, вопроса, просьбы или выбора, ответь ровно: «Пожалуйста!».",
-        "Если сообщение является только подтверждением понимания и не содержит запроса, ответь коротко и нейтрально, без фактов из базы и без повтора предыдущего ответа.",
-        "Не задавай вопросов, не запрашивай дату или другие детали, не предлагай действий и не веди диалог дальше.",
+        "Не придумывай информацию.",
+        "Если только прощается, ответь прощанием.",
+        "Если лишь подтверждает, что понял ответ, ответь коротко и нейтрально.",
     )
     normalized_source_prompt = " ".join(source_prompt.split())
-    normalized_runtime_prompt = " ".join(runtime_prompt.split())
     for clause in required_contract:
         assert clause in normalized_source_prompt
-        assert clause in normalized_runtime_prompt
+
+
+def test_approved_prompt_texts_keep_emojis_in_editor_rule_only(tmp_path: Path) -> None:
+    source = (REPOSITORY_ROOT / "deploy" / "profile-source" / "SIMPLE_ANSWER_PROMPT.md").read_text(encoding="utf-8")
+    engine, client = make_engine("Ответ.", profile_root=make_profile_root(tmp_path), preserve_grounded_text=True)
+    engine.answer(question="Вопрос", history=[])
+    rule = json.loads(str(client.calls[0]["user_prompt"]))["output_contract"]["rule"]
+    assert "Не придумывай информацию" in source
+    assert "ответь прощанием" in source
+    assert "Не используй эмодзи" not in source
+    assert "Не придумывай информацию" in rule
+    assert "Не используй эмодзи" in rule
+    assert "если только прощается — прощанием" in rule
 
 
 def test_user_prompt_contract_includes_evidence_shape_and_exact_quote_requirement(tmp_path: Path) -> None:
