@@ -14,6 +14,7 @@ def get_llm_client(
     retry_backoff_seconds: float = 0.0,
     retry_deadline_seconds: float | None = None,
     drop_params: bool = False,
+    default_think: bool = False,
 ) -> BaseLLMClient:
     normalized_provider = provider.strip().lower()
     if normalized_provider == "stub":
@@ -37,6 +38,7 @@ def get_llm_client(
             retry_backoff_seconds=retry_backoff_seconds,
             retry_deadline_seconds=retry_deadline_seconds,
             drop_params=drop_params,
+            default_think=default_think,
         )
 
     raise ValueError(f"Unsupported LLM provider: {provider}")

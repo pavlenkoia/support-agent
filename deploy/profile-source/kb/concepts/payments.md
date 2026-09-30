@@ -14,8 +14,9 @@ sources:
 - raw/documents/payment-methods-governor-2026-09-03.md
 runtime_facts:
 - id: payment.price-list
-  text: 'Актуальный прайс опубликован по ссылке: https://vk.cc/cYzS5j.'
-  conditions: []
+  text: 'Актуальные цены на все услуги и дополнительные услуги опубликованы по ссылке: https://vk.cc/cYzS5j.'
+  conditions:
+  - 'Применяется к вопросам о цене, стоимости, сумме или скидке услуг и дополнительных услуг.'
   source_refs:
   - payment:01
 - id: payment.methods.service

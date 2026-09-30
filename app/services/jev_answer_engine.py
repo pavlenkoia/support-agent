@@ -95,13 +95,21 @@ class JevAnswerEngine:
                 raise ValueError("invalid turn type")
             if turn_type != "substantive":
                 stage = "dialogue_writer"
+                user_fields = {"question": question, "turn_type": turn_type,
+                    "role": profile.get("role"), "scope": profile["scope"],
+                    "output_contract": {"response_text": "short natural reply without new business facts"}}
+                if turn_type != "social":
+                    user_fields["history"] = projected_history
                 raw = self.writer.generate(system_prompt=self._prompt("JEV_DIALOGUE_PROMPT.md"),
-                    user_prompt=json.dumps({"question": question, "history": projected_history, "turn_type": turn_type,
-                        "role": profile.get("role"), "scope": profile["scope"],
-                        "output_contract": {"response_text": "short natural reply without new business facts"}}, ensure_ascii=False),
+                    user_prompt=json.dumps(user_fields, ensure_ascii=False),
                     temperature=0.0, response_format={"type": "json_object"})
-                parsed = SimpleAnswerEngine._parse_json_object(raw)
-                text = parsed.get("response_text")
+                try:
+                    text = SimpleAnswerEngine._parse_json_object(raw).get("response_text")
+                except json.JSONDecodeError:
+                    plain = raw.strip()
+                    if turn_type != "social" or not plain or len(plain) > 500 or "\n" in plain or plain.startswith(("{", "[", "```")):
+                        raise
+                    text = plain
                 if not isinstance(text, str) or not text.strip():
                     raise ValueError("invalid dialogue reply")
                 return self._result("social_reply" if turn_type == "social" else "out_of_scope", text.strip(),
@@ -139,7 +147,16 @@ class JevAnswerEngine:
                     "selected_facts": [selected],
                     "output_contract": {"response_text": "natural grounded reply limited to selected fact"}
                 }, ensure_ascii=False), temperature=0.0, response_format={"type": "json_object"})
-            parsed = SimpleAnswerEngine._parse_json_object(raw)
+            try:
+                parsed = SimpleAnswerEngine._parse_json_object(raw)
+                content_format = "json"
+            except json.JSONDecodeError:
+                plain = raw.strip()
+                if (not plain or len(plain) > 1200 or "\n" in plain
+                        or plain.startswith(("{", "[", "```", "<think>"))):
+                    raise
+                parsed = {"response_text": plain}
+                content_format = "plain"
             text = parsed.get("response_text")
             evidence = parsed.get("evidence")
             if (not isinstance(text, str) or not text.strip() or
@@ -147,7 +164,7 @@ class JevAnswerEngine:
                     or not isinstance(evidence[0], dict) or evidence[0].get("fact_id") != choice))):
                 raise ValueError("unverified selected fact reply")
             return self._result("grounded_answer", text.strip(), [choice], **decision,
-                                turn_type=turn_type, logical_llm_call_count=1)
+                                writer_content_format=content_format, turn_type=turn_type, logical_llm_call_count=1)
         except Exception as exc:
             # Transport and schema errors do not mean that knowledge is absent.
             return self._result("retry_pending", contract_error=f"jev_engine:{stage}:{type(exc).__name__}",

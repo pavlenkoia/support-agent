@@ -1,7 +1,7 @@
 ---
 title: Аэродром и офис
 created: '2026-09-12'
-updated: '2026-09-28'
+updated: '2026-09-29'
 type: concept
 tags:
 - services
@@ -10,7 +10,6 @@ sources:
 - raw/documents/faq-main-source.md
 - raw/documents/general-info-source.md
 - raw/documents/legacy-approved-policy-source.md
-- raw/documents/operator-case-vk-1384-unclear-code-message.md
 - raw/documents/operator-case-vk-1414-public-transport-airfield.md
 runtime_facts:
 - id: service.location.kalachevo
@@ -46,12 +45,6 @@ runtime_facts:
   - Офис работает с понедельника по пятницу с 09:00 до 17:00.
   source_refs:
   - location:06
-- id: communication.unclear-code
-  text: Если сообщение клиента непонятное и похоже на код или случайный набор символов, нужно уточнить, что интересует клиента.
-  conditions:
-  - На такое сообщение не отвечают «пожалуйста».
-  source_refs:
-  - location:07
 ---
 # Аэродром и офис
 
@@ -72,10 +65,6 @@ runtime_facts:
 
 ## Телефон и визит в офис
 - Телефон офиса: +7 (351) 214-30-30. Перед визитом рекомендуется предварительно позвонить. Если по телефону не отвечают, звонок повторяют в рабочее время.
-
-## Непонятные сообщения
-- Если сообщение клиента непонятное и похоже на код или случайный набор символов, нужно уточнить, что интересует клиента.
-- На такое сообщение не нужно отвечать «пожалуйста».
 
 ## Другие вопросы, которыми занимается офис
 - Офис занимается нестандартными вопросами и индивидуальными договорённостями.

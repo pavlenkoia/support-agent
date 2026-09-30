@@ -39,6 +39,7 @@ class OpenAICompatibleClient(BaseLLMClient):
         retry_deadline_seconds: float | None = None,
         rate_limit_cooldown_seconds: float = 60.0,
         drop_params: bool = False,
+        default_think: bool = False,
     ) -> None:
         self.provider = provider
         self.base_url = base_url.rstrip("/")
@@ -63,6 +64,7 @@ class OpenAICompatibleClient(BaseLLMClient):
         self.retry_deadline_seconds = None if retry_deadline_seconds is None else max(0.0, float(retry_deadline_seconds))
         self.rate_limit_cooldown_seconds = max(0.0, float(rate_limit_cooldown_seconds))
         self.drop_params = bool(drop_params)
+        self.default_think = default_think
 
     def _get_active_key_index(self) -> int:
         with self._pool_lock:
@@ -203,6 +205,7 @@ class OpenAICompatibleClient(BaseLLMClient):
         tool_choice: str | dict[str, Any] | None = None,
         parallel_tool_calls: bool | None = None,
         messages: list[dict[str, Any]] | None = None,
+        think: bool | None = None,
     ) -> str:
         started = time.perf_counter()
         deadline = started + self.retry_deadline_seconds if self.retry_deadline_seconds is not None else None
@@ -211,9 +214,7 @@ class OpenAICompatibleClient(BaseLLMClient):
             "model": self.model,
             "temperature": temperature,
             "stream": False,
-            # Keep customer turns bounded: the provider must return the
-            # requested compact response rather than an unbounded reasoning run.
-            "think": False,
+            "think": self.default_think if think is None else think,
             "messages": messages if messages is not None else [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
@@ -413,12 +414,9 @@ class OpenAICompatibleClient(BaseLLMClient):
             content = message.get("content") if isinstance(message, dict) else None
             if isinstance(content, str) and content.strip():
                 return content
-            # Ollama/OpenAI-compatible reasoning models may put their entire
-            # structured completion in reasoning_content and leave content empty.
-            reasoning_content = message.get("reasoning_content") or message.get("reasoning")
-            if isinstance(reasoning_content, str) and reasoning_content.strip():
-                return reasoning_content
-            raise RuntimeError("LLM response has neither content nor reasoning_content")
+            # A reasoning field is never a customer-facing answer, regardless of
+            # whether thinking was explicitly requested or enabled by default.
+            raise RuntimeError("LLM response has no answer content")
         except (KeyError, IndexError, TypeError) as exc:  # pragma: no cover - malformed response path
             raise RuntimeError(f"Malformed LLM response: {data}") from exc
 
@@ -439,6 +437,7 @@ class StubLLMClient(BaseLLMClient):
         tool_choice: str | dict[str, Any] | None = None,
         parallel_tool_calls: bool | None = None,
         messages: list[dict[str, Any]] | None = None,
+        think: bool = False,
     ) -> str:
         _ = (system_prompt, temperature, response_format, tools, tool_choice)
         self._set_last_call_info(

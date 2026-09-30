@@ -20,5 +20,6 @@ class BaseLLMClient:
         tool_choice: str | dict[str, Any] | None = None,
         parallel_tool_calls: bool | None = None,
         messages: list[dict[str, Any]] | None = None,
+        think: bool | None = None,
     ) -> str:  # pragma: no cover - interface stub
         raise NotImplementedError

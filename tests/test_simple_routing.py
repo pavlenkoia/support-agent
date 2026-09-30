@@ -91,7 +91,7 @@ def test_jev_selected_fact_snapshot_is_persisted_for_later_review(tmp_path: Path
 def test_jev_fact_snapshot_is_persisted_when_writer_fails(tmp_path: Path) -> None:
     session_factory = make_session_factory(f"sqlite+pysqlite:///{tmp_path / 'jev-error.db'}")
     Base.metadata.create_all(bind=session_factory.kw["bind"])
-    jev, _, _ = make_jev_engine(tmp_path, ["substantive", "jump.announcement"], ["not json"])
+    jev, _, _ = make_jev_engine(tmp_path, ["substantive", "jump.announcement"], ['{"response_text": invalid}'])
     routing = RoutingService(session_factory=session_factory, simple_answer_engine=jev, answer_engine_mode="jev_selected_fact")
     result = routing.handle_inbound(InboundMessage(channel="internal_test", external_user_id="igor", external_chat_id="igor", text="Когда прыжки?"))
     with session_factory() as session:

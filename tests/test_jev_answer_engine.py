@@ -100,6 +100,24 @@ def test_social_acknowledgement_is_not_flood_or_fact_selection(tmp_path):
     assert "knowledge_base" not in writer.calls[0]["user_prompt"]
 
 
+def test_social_writer_uses_latest_turn_without_history_and_accepts_plain_content(tmp_path):
+    llm, selector, writer = engine(tmp_path, ["social"], ["Пожалуйста!"])
+    result = llm.answer(question="Понял, спасибо", history=[{"role": "user", "content": "Вопрос о сертификате"}])
+    assert result["kind"] == "social_reply"
+    assert result["response_text"] == "Пожалуйста!"
+    assert selector.calls[0]["state"]["history"] == [{"role": "user", "content": "Вопрос о сертификате"}]
+    assert "history" not in json.loads(writer.calls[0]["user_prompt"])
+    assert "think" not in writer.calls[0]
+
+
+def test_social_writer_rejects_empty_or_structured_invalid_content(tmp_path):
+    for raw in ("", '{"response_text": invalid}', "размышляю\nа потом отвечу"):
+        llm, _, _ = engine(tmp_path / str(len(raw)), ["social"], [raw])
+        result = llm.answer(question="Спасибо", history=[])
+        assert result["kind"] == "retry_pending"
+        assert result["response_text"] == ""
+
+
 def test_offtopic_and_flood_stay_distinct_from_no_answer(tmp_path):
     for kind in ("off_topic", "flood"):
         llm, selector, writer = engine(tmp_path / kind, [kind], [json.dumps({"response_text": "Я помогу с вопросами по услугам нашего клуба."}, ensure_ascii=False)])
@@ -110,8 +128,18 @@ def test_offtopic_and_flood_stay_distinct_from_no_answer(tmp_path):
         assert len(selector.calls) == 1
 
 
-def test_plain_text_or_conflicting_fact_id_is_not_delivered_as_fact(tmp_path):
-    for output in ("Звоните по выдуманному номеру.", json.dumps({"response_text": "Звоните по выдуманному номеру.", "evidence": [{"fact_id": "certificate.validity", "quote": "Другое"}]}, ensure_ascii=False)):
+def test_plain_and_json_content_from_same_selected_fact_are_delivered(tmp_path):
+    answer = "Дата прыжков подтверждается в анонсе группы за несколько дней до выходных."
+    for index, output in enumerate((answer, json.dumps({"response_text": answer}, ensure_ascii=False))):
+        llm, _, _ = engine(tmp_path / str(index), ["substantive", "jump.announcement"], [output])
+        result = llm.answer(question="Когда подтвердится дата прыжков?", history=[])
+        assert result["kind"] == "grounded_answer"
+        assert result["response_text"] == answer
+        assert result["source_refs"] == ["jump.announcement"]
+
+
+def test_invalid_structured_content_or_conflicting_fact_id_is_not_delivered(tmp_path):
+    for output in ('{"response_text": invalid}', json.dumps({"response_text": "Звоните по выдуманному номеру.", "evidence": [{"fact_id": "certificate.validity", "quote": "Другое"}]}, ensure_ascii=False)):
         llm, _, _ = engine(tmp_path / str(len(output)), ["substantive", "jump.announcement"], [output])
         result = llm.answer(question="Будут прыжки 26-го?", history=[])
         assert result["kind"] == "retry_pending"
@@ -141,3 +169,40 @@ def test_profile_build_includes_both_jev_prompts(tmp_path):
     build_runtime_profile(source, target)
     assert (target / "JEV_ANSWER_PROMPT.md").read_text() == "Selected fact contract"
     assert (target / "JEV_DIALOGUE_PROMPT.md").read_text() == "Social contract"
+
+
+def test_selected_fact_prompt_forbids_emotional_self_expression():
+    source = Path(__file__).resolve().parents[1] / "deploy" / "profile-source" / "JEV_ANSWER_PROMPT.md"
+    prompt = source.read_text(encoding="utf-8")
+    assert "Не выражай эмоций, личного отношения" in prompt
+    assert "не как источник фактов или готовых формулировок" in prompt
+    assert "не обещай помочь" in prompt
+    assert "Не задавай клиенту встречных вопросов" in prompt
+
+
+def test_social_prompt_is_short_and_scope_based():
+    source = Path(__file__).resolve().parents[1] / "deploy" / "profile-source" / "JEV_DIALOGUE_PROMPT.md"
+    prompt = source.read_text(encoding="utf-8")
+    assert "Область поддержки указана в переданном scope" in prompt
+    assert "одной короткой фразой" in prompt
+    assert "Не повторяй слова клиента" in prompt
+    assert "приглашение обратиться снова" in prompt
+    assert "парашютных прыжков" not in prompt
+
+
+def test_prompts_do_not_ask_customers_followup_questions():
+    root = Path(__file__).resolve().parents[1] / "deploy" / "profile-source"
+    answer = (root / "JEV_ANSWER_PROMPT.md").read_text(encoding="utf-8")
+    dialogue = (root / "JEV_DIALOGUE_PROMPT.md").read_text(encoding="utf-8")
+    assert "задай только один прямой нейтральный вопрос" not in answer
+    assert "попроси его уточнить" not in dialogue
+
+
+def test_dialogue_policies_are_not_selectable_kb_facts(tmp_path):
+    from scripts.build_runtime_profile import build_runtime_profile
+    source = Path(__file__).resolve().parents[1] / "deploy" / "profile-source"
+    compiled = build_runtime_profile(source, tmp_path / "compiled")
+    facts = json.loads((tmp_path / "compiled" / "kb" / "knowledge-base.v1.json").read_text(encoding="utf-8"))["facts"]
+    ids = {fact["id"] for fact in facts}
+    assert "communication.generic-interest" not in ids
+    assert "communication.unclear-code" not in ids

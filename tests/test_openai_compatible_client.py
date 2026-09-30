@@ -495,3 +495,47 @@ def test_openai_compatible_client_can_request_litellm_drop_params(monkeypatch) -
     assert captured_payloads[0]["drop_params"] is True
     assert captured_payloads[0]["parallel_tool_calls"] is False
     assert captured_payloads[0]["think"] is False
+
+
+def test_thinking_returns_only_content_and_never_reasoning(monkeypatch) -> None:
+    captured_payloads = []
+    responses = iter([
+        {"choices": [{"message": {"content": "Пожалуйста!", "reasoning_content": "private reasoning"}}]},
+        {"choices": [{"message": {"content": "", "reasoning_content": "private reasoning"}}]},
+    ])
+
+    def fake_urlopen(req, timeout):
+        captured_payloads.append(json.loads(req.data.decode("utf-8")))
+        return FakeResponse(next(responses))
+
+    monkeypatch.setattr("app.integrations.llm.openai_compatible.request.urlopen", fake_urlopen)
+    client = OpenAICompatibleClient(provider="openai_compatible", base_url="https://example.test/v1", api_key="token", model="test-model")
+    assert client.generate(system_prompt="sys", user_prompt="usr", think=True) == "Пожалуйста!"
+    with pytest.raises(RuntimeError, match="no answer content"):
+        client.generate(system_prompt="sys", user_prompt="usr", think=True)
+    assert [item["think"] for item in captured_payloads] == [True, True]
+
+
+def test_default_thinking_can_be_toggled_and_overridden(monkeypatch) -> None:
+    payloads = []
+    def fake_urlopen(req, timeout):
+        payloads.append(json.loads(req.data.decode("utf-8")))
+        return FakeResponse({"choices": [{"message": {"content": "ok"}}]})
+    monkeypatch.setattr("app.integrations.llm.openai_compatible.request.urlopen", fake_urlopen)
+    enabled = OpenAICompatibleClient(provider="openai_compatible", base_url="https://example.test/v1", api_key="token", model="test-model", default_think=True)
+    disabled = OpenAICompatibleClient(provider="openai_compatible", base_url="https://example.test/v1", api_key="token", model="test-model", default_think=False)
+    enabled.generate(system_prompt="sys", user_prompt="usr")
+    enabled.generate(system_prompt="sys", user_prompt="usr", think=False)
+    disabled.generate(system_prompt="sys", user_prompt="usr")
+    assert [p["think"] for p in payloads] == [True, False, False]
+
+
+def test_default_thinking_never_uses_reasoning_when_content_is_empty(monkeypatch) -> None:
+    def fake_urlopen(req, timeout):
+        return FakeResponse({"choices": [{"message": {"content": "", "reasoning_content": "private reasoning"}}]})
+    monkeypatch.setattr("app.integrations.llm.openai_compatible.request.urlopen", fake_urlopen)
+    client = OpenAICompatibleClient(provider="openai_compatible", base_url="https://example.test/v1", api_key="token", model="test-model", default_think=True)
+    with pytest.raises(RuntimeError, match="no answer content"):
+        client.generate(system_prompt="sys", user_prompt="usr")
+    with pytest.raises(RuntimeError, match="no answer content"):
+        client.generate(system_prompt="sys", user_prompt="usr", think=False)
