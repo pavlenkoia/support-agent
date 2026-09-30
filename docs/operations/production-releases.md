@@ -29,6 +29,8 @@ Compact knowledge is an incremental improvement, not a semantic guarantee. Price
 
 The application release procedure below is for code/image changes, not routine KB-only maintenance.
 
+When shipping thinking-safety code, keep `DIRECT_LLM_THINK_ENABLED=false` in production until the proxy/backend is proven to honor the configured completion budget. `DIRECT_LLM_THINK_MAX_OUTPUT_TOKENS` defaults to 1024 and only affects thinking calls (and their single bounded non-thinking fallback after an explicit `length`). A client-side timeout does not prove inference cancellation; do not run unbounded thinking replays through the shared single-slot provider as a release smoke test.
+
 The command verifies the mounted profile against this same tracked directory, obtains the full Git SHA, builds release-tagged images for `app`, `worker`, `vk-worker`, `viewer-web`, and `viewer-push-worker`, and force-recreates exactly those services. PostgreSQL is not recreated. The polling-liveness gate allows up to 150 seconds for an initial Telegram Long Poll plus startup. Check the effective `ANSWER_ENGINE_MODE` in each executor after recreation; the code default alone does not establish production mode.
 
 A release is successful only when the command exits with `RELEASE SUCCESS` and writes a JSON receipt beneath `${SUPPORT_AGENT_RUNTIME_ROOT_HOST:-/home/tian/support-agent-runtime}/releases/`.

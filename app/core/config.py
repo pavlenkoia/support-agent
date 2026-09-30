@@ -1,3 +1,4 @@
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -29,6 +30,7 @@ class Settings(BaseSettings):
     direct_llm_model: str = "stub"
     direct_llm_temperature: float = 0.0
     direct_llm_think_enabled: bool = False
+    direct_llm_think_max_output_tokens: int = Field(default=1024, ge=1, le=4096)
     direct_llm_timeout_seconds: int = 45
     direct_llm_max_retries: int = 3
     direct_llm_retry_backoff_seconds: float = 0.75

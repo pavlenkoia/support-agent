@@ -40,6 +40,7 @@ class OpenAICompatibleClient(BaseLLMClient):
         rate_limit_cooldown_seconds: float = 60.0,
         drop_params: bool = False,
         default_think: bool = False,
+        thinking_max_output_tokens: int = 1024,
     ) -> None:
         self.provider = provider
         self.base_url = base_url.rstrip("/")
@@ -65,6 +66,9 @@ class OpenAICompatibleClient(BaseLLMClient):
         self.rate_limit_cooldown_seconds = max(0.0, float(rate_limit_cooldown_seconds))
         self.drop_params = bool(drop_params)
         self.default_think = default_think
+        if not 1 <= thinking_max_output_tokens <= 4096:
+            raise ValueError("thinking_max_output_tokens must be between 1 and 4096")
+        self.thinking_max_output_tokens = thinking_max_output_tokens
 
     def _get_active_key_index(self) -> int:
         with self._pool_lock:
@@ -206,20 +210,25 @@ class OpenAICompatibleClient(BaseLLMClient):
         parallel_tool_calls: bool | None = None,
         messages: list[dict[str, Any]] | None = None,
         think: bool | None = None,
+        _fallback_attempt: bool = False,
     ) -> str:
         started = time.perf_counter()
         deadline = started + self.retry_deadline_seconds if self.retry_deadline_seconds is not None else None
         endpoint = f"{self.base_url}/chat/completions"
+        thinking = self.default_think if think is None else think
         payload: dict[str, Any] = {
             "model": self.model,
             "temperature": temperature,
             "stream": False,
-            "think": self.default_think if think is None else think,
+            "think": thinking,
             "messages": messages if messages is not None else [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
         }
+        if thinking or _fallback_attempt:
+            # The completion budget includes hidden reasoning and visible text.
+            payload["max_tokens"] = self.thinking_max_output_tokens
         if response_format is not None:
             payload["response_format"] = response_format
         if tools:
@@ -235,6 +244,9 @@ class OpenAICompatibleClient(BaseLLMClient):
 
         total_attempts = 0
         key_indexes = self._available_key_indexes()
+        if thinking or _fallback_attempt:
+            # An ambiguous failed call may continue using the inference slot.
+            key_indexes = key_indexes[:1]
         if not key_indexes:
             self._set_last_call_info({"provider": self.provider, "model": self.model, "endpoint": endpoint, "attempts": 0, "error": "recovery_exhausted:no_available_slots"})
             raise LLMRecoveryExhausted("All LLM API key slots are temporarily unavailable")
@@ -244,12 +256,13 @@ class OpenAICompatibleClient(BaseLLMClient):
         last_error: Exception | None = None
         failover_events: list[dict[str, Any]] = []
         attempt_diagnostics: list[dict[str, Any]] = []
+        max_attempts = 1 if thinking or _fallback_attempt else self.max_retries + 1
 
         while active_key_position < len(key_indexes):
             active_key_index = key_indexes[active_key_position]
             active_api_key = self.api_keys[active_key_index]
             req = self._build_request(endpoint=endpoint, payload=payload, api_key=active_api_key)
-            for retry_attempt in range(self.max_retries + 1):
+            for retry_attempt in range(max_attempts):
                 try:
                     request_timeout = self.timeout_seconds
                     if deadline is not None:
@@ -308,7 +321,7 @@ class OpenAICompatibleClient(BaseLLMClient):
                     elif exc.code == 429 and should_fail_over:
                         self._cool_down_key_index(active_key_index)
                     should_retry = (exc.code in {408, 409, 425, 429} or exc.code >= 500) and not should_fail_over
-                    if should_retry and retry_attempt < self.max_retries:
+                    if should_retry and retry_attempt + 1 < max_attempts:
                         last_error = RuntimeError(f"LLM HTTP {exc.code}: {detail}")
                         if self._retry_allowed(deadline=deadline, retry_attempt=retry_attempt, retry_after_seconds=retry_after_seconds):
                             continue
@@ -365,7 +378,7 @@ class OpenAICompatibleClient(BaseLLMClient):
                     )
                     raise LLMRecoveryExhausted(f"LLM HTTP {exc.code}: {detail}") from exc
                 except (error.URLError, TimeoutError, IncompleteRead) as exc:  # pragma: no cover - network error path
-                    if retry_attempt < self.max_retries:
+                    if retry_attempt + 1 < max_attempts:
                         last_error = RuntimeError(f"LLM connection error: {exc}")
                         if self._retry_allowed(deadline=deadline, retry_attempt=retry_attempt):
                             continue
@@ -408,7 +421,33 @@ class OpenAICompatibleClient(BaseLLMClient):
             raise last_error or RuntimeError("LLM request failed")
 
         try:
-            message = data["choices"][0]["message"]
+            choice = data["choices"][0]
+            finish_reason = choice.get("finish_reason")
+            if (finish_reason == "length" or choice.get("done_reason") == "length"
+                    or data.get("done_reason") == "length" or data.get("truncated") in (True, 1, "1")):
+                info = self.get_last_call_info() or {}
+                self._set_last_call_info({**info, "finish_reason": finish_reason, "error": "output_truncated"})
+                if thinking and not _fallback_attempt:
+                    # Only a completed, explicitly truncated call can be
+                    # retried once with a different strategy. Never resend a
+                    # timed-out reasoning request whose server state is unknown.
+                    try:
+                        result = self.generate(
+                            system_prompt=system_prompt, user_prompt=user_prompt,
+                            temperature=temperature, response_format=response_format,
+                            tools=tools, tool_choice=tool_choice,
+                            parallel_tool_calls=parallel_tool_calls, messages=messages,
+                            think=False, _fallback_attempt=True,
+                        )
+                    except Exception:
+                        fallback_info = self.get_last_call_info() or {}
+                        self._set_last_call_info({**fallback_info, "thinking_fallback": "failed", "thinking_truncation": info})
+                        raise
+                    fallback_info = self.get_last_call_info() or {}
+                    self._set_last_call_info({**fallback_info, "thinking_fallback": "non_thinking", "thinking_truncation": info})
+                    return result
+                raise RuntimeError("LLM output truncated")
+            message = choice["message"]
             if isinstance(message, dict) and isinstance(message.get("tool_calls"), list):
                 return json.dumps({"_native_tool_calls": message["tool_calls"]}, ensure_ascii=False)
             content = message.get("content") if isinstance(message, dict) else None

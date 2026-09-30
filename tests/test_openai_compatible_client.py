@@ -539,3 +539,95 @@ def test_default_thinking_never_uses_reasoning_when_content_is_empty(monkeypatch
         client.generate(system_prompt="sys", user_prompt="usr")
     with pytest.raises(RuntimeError, match="no answer content"):
         client.generate(system_prompt="sys", user_prompt="usr", think=False)
+
+
+def test_thinking_sends_bounded_output_budget_without_changing_non_thinking_payload(monkeypatch) -> None:
+    payloads = []
+    def fake_urlopen(req, timeout):
+        payloads.append(json.loads(req.data.decode("utf-8")))
+        return FakeResponse({"choices": [{"finish_reason": "stop", "message": {"content": "Готово"}}]})
+    monkeypatch.setattr("app.integrations.llm.openai_compatible.request.urlopen", fake_urlopen)
+    client = OpenAICompatibleClient(provider="openai_compatible", base_url="https://example.test/v1", api_key="token", model="test-model", thinking_max_output_tokens=1024)
+    assert client.generate(system_prompt="sys", user_prompt="usr", think=True) == "Готово"
+    assert client.generate(system_prompt="sys", user_prompt="usr", think=False) == "Готово"
+    assert payloads[0]["max_tokens"] == 1024
+    assert "max_tokens" not in payloads[1]
+
+
+def test_truncated_completion_is_never_delivered_even_with_content_or_tool_calls(monkeypatch) -> None:
+    responses = iter([
+        {"choices": [{"finish_reason": "length", "message": {"content": "Частичный ответ"}}], "usage": {"completion_tokens": 1024}},
+        {"choices": [{"finish_reason": "length", "message": {"content": "", "tool_calls": [{"id": "incomplete"}]}}]},
+        {"choices": [{"finish_reason": "stop", "message": {"content": "Частичный ответ"}}], "truncated": 1},
+        {"choices": [{"finish_reason": "stop", "message": {"content": "Частичный ответ"}}], "done_reason": "length"},
+    ])
+    monkeypatch.setattr("app.integrations.llm.openai_compatible.request.urlopen", lambda req, timeout: FakeResponse(next(responses)))
+    client = OpenAICompatibleClient(provider="openai_compatible", base_url="https://example.test/v1", api_key="token", model="test-model", default_think=True, thinking_max_output_tokens=1024)
+    for _ in range(4):
+        with pytest.raises(RuntimeError, match="output truncated"):
+            client.generate(system_prompt="sys", user_prompt="usr", think=False)
+        assert client.get_last_call_info()["error"] == "output_truncated"
+        assert client.get_last_call_info()["attempts"] == 1
+
+
+def test_thinking_timeout_is_not_retried_on_any_key(monkeypatch) -> None:
+    calls = []
+    def fake_urlopen(req, timeout):
+        calls.append(req.headers["Authorization"])
+        raise TimeoutError("request timed out")
+    monkeypatch.setattr("app.integrations.llm.openai_compatible.request.urlopen", fake_urlopen)
+    client = OpenAICompatibleClient(provider="openai_compatible", base_url="https://example.test/v1", api_key="first", api_keys=["first", "second"], model="test-model", max_retries=3, default_think=True)
+    with pytest.raises(RuntimeError, match="connection error"):
+        client.generate(system_prompt="sys", user_prompt="usr")
+    assert calls == ["Bearer first"]
+    assert client.get_last_call_info()["attempts"] == 1
+
+
+def test_length_failure_is_not_accepted_with_thinking_disabled(monkeypatch) -> None:
+    monkeypatch.setattr("app.integrations.llm.openai_compatible.request.urlopen", lambda req, timeout: FakeResponse({"choices": [{"finish_reason": "length", "message": {"content": "Обрезано"}}]}))
+    client = OpenAICompatibleClient(provider="openai_compatible", base_url="https://example.test/v1", api_key="token", model="test-model")
+    with pytest.raises(RuntimeError, match="output truncated"):
+        client.generate(system_prompt="sys", user_prompt="usr")
+
+
+def test_thinking_does_not_retry_retryable_http_errors(monkeypatch) -> None:
+    calls = []
+    def fake_urlopen(req, timeout):
+        calls.append(req.headers["Authorization"])
+        raise error.HTTPError(req.full_url, 503, "busy", hdrs=None, fp=io.BytesIO(b'{}'))
+    monkeypatch.setattr("app.integrations.llm.openai_compatible.request.urlopen", fake_urlopen)
+    client = OpenAICompatibleClient(provider="openai_compatible", base_url="https://example.test/v1", api_key="first", api_keys=["first", "second"], model="test-model", max_retries=3, default_think=True)
+    with pytest.raises(RuntimeError, match="LLM HTTP 503"):
+        client.generate(system_prompt="sys", user_prompt="usr")
+    assert calls == ["Bearer first"]
+
+
+def test_thinking_length_falls_back_once_to_bounded_non_thinking(monkeypatch) -> None:
+    payloads = []
+    responses = iter([
+        {"choices": [{"finish_reason": "length", "message": {"content": "Частичный"}}]},
+        {"choices": [{"finish_reason": "stop", "message": {"content": "Полный ответ"}}]},
+    ])
+    def fake_urlopen(req, timeout):
+        payloads.append(json.loads(req.data.decode("utf-8")))
+        return FakeResponse(next(responses))
+    monkeypatch.setattr("app.integrations.llm.openai_compatible.request.urlopen", fake_urlopen)
+    client = OpenAICompatibleClient(provider="openai_compatible", base_url="https://example.test/v1", api_key="token", model="test-model", default_think=True, max_retries=3, thinking_max_output_tokens=1024)
+    assert client.generate(system_prompt="sys", user_prompt="usr") == "Полный ответ"
+    assert [(item["think"], item.get("max_tokens")) for item in payloads] == [(True, 1024), (False, 1024)]
+    assert client.get_last_call_info()["thinking_fallback"] == "non_thinking"
+
+
+def test_thinking_length_fallback_does_not_retry_after_timeout(monkeypatch) -> None:
+    payloads = []
+    def fake_urlopen(req, timeout):
+        payload = json.loads(req.data.decode("utf-8"))
+        payloads.append(payload)
+        if payload["think"]:
+            return FakeResponse({"choices": [{"finish_reason": "length", "message": {"content": "Частичный"}}]})
+        raise TimeoutError("still running")
+    monkeypatch.setattr("app.integrations.llm.openai_compatible.request.urlopen", fake_urlopen)
+    client = OpenAICompatibleClient(provider="openai_compatible", base_url="https://example.test/v1", api_key="token", model="test-model", default_think=True, max_retries=3)
+    with pytest.raises(RuntimeError, match="connection error"):
+        client.generate(system_prompt="sys", user_prompt="usr")
+    assert [item["think"] for item in payloads] == [True, False]

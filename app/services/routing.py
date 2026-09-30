@@ -59,6 +59,7 @@ class RoutingService:
                 retry_deadline_seconds=settings.direct_llm_retry_deadline_seconds,
                 drop_params=settings.openai_compatible_drop_params,
                 default_think=settings.direct_llm_think_enabled,
+                thinking_max_output_tokens=settings.direct_llm_think_max_output_tokens,
             )
             if self.answer_engine_mode == "jev_selected_fact":
                 self.simple_answer_engine = JevAnswerEngine(

@@ -26,6 +26,30 @@ def test_direct_writer_factory_receives_thinking_default() -> None:
     assert client.default_think is True
 
 
+def test_direct_writer_receives_bounded_thinking_budget(monkeypatch) -> None:
+    import app.services.routing as routing
+    clients = []
+    def fake_factory(**kwargs):
+        client = get_llm_client(**kwargs)
+        clients.append(client)
+        return client
+    monkeypatch.setattr(routing, "get_llm_client", fake_factory)
+    monkeypatch.setattr(routing.settings, "direct_llm_provider", "openai_compatible")
+    monkeypatch.setattr(routing.settings, "direct_llm_base_url", "https://example.test/v1")
+    monkeypatch.setattr(routing.settings, "direct_llm_api_key", "test-key")
+    monkeypatch.setattr(routing.settings, "direct_llm_think_max_output_tokens", 1024, raising=False)
+    monkeypatch.setattr(routing.settings, "jev_api_key", "test-key")
+    RoutingService(session_factory=lambda: None, answer_engine_mode="jev_selected_fact")
+    assert clients[0].thinking_max_output_tokens == 1024
+
+
+def test_thinking_budget_setting_rejects_unbounded_values(monkeypatch) -> None:
+    import pytest
+    monkeypatch.setenv("DIRECT_LLM_THINK_MAX_OUTPUT_TOKENS", "16384")
+    with pytest.raises(ValueError):
+        Settings(_env_file=None)
+
+
 def test_thinking_setting_is_off_by_default_and_reads_environment(monkeypatch) -> None:
     monkeypatch.delenv("DIRECT_LLM_THINK_ENABLED", raising=False)
     assert Settings(_env_file=None).direct_llm_think_enabled is False
