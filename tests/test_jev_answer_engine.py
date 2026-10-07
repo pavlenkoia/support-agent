@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from app.services.jev_answer_engine import JevAnswerEngine
+from app.services.jev_answer_engine import JevAnswerEngine, TURN_TYPES
 
 
 FACTS = [
@@ -57,7 +57,7 @@ def test_selected_fact_is_only_business_evidence_and_composite_chooses_main(tmp_
     assert len(result["telemetry"]["kb_sha256"]) == 64
     assert len(selector.calls) == 2
     assert set(selector.calls[1]["criteria"]) == {"jump.announcement", "certificate.validity", "no_answer"}
-    assert "способе подтверждения" in selector.calls[1]["instructions"]
+    assert "подтверждённый способ дальнейшего действия" in selector.calls[1]["instructions"]
     packet = json.loads(writer.calls[0]["user_prompt"])
     assert packet["selected_facts"] == [{k: FACTS[0][k] for k in ("id", "text", "conditions")}]
     assert packet["question"] == "Здравствуйте, будут прыжки 26-го и сколько сертификат действует?"
@@ -73,6 +73,24 @@ def test_no_answer_uses_configured_fallback_without_writer(tmp_path):
     assert result["kind"] == "cannot_answer"
     assert result["response_text"] == "Для уточнения вопроса можно позвонить в офис в рабочее время."
     assert writer.calls == []
+
+
+def test_expressed_interest_uses_intent_and_attachment_context_for_fact_choice(tmp_path):
+    llm, selector, writer = engine(tmp_path, ["substantive", "jump.announcement"],
+                                  [json.dumps({"response_text": "Условия сообщают в анонсе группы."}, ensure_ascii=False)])
+    question = "Здравствуйте! Меня заинтересовала эта услуга.\nКонтекст VK Market-вложения:\nНазвание: Прыжок"
+    result = llm.answer(question=question, history=[])
+
+    assert result["kind"] == "grounded_answer"
+    assert result["telemetry"]["selected_fact_id"] == "jump.announcement"
+    assert "выраженное намерение" in TURN_TYPES["substantive"]
+    assert "вопросительная форма не обязательны" in TURN_TYPES["substantive"]
+    assert "информационную потребность или намерение" in selector.calls[1]["instructions"]
+    assert "контекста вложения" in selector.calls[1]["instructions"]
+    assert "выраженный интерес к конкретной услуге" in selector.calls[1]["instructions"]
+    assert "нет подтверждённого факта о подходящем следующем шаге" in selector.calls[1]["criteria"]["no_answer"]
+    assert selector.calls[1]["state"]["message"] == question
+    assert json.loads(writer.calls[0]["user_prompt"])["selected_facts"][0]["id"] == "jump.announcement"
 
 
 def test_choice_client_rejects_unlisted_and_zero_probability_choices():
