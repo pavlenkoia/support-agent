@@ -66,8 +66,21 @@ def test_opt_in_jev_route_uses_selected_engine_and_keeps_delivery_isolated(tmp_p
     result = routing.handle_inbound(InboundMessage(channel="internal_test", external_user_id="igor", external_chat_id="igor", text="Неизвестный вопрос"))
     assert result["route"]["answer_engine"] == "jev_selected_fact"
     assert result["outcome"]["outcome_type"] == "cannot_answer"
-    assert result["outcome"]["outcome_payload"]["response_text"] == "Здравствуйте! Для уточнения вопроса можно позвонить в офис в рабочее время."
+    assert result["outcome"]["outcome_payload"]["response_text"] == "Для уточнения вопроса можно позвонить в офис в рабочее время."
     assert len(engine.calls) == 1
+
+
+def test_jev_no_answer_keeps_exact_text_on_first_reply(tmp_path: Path) -> None:
+    session_factory = make_session_factory(f"sqlite+pysqlite:///{tmp_path / 'jev-fallback.db'}")
+    Base.metadata.create_all(bind=session_factory.kw["bind"])
+    fallback = (
+        "К сожалению, я не могу ответить на ваш вопрос. Я уже подключил к решению специалиста. "
+        "Он подготовит ответ и напишет вам в этом чате."
+    )
+    engine = RecordingSimpleEngine(kind="cannot_answer", response_text=fallback)
+    routing = RoutingService(session_factory=session_factory, simple_answer_engine=engine, answer_engine_mode="jev_selected_fact")
+    result = routing.handle_inbound(InboundMessage(channel="internal_test", external_user_id="igor", external_chat_id="igor", text="Неизвестный вопрос"))
+    assert result["outcome"]["outcome_payload"]["response_text"] == fallback
 
 
 def test_jev_selected_fact_snapshot_is_persisted_for_later_review(tmp_path: Path) -> None:

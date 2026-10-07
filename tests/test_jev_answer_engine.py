@@ -75,6 +75,16 @@ def test_no_answer_uses_configured_fallback_without_writer(tmp_path):
     assert writer.calls == []
 
 
+def test_live_profile_no_answer_literal_is_approved_text():
+    from app.services.policy import PolicyService
+
+    policy = PolicyService(str(Path(__file__).resolve().parents[1] / "deploy" / "profile"))
+    assert policy.no_answer_policy_evidence()[0]["text"] == (
+        "К сожалению, я не могу ответить на ваш вопрос. Я уже подключил к решению специалиста. "
+        "Он подготовит ответ и напишет вам в этом чате."
+    )
+
+
 def test_expressed_interest_uses_intent_and_attachment_context_for_fact_choice(tmp_path):
     llm, selector, writer = engine(tmp_path, ["substantive", "jump.announcement"],
                                   [json.dumps({"response_text": "Условия сообщают в анонсе группы."}, ensure_ascii=False)])

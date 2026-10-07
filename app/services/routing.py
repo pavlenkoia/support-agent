@@ -135,7 +135,9 @@ class RoutingService:
         first_reply = not any(item["role"] == "assistant" for item in context["recent_messages"])
         raw_text = str(engine_result["response_text"] or "")
         response_text = "" if route_name == "retry_pending" else self.policy.finalize_simple_customer_text(
-            raw_text, first_reply_in_dialogue=first_reply,
+            raw_text, first_reply_in_dialogue=first_reply and not (
+                self.answer_engine_mode == "jev_selected_fact" and kind == "cannot_answer"
+            ),
         )
         route = {
             "route": route_name,
