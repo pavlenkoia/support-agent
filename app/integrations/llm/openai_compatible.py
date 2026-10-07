@@ -40,6 +40,7 @@ class OpenAICompatibleClient(BaseLLMClient):
         rate_limit_cooldown_seconds: float = 60.0,
         drop_params: bool = False,
         default_think: bool = False,
+        reasoning_effort: str | None = None,
         thinking_max_output_tokens: int = 1024,
     ) -> None:
         self.provider = provider
@@ -66,6 +67,9 @@ class OpenAICompatibleClient(BaseLLMClient):
         self.rate_limit_cooldown_seconds = max(0.0, float(rate_limit_cooldown_seconds))
         self.drop_params = bool(drop_params)
         self.default_think = default_think
+        if reasoning_effort not in (None, "low", "medium", "high"):
+            raise ValueError("reasoning_effort must be low, medium or high")
+        self.reasoning_effort = reasoning_effort
         if not 1 <= thinking_max_output_tokens <= 4096:
             raise ValueError("thinking_max_output_tokens must be between 1 and 4096")
         self.thinking_max_output_tokens = thinking_max_output_tokens
@@ -220,12 +224,15 @@ class OpenAICompatibleClient(BaseLLMClient):
             "model": self.model,
             "temperature": temperature,
             "stream": False,
-            "think": thinking,
             "messages": messages if messages is not None else [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
         }
+        if thinking and self.reasoning_effort is not None:
+            payload["reasoning_effort"] = self.reasoning_effort
+        else:
+            payload["think"] = thinking
         if thinking or _fallback_attempt:
             # The completion budget includes hidden reasoning and visible text.
             payload["max_tokens"] = self.thinking_max_output_tokens

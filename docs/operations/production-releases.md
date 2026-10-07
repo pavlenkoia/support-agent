@@ -35,6 +35,8 @@ The command verifies the mounted profile against this same tracked directory, ob
 
 A release is successful only when the command exits with `RELEASE SUCCESS` and writes a JSON receipt beneath `${SUPPORT_AGENT_RUNTIME_ROOT_HOST:-/home/tian/support-agent-runtime}/releases/`.
 
+For a provider that expects `reasoning_effort` instead of `think`, set `DIRECT_LLM_REASONING_EFFORT=medium` alongside `DIRECT_LLM_THINK_ENABLED=true` in the external protected runtime env. This changes only the direct answer writer, not Jev or summary; an unset effort preserves the legacy `think` request shape. Back up the prior runtime env and retain the old successful receipt. Rollback of an external provider switch requires restoring the prior env as well as the image when applicable; never print or commit either key.
+
 ## Hard verification gate
 
 The command fails when the single tracked/mounted profile tree is empty or inconsistent, or when any application-plane service is missing, not running, was not recreated for the operation, has a mismatched OCI revision label, or (for Python runtime services) has a mismatched complete `app/**/*.py` source manifest. It additionally requires backend health and Telegram/VK polling liveness. The current release script does **not** run a semantic no-send probe; run it separately through the production internal probe and inspect the persisted workflow events with zero customer transport sends.

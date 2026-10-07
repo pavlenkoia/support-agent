@@ -553,6 +553,34 @@ def test_thinking_sends_bounded_output_budget_without_changing_non_thinking_payl
     assert payloads[0]["max_tokens"] == 1024
     assert "max_tokens" not in payloads[1]
 
+def test_reasoning_effort_medium_uses_provider_contract_and_bounded_budget(monkeypatch) -> None:
+    payloads = []
+    def fake_urlopen(req, timeout):
+        payloads.append(json.loads(req.data.decode("utf-8")))
+        return FakeResponse({"choices": [{"finish_reason": "stop", "message": {"content": "Ответ", "reasoning_content": "private"}}]})
+    monkeypatch.setattr("app.integrations.llm.openai_compatible.request.urlopen", fake_urlopen)
+    client = OpenAICompatibleClient(provider="openai_compatible", base_url="https://example.test/v1", api_key="token", model="test-model", default_think=True, reasoning_effort="medium", thinking_max_output_tokens=4096)
+    assert client.generate(system_prompt="sys", user_prompt="usr") == "Ответ"
+    assert payloads[0]["reasoning_effort"] == "medium"
+    assert payloads[0]["max_tokens"] == 4096
+    assert "think" not in payloads[0]
+
+def test_reasoning_effort_medium_is_not_sent_on_non_thinking_fallback(monkeypatch) -> None:
+    payloads = []
+    responses = iter([
+        {"choices": [{"finish_reason": "length", "message": {"content": "Частично"}}]},
+        {"choices": [{"finish_reason": "stop", "message": {"content": "Готово"}}]},
+    ])
+    def fake_urlopen(req, timeout):
+        payloads.append(json.loads(req.data.decode("utf-8")))
+        return FakeResponse(next(responses))
+    monkeypatch.setattr("app.integrations.llm.openai_compatible.request.urlopen", fake_urlopen)
+    client = OpenAICompatibleClient(provider="openai_compatible", base_url="https://example.test/v1", api_key="token", model="test-model", default_think=True, reasoning_effort="medium", thinking_max_output_tokens=4096)
+    assert client.generate(system_prompt="sys", user_prompt="usr") == "Готово"
+    assert [p.get("reasoning_effort") for p in payloads] == ["medium", None]
+    assert payloads[1]["think"] is False
+    assert payloads[1]["max_tokens"] == 4096
+
 
 def test_truncated_completion_is_never_delivered_even_with_content_or_tool_calls(monkeypatch) -> None:
     responses = iter([

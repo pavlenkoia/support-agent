@@ -68,3 +68,15 @@ def test_routing_passes_thinking_setting_to_direct_writer_only(monkeypatch) -> N
     monkeypatch.setattr(routing.settings, "jev_api_key", "test-key")
     RoutingService(session_factory=lambda: None, answer_engine_mode="jev_selected_fact")
     assert captured[0]["default_think"] is True
+
+def test_routing_passes_reasoning_effort_to_direct_writer(monkeypatch) -> None:
+    import app.services.routing as routing
+    captured = []
+    def fake_factory(**kwargs):
+        captured.append(kwargs)
+        return get_llm_client(provider="stub", base_url=None, api_key=None, api_keys=None, model="stub")
+    monkeypatch.setattr(routing, "get_llm_client", fake_factory)
+    monkeypatch.setattr(routing.settings, "direct_llm_reasoning_effort", "medium", raising=False)
+    monkeypatch.setattr(routing.settings, "jev_api_key", "test-key")
+    RoutingService(session_factory=lambda: None, answer_engine_mode="jev_selected_fact")
+    assert captured[0]["reasoning_effort"] == "medium"
