@@ -80,3 +80,12 @@ def test_routing_passes_reasoning_effort_to_direct_writer(monkeypatch) -> None:
     monkeypatch.setattr(routing.settings, "jev_api_key", "test-key")
     RoutingService(session_factory=lambda: None, answer_engine_mode="jev_selected_fact")
     assert captured[0]["reasoning_effort"] == "medium"
+
+def test_routing_passes_json_wire_compatibility_to_direct_writer(monkeypatch) -> None:
+    import app.services.routing as routing
+    captured = []
+    monkeypatch.setattr(routing, "get_llm_client", lambda **kwargs: captured.append(kwargs) or get_llm_client(provider="stub", base_url=None, api_key=None, api_keys=None, model="stub"))
+    monkeypatch.setattr(routing.settings, "direct_llm_json_object_prompt_only", True, raising=False)
+    monkeypatch.setattr(routing.settings, "jev_api_key", "test-key")
+    RoutingService(session_factory=lambda: None, answer_engine_mode="jev_selected_fact")
+    assert captured[0]["json_object_prompt_only"] is True

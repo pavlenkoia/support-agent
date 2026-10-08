@@ -565,6 +565,20 @@ def test_reasoning_effort_medium_uses_provider_contract_and_bounded_budget(monke
     assert payloads[0]["max_tokens"] == 4096
     assert "think" not in payloads[0]
 
+def test_json_object_prompt_only_avoids_incompatible_wire_format(monkeypatch) -> None:
+    payloads = []
+    def fake_urlopen(req, timeout):
+        payloads.append(json.loads(req.data.decode("utf-8")))
+        return FakeResponse({"choices": [{"finish_reason": "stop", "message": {"content": '{"response_text":"Готово"}'}}]})
+    monkeypatch.setattr("app.integrations.llm.openai_compatible.request.urlopen", fake_urlopen)
+    client = OpenAICompatibleClient(provider="openai_compatible", base_url="https://example.test/v1", api_key="token", model="test-model", json_object_prompt_only=True)
+    assert client.generate(system_prompt="Системная инструкция", user_prompt="Вопрос", response_format={"type": "json_object"}) == '{"response_text":"Готово"}'
+    assert "response_format" not in payloads[0]
+    assert "JSON" in payloads[0]["messages"][0]["content"]
+    assert payloads[0]["messages"][1]["content"] == "Вопрос"
+    client.generate(system_prompt="Системная инструкция", user_prompt="Вопрос")
+    assert "JSON" not in payloads[1]["messages"][0]["content"]
+
 def test_reasoning_effort_medium_is_not_sent_on_non_thinking_fallback(monkeypatch) -> None:
     payloads = []
     responses = iter([

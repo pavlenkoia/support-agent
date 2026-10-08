@@ -60,6 +60,7 @@ class RoutingService:
                 drop_params=settings.openai_compatible_drop_params,
                 default_think=settings.direct_llm_think_enabled,
                 reasoning_effort=settings.direct_llm_reasoning_effort,
+                json_object_prompt_only=settings.direct_llm_json_object_prompt_only,
                 thinking_max_output_tokens=settings.direct_llm_think_max_output_tokens,
             )
             if self.answer_engine_mode == "jev_selected_fact":

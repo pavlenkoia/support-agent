@@ -35,7 +35,7 @@ The command verifies the mounted profile against this same tracked directory, ob
 
 A release is successful only when the command exits with `RELEASE SUCCESS` and writes a JSON receipt beneath `${SUPPORT_AGENT_RUNTIME_ROOT_HOST:-/home/tian/support-agent-runtime}/releases/`.
 
-For a provider that expects `reasoning_effort` instead of `think`, set `DIRECT_LLM_REASONING_EFFORT=medium` alongside `DIRECT_LLM_THINK_ENABLED=true` in the external protected runtime env. This changes only the direct answer writer, not Jev or summary; an unset effort preserves the legacy `think` request shape. Back up the prior runtime env and retain the old successful receipt. Rollback of an external provider switch requires restoring the prior env as well as the image when applicable; never print or commit either key.
+For a provider that expects `reasoning_effort` instead of `think`, set `DIRECT_LLM_REASONING_EFFORT=medium` alongside `DIRECT_LLM_THINK_ENABLED=true` in the external protected runtime env. If its OpenAI-compatible proxy rejects `response_format=json_object`, set `DIRECT_LLM_JSON_OBJECT_PROMPT_ONLY=true` for the direct writer; this omits that wire parameter and asks for a JSON object in the system message. Leave it unset for providers that support structured output. This changes only the direct answer writer, not Jev or summary; an unset effort preserves the legacy `think` request shape. Back up the prior runtime env and retain the old successful receipt. Rollback of an external provider switch requires restoring the prior env as well as the image when applicable; never print or commit either key.
 
 ## Hard verification gate
 

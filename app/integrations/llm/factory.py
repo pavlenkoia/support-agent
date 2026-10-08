@@ -16,6 +16,7 @@ def get_llm_client(
     drop_params: bool = False,
     default_think: bool = False,
     reasoning_effort: str | None = None,
+    json_object_prompt_only: bool = False,
     thinking_max_output_tokens: int = 1024,
 ) -> BaseLLMClient:
     normalized_provider = provider.strip().lower()
@@ -42,6 +43,7 @@ def get_llm_client(
             drop_params=drop_params,
             default_think=default_think,
             reasoning_effort=reasoning_effort,
+            json_object_prompt_only=json_object_prompt_only,
             thinking_max_output_tokens=thinking_max_output_tokens,
         )
 

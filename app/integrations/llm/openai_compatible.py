@@ -41,6 +41,7 @@ class OpenAICompatibleClient(BaseLLMClient):
         drop_params: bool = False,
         default_think: bool = False,
         reasoning_effort: str | None = None,
+        json_object_prompt_only: bool = False,
         thinking_max_output_tokens: int = 1024,
     ) -> None:
         self.provider = provider
@@ -70,6 +71,7 @@ class OpenAICompatibleClient(BaseLLMClient):
         if reasoning_effort not in (None, "low", "medium", "high"):
             raise ValueError("reasoning_effort must be low, medium or high")
         self.reasoning_effort = reasoning_effort
+        self.json_object_prompt_only = json_object_prompt_only
         if not 1 <= thinking_max_output_tokens <= 4096:
             raise ValueError("thinking_max_output_tokens must be between 1 and 4096")
         self.thinking_max_output_tokens = thinking_max_output_tokens
@@ -229,6 +231,14 @@ class OpenAICompatibleClient(BaseLLMClient):
                 {"role": "user", "content": user_prompt},
             ],
         }
+        if self.json_object_prompt_only and response_format == {"type": "json_object"}:
+            # A proxy may reject structured output while still returning JSON text.
+            response_format = None
+            payload["messages"] = [dict(message) for message in payload["messages"]]
+            for message in payload["messages"]:
+                if message.get("role") == "system" and isinstance(message.get("content"), str):
+                    message["content"] += "\nВерни ровно один объект JSON с полем response_text; без markdown."
+                    break
         if thinking and self.reasoning_effort is not None:
             payload["reasoning_effort"] = self.reasoning_effort
         else:
