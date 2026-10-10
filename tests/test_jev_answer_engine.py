@@ -128,6 +128,18 @@ def test_social_acknowledgement_is_not_flood_or_fact_selection(tmp_path):
     assert "knowledge_base" not in writer.calls[0]["user_prompt"]
 
 
+def test_emotional_reaction_without_request_is_described_as_social(tmp_path):
+    llm, selector, writer = engine(tmp_path, ["social"], ['{"response_text":"Понимаю, хотелось бы прыгнуть выше самостоятельно."}'])
+    result = llm.answer(question="блин, жалко, для самостоятельного прыжка нельзя такую высоту 😔",
+                        history=[{"role": "assistant", "content": "Высота прыжка в тандеме — 2500 метров."}])
+    assert result["kind"] == "social_reply"
+    assert len(selector.calls) == 1
+    assert "эмоциональная реакция" in selector.calls[0]["criteria"]["social"]
+    assert "Если клиент только реагирует" in selector.calls[0]["instructions"]
+    assert "если реплика также выражает эмоцию" in selector.calls[0]["instructions"]
+    assert "history" not in json.loads(writer.calls[0]["user_prompt"])
+
+
 def test_social_writer_uses_latest_turn_without_history_and_accepts_plain_content(tmp_path):
     llm, selector, writer = engine(tmp_path, ["social"], ["Пожалуйста!"])
     result = llm.answer(question="Понял, спасибо", history=[{"role": "user", "content": "Вопрос о сертификате"}])
@@ -212,8 +224,9 @@ def test_social_prompt_is_short_and_scope_based():
     source = Path(__file__).resolve().parents[1] / "deploy" / "profile-source" / "JEV_DIALOGUE_PROMPT.md"
     prompt = source.read_text(encoding="utf-8")
     assert "Область поддержки указана в переданном scope" in prompt
-    assert "одной короткой фразой" in prompt
-    assert "Не повторяй слова клиента" in prompt
+    assert "одной короткой уместной фразой" in prompt
+    assert "Можно признать сожаление или разочарование клиента" in prompt
+    assert "не повторяй факты из предыдущего ответа" in prompt
     assert "приглашение обратиться снова" in prompt
     assert "парашютных прыжков" not in prompt
 
