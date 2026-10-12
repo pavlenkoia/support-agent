@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import time
+from concurrent.futures import Executor, Future, ThreadPoolExecutor
 from pathlib import Path
 
 from app.core.config import settings
@@ -58,6 +59,30 @@ def process_tick(gateway: VKGatewayService, poller: VKLongPollClient, acker: Lon
         "retried": due_turns,
     }
 
+class VKLiveWorker:
+    """Keep Long Poll ingress active while the single delivery lane generates."""
+
+    def __init__(self, *, gateway: VKGatewayService, poller: VKLongPollClient, acker: LongPollAcker, executor: Executor) -> None:
+        self.gateway = gateway
+        self.poller = poller
+        self.acker = acker
+        self.executor = executor
+        self.due_future: Future | None = None
+
+    def tick(self, state: VKLongPollState | None) -> dict:
+        result = process_once(self.gateway, self.poller, self.acker, state)
+        recovered = retried = 0
+        if self.due_future is not None and self.due_future.done():
+            recovered, retried = self.due_future.result()
+            self.due_future = None
+        if self.due_future is None:
+            self.due_future = self.executor.submit(self._process_due)
+        return result | {"recovered": recovered, "retried": retried}
+
+    def _process_due(self) -> tuple[int, int]:
+        recovered = self.gateway.recover_expired_turns()["recovered"]
+        return recovered, self.gateway.process_due_turns()
+
 
 def main() -> None:
     gateway = VKGatewayService()
@@ -65,6 +90,11 @@ def main() -> None:
     store = FileLongPollStateStore(settings.vk_poll_state_file)
     acker = LongPollAcker(store)
 
+    with ThreadPoolExecutor(max_workers=1, thread_name_prefix="vk-due-turn") as executor:
+        worker = VKLiveWorker(gateway=gateway, poller=poller, acker=acker, executor=executor)
+        _run_polling(worker, store)
+
+def _run_polling(worker: VKLiveWorker, store: FileLongPollStateStore) -> None:
     while True:
         if not settings.vk_enabled:
             print("vk polling disabled: VK_ENABLED is false", flush=True)
@@ -76,7 +106,7 @@ def main() -> None:
             continue
 
         current_state = store.load()
-        result = process_tick(gateway=gateway, poller=poller, acker=acker, state=current_state)
+        result = worker.tick(current_state)
         print(
             f"vk polling tick processed={result['processed']} recovered={result['recovered']} retried={result['retried']} ts={result['state']['ts']}",
             flush=True,

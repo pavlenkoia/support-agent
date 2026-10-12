@@ -14,7 +14,7 @@ class VkTurn(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     conversation_id: Mapped[int] = mapped_column(ForeignKey("conversations.id"), nullable=False, index=True)
     case_id: Mapped[int | None] = mapped_column(ForeignKey("support_cases.id"), nullable=True, index=True)
-    first_event_id: Mapped[int] = mapped_column(ForeignKey("transport_events.id"), nullable=False, unique=True)
+    first_event_id: Mapped[int] = mapped_column(ForeignKey("transport_events.id"), nullable=False)
     last_event_id: Mapped[int] = mapped_column(ForeignKey("transport_events.id"), nullable=False, index=True)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="open", index=True)
     due_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)

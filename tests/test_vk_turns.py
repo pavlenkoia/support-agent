@@ -89,7 +89,24 @@ def test_new_inbound_supersedes_a_claimed_turn_before_opening_next_turn(tmp_path
         assert previous.status == "suppressed"
         assert previous.reason == "newer_inbound"
         assert next_turn.id != first.id
+        assert next_turn.first_event_id == first.first_event_id
         assert next_turn.status == "open"
+
+
+def test_new_inbound_preserves_earliest_unsent_source_after_multiple_supersessions(tmp_path):
+    session_factory = make_session(tmp_path)
+    now = datetime.now(UTC)
+    with session_factory() as session:
+        item = conversation(session)
+        first = open_or_extend_turn(session, conversation_id=item.id, event_id=10, now=now, quiet_seconds=0)
+        claim_due_turn(session, turn_id=first.id, now=now, lease_seconds=60)
+        second = open_or_extend_turn(session, conversation_id=item.id, event_id=11, now=now, quiet_seconds=0)
+        second.status = "retry_pending"
+        third = open_or_extend_turn(session, conversation_id=item.id, event_id=12, now=now, quiet_seconds=5)
+        session.commit()
+        assert third.first_event_id == 10
+        assert third.last_event_id == 12
+        assert second.status == "suppressed"
 
 
 def test_human_override_suppresses_active_turn(tmp_path):

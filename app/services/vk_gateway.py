@@ -641,34 +641,46 @@ class VKGatewayService:
                         send_status="pending",
                     )
                 session.commit()
-            try:
-                delivery = self.sender.send_message(peer_id=inbound.external_chat_id, text=reply_text, random_id=random_id)
-            except Exception as exc:
-                self._finish_turn(turn_id, claim_token, status="retry_pending", reason=f"send_error:{type(exc).__name__}", due_at=current)
-                processed += 1
-                continue
-            sent = bool(delivery.get("sent", delivery.get("ok")))
             with self.session_factory() as session:
-                turn = session.get(VkTurn, turn_id)
-                if turn is not None and turn.status == "claimed" and turn.claim_token == claim_token:
-                    turn.status = "sent" if sent else "retry_pending"
-                    turn.reason = None if sent else self._format_delivery_error(delivery)
-                    turn.claim_token = turn.claim_until = None
-                    for event in events:
-                        stored = session.get(TransportEvent, event.id)
-                        if stored is not None:
-                            mark_transport_event_processed(session, stored, status="processed" if sent else "retry_pending")
-                    finalize_outbound_transport_send(
-                        session,
-                        random_id=random_id,
-                        external_message_id=delivery.get("external_message_id") if sent else None,
-                        sent_at=delivery.get("sent_at"),
-                        send_status="sent" if sent else "failed",
-                    )
-                    if sent:
-                        current_state = self._locked_transport_state(session, conversation_id=turn.conversation_id)
-                        set_last_bot_reply(session, current_state, replied_at=delivery.get("sent_at"))
+                # Ingress obtains this same conversation-state lock. Keep it
+                # through the external call: there must be no gap between the
+                # last freshness check and the irreversible send.
+                state = self._locked_transport_state(session, conversation_id=conversation.id)
+                turn = session.scalar(select(VkTurn).where(VkTurn.id == turn_id).with_for_update())
+                if turn is None or turn.status != "claimed" or turn.claim_token != claim_token or self._is_stale_or_overridden(state, inbound, now=datetime.now(UTC)):
+                    finalize_outbound_transport_send(session, random_id=random_id, send_status="failed")
                     session.commit()
+                    processed += 1
+                    continue
+                try:
+                    delivery = self.sender.send_message(peer_id=inbound.external_chat_id, text=reply_text, random_id=random_id)
+                except Exception as exc:
+                    turn.status, turn.reason = "retry_pending", f"send_error:{type(exc).__name__}"
+                    turn.due_at = datetime.now(UTC) + timedelta(seconds=settings.deferred_retry_delay_seconds)
+                    turn.claim_token = turn.claim_until = None
+                    session.commit()
+                    processed += 1
+                    continue
+                sent = bool(delivery.get("sent", delivery.get("ok")))
+                turn.status = "sent" if sent else "retry_pending"
+                turn.reason = None if sent else self._format_delivery_error(delivery)
+                if not sent:
+                    turn.due_at = datetime.now(UTC) + timedelta(seconds=settings.deferred_retry_delay_seconds)
+                turn.claim_token = turn.claim_until = None
+                for event in events:
+                    stored = session.get(TransportEvent, event.id)
+                    if stored is not None:
+                        mark_transport_event_processed(session, stored, status="processed" if sent else "retry_pending")
+                finalize_outbound_transport_send(
+                    session,
+                    random_id=random_id,
+                    external_message_id=delivery.get("external_message_id") if sent else None,
+                    sent_at=delivery.get("sent_at"),
+                    send_status="sent" if sent else "failed",
+                )
+                if sent:
+                    set_last_bot_reply(session, state, replied_at=delivery.get("sent_at"))
+                session.commit()
             if sent and case_id is not None:
                 self.routing.record_outbound_message(case_id, reply_text)
             processed += 1

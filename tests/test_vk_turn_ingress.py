@@ -1,9 +1,11 @@
 from datetime import UTC, datetime, timedelta
+from threading import Event, Thread
 
-from sqlalchemy import select
+from sqlalchemy import event, select
 
 from app.core.db import Base, make_session_factory
 from app.models.conversation import Conversation
+from app.models.outbound_transport_send import OutboundTransportSend
 from app.models.transport_event import TransportEvent
 from app.models.vk_turn import VkTurn
 from app.services.vk_gateway import VKGatewayService
@@ -100,6 +102,88 @@ def test_durable_due_turn_processor_combines_persisted_events_and_sends_once(tmp
         turn = session.scalar(select(VkTurn))
         assert turn is not None
         assert turn.status == "sent"
+
+
+def test_new_vk_fragment_during_generation_discards_old_reply_and_combines_unsent_turn(tmp_path):
+    factory = make_session_factory(f"sqlite+pysqlite:///{tmp_path / 'superseded.db'}")
+    Base.metadata.create_all(bind=factory.kw["bind"])
+    started, release = Event(), Event()
+
+    class BlockingRouting(_Routing):
+        def handle_inbound(self, payload, *, persist_inbound=True):
+            if not self.payloads:
+                started.set()
+                assert release.wait(timeout=10)
+            return super().handle_inbound(payload, persist_inbound=persist_inbound)
+
+    routing, sender = BlockingRouting(), _Sender()
+    service = VKGatewayService(routing=routing, sender=sender, session_factory=factory)
+    now = datetime.now(UTC)
+
+    def inbound(message_id, text, at):
+        service.handle_event({"type": "message_new", "group_id": 55, "object": {"message": {
+            "id": message_id, "peer_id": 42, "from_id": 7, "text": text,
+            "date": int(at.timestamp()),
+        }}})
+
+    inbound(100, "Мне рекомендовали его зовут Максим", now)
+    worker = Thread(target=lambda: service.process_due_turns(now=now + timedelta(seconds=6)))
+    worker.start()
+    try:
+        assert started.wait(timeout=10)
+        inbound(101, "Но фамилии не знаю", now + timedelta(seconds=11))
+    finally:
+        release.set()
+        worker.join(timeout=10)
+    assert not worker.is_alive()
+    assert sender.calls == []
+
+    assert service.process_due_turns(now=now + timedelta(seconds=17)) == 1
+    assert [payload.text for payload, _ in routing.payloads] == [
+        "Мне рекомендовали его зовут Максим",
+        "Мне рекомендовали его зовут Максим\nНо фамилии не знаю",
+    ]
+    assert len(sender.calls) == 1
+
+
+def test_new_vk_fragment_after_outbound_intent_commit_still_prevents_old_send(tmp_path):
+    factory = make_session_factory(f"sqlite+pysqlite:///{tmp_path / 'pending_race.db'}")
+    Base.metadata.create_all(bind=factory.kw["bind"])
+    routing, sender = _Routing(), _Sender()
+    service = VKGatewayService(routing=routing, sender=sender, session_factory=factory)
+    now = datetime.now(UTC)
+
+    def inbound(message_id, text, at):
+        service.handle_event({"type": "message_new", "group_id": 55, "object": {"message": {
+            "id": message_id, "peer_id": 42, "from_id": 7, "text": text,
+            "date": int(at.timestamp()),
+        }}})
+
+    inbound(100, "Мне рекомендовали Максима", now)
+    injected = False
+
+    def before_flush(session, _flush_context, _instances):
+        if any(isinstance(item, OutboundTransportSend) and item.send_status == "pending" for item in session.new):
+            session.info["pending_intent"] = True
+
+    def after_commit(session):
+        nonlocal injected
+        if not injected and session.info.pop("pending_intent", False):
+            injected = True
+            inbound(101, "Фамилии не знаю", now + timedelta(seconds=11))
+
+    event.listen(factory.class_, "before_flush", before_flush)
+    event.listen(factory.class_, "after_commit", after_commit)
+    try:
+        service.process_due_turns(now=now + timedelta(seconds=6))
+    finally:
+        event.remove(factory.class_, "before_flush", before_flush)
+        event.remove(factory.class_, "after_commit", after_commit)
+    assert injected
+    assert sender.calls == []
+    service.process_due_turns(now=now + timedelta(seconds=17))
+    assert len(sender.calls) == 1
+    assert routing.payloads[-1][0].text == "Мне рекомендовали Максима\nФамилии не знаю"
 
 
 def test_durable_due_turn_processor_rehydrates_vk_market_attachment_context(tmp_path):

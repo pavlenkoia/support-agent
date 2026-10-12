@@ -25,16 +25,17 @@ def open_or_extend_turn(
     # A claimed turn is already generating an answer. A newly accepted customer
     # message is a newer durable turn boundary and invalidates that unfinished
     # answer before it can create an outbound intent.
-    claimed_turns = session.scalars(
+    unfinished_turns = session.scalars(
         select(VkTurn)
-        .where(VkTurn.conversation_id == conversation_id, VkTurn.status == "claimed")
+        .where(VkTurn.conversation_id == conversation_id, VkTurn.status.in_(("claimed", "retry_pending")))
         .with_for_update()
     ).all()
-    for claimed_turn in claimed_turns:
-        claimed_turn.status = "suppressed"
-        claimed_turn.reason = "newer_inbound"
-        claimed_turn.claim_token = None
-        claimed_turn.claim_until = None
+    first_event_id = min((turn.first_event_id for turn in unfinished_turns), default=event_id)
+    for unfinished_turn in unfinished_turns:
+        unfinished_turn.status = "suppressed"
+        unfinished_turn.reason = "newer_inbound"
+        unfinished_turn.claim_token = None
+        unfinished_turn.claim_until = None
 
     turn = session.scalar(
         select(VkTurn)
@@ -45,7 +46,7 @@ def open_or_extend_turn(
     if turn is None:
         turn = VkTurn(
             conversation_id=conversation_id,
-            first_event_id=event_id,
+            first_event_id=first_event_id,
             last_event_id=event_id,
             status="open",
             due_at=current + timedelta(seconds=quiet_seconds),
@@ -53,6 +54,7 @@ def open_or_extend_turn(
         session.add(turn)
         session.flush()
         return turn
+    turn.first_event_id = min(turn.first_event_id, first_event_id)
     turn.last_event_id = event_id
     turn.due_at = current + timedelta(seconds=quiet_seconds)
     session.flush()

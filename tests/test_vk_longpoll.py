@@ -1,7 +1,9 @@
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor
+from threading import Event
 
 from app.integrations.vk.longpoll import VKLongPollClient, VKLongPollState
-from app.workers.vk_main import FileLongPollStateStore, process_once, process_tick
+from app.workers.vk_main import FileLongPollStateStore, VKLiveWorker, process_once, process_tick
 
 
 class StubVKAPIClient:
@@ -111,6 +113,34 @@ def test_vk_tick_persists_new_longpoll_updates_before_due_retries() -> None:
 
     assert result["processed"] == 1
     assert gateway.steps == ["inbound", "recovery", "due_turn"]
+
+
+def test_live_vk_worker_continues_ingest_while_prior_turn_generates() -> None:
+    started, release = Event(), Event()
+
+    class BlockingGateway(OrderedGateway):
+        def process_due_turns(self):
+            started.set()
+            assert release.wait(timeout=10)
+            return super().process_due_turns()
+
+    client = StubVKAPIClient(poll_responses=[
+        {"ok": True, "ts": "778", "updates": [{"type": "message_new", "id": 1}]},
+        {"ok": True, "ts": "779", "updates": [{"type": "message_new", "id": 2}]},
+    ])
+    gateway = BlockingGateway()
+    poller = VKLongPollClient(api_client=client, group_id="55")
+    acker = RecordingAcker()
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        worker = VKLiveWorker(gateway=gateway, poller=poller, acker=acker, executor=executor)
+        worker.tick(VKLongPollState(server="https://lp.vk.test", key="key", ts="10"))
+        try:
+            assert started.wait(timeout=10)
+            worker.tick(acker.states[-1])
+            assert [event["id"] for event in gateway.events] == [1, 2]
+            assert gateway.steps[:3] == ["inbound", "recovery", "inbound"]
+        finally:
+            release.set()
 
 
 def test_vk_longpoll_default_wait_keeps_due_retries_under_fifteen_seconds() -> None:
