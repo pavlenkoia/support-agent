@@ -153,7 +153,7 @@ class RoutingService:
         retrieval = ({"kb_status": "runtime_facts", "kb_snippets": [], "kb_skip_reason": "full_runtime_facts"}
                      if self.answer_engine_mode != "jev_selected_fact" else
                      {"kb_status": "runtime_facts" if engine_result["source_refs"] else "not_used",
-                      "kb_snippets": [], "kb_skip_reason": "selected_fact"})
+                      "kb_snippets": [], "kb_skip_reason": "selected_facts"})
         outcome = self.outcome.execute(route, case, context, retrieval, payload.text)
         support_case = session.scalar(select(SupportCase).where(SupportCase.id == case["case_id"]))
         if support_case is not None:
@@ -162,10 +162,10 @@ class RoutingService:
         response_strategy = {"answer_engine": self.answer_engine_mode, **engine_result["telemetry"]}
         audit = build_audit_event(case, route, retrieval, outcome,
                                   {"turn_type": "jev_classified" if self.answer_engine_mode == "jev_selected_fact" else "simple_full_corpus"}, response_strategy)
-        if self.answer_engine_mode == "jev_selected_fact" and isinstance(response_strategy.get("selected_fact"), dict):
+        if self.answer_engine_mode == "jev_selected_fact" and isinstance(response_strategy.get("selected_facts"), list):
             persist_workflow_event(session, case["case_id"], {
                 "trace_id": audit["trace_packet"]["trace_id"],
-                "selected_fact": response_strategy["selected_fact"],
+                "selected_facts": response_strategy["selected_facts"],
                 "kb_sha256": response_strategy["kb_sha256"],
                 "turn_type": response_strategy.get("turn_type"),
                 "outcome_kind": kind,

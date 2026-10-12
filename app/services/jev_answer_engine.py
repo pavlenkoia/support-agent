@@ -62,6 +62,54 @@ class JevChoiceClient:
             time.sleep(2 ** attempt)
         raise RuntimeError("Jev request exhausted")
 
+    def choose_many(self, *, state: dict[str, Any], facts: list[dict[str, Any]]) -> list[str]:
+        if not facts or len(facts) > 255:
+            raise ValueError("invalid Jev fact count")
+        questions = {
+            f"fact_{index}": {
+                "type": "choice",
+                "instructions": "Оцени пригодность конкретного факта для прямого ответа хотя бы на одну часть последнего запроса; тематической близости недостаточно. Факт: " + json.dumps(
+                    {key: fact[key] for key in ("id", "text", "conditions")}, ensure_ascii=False),
+                "criteria": {
+                    "yes": "Этот факт непосредственно отвечает на одну из частей запроса.",
+                    "no": "Этот факт не отвечает непосредственно ни на одну часть запроса.",
+                },
+            }
+            for index, fact in enumerate(facts)
+        }
+        payload = {"model": self.model, "state": state, "questions": questions}
+        request = Request(self.endpoint, data=json.dumps(payload, ensure_ascii=False).encode("utf-8"), headers={
+            "Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json",
+        }, method="POST")
+        for attempt in range(3):
+            try:
+                with urlopen(request, timeout=45) as response:
+                    answers = json.load(response)["answers"]
+                if not isinstance(answers, dict) or set(answers) != set(questions):
+                    raise ValueError("incomplete Jev fact decisions")
+                selected = []
+                for index, fact in enumerate(facts):
+                    answer = answers[f"fact_{index}"]
+                    choice = answer["choice"]
+                    probabilities = answer["probabilities"]
+                    if (choice not in {"yes", "no"} or not isinstance(probabilities, dict)
+                            or set(probabilities) != {"yes", "no"} or any(
+                                not isinstance(value, (int, float)) or isinstance(value, bool) or not 0 <= value <= 1
+                                for value in probabilities.values()
+                            ) or probabilities[choice] <= 0):
+                        raise ValueError("invalid Jev fact decision")
+                    if choice == "yes":
+                        selected.append(fact["id"])
+                return selected
+            except HTTPError as exc:
+                if exc.code not in {429, 502, 503, 504} or attempt == 2:
+                    raise
+            except (URLError, TimeoutError):
+                if attempt == 2:
+                    raise
+            time.sleep(2 ** attempt)
+        raise RuntimeError("Jev request exhausted")
+
 
 class JevAnswerEngine:
     def __init__(self, *, selector: Any, writer: Any, profile_root: str | Path, max_corpus_chars: int = 50_000):
@@ -121,50 +169,33 @@ class JevAnswerEngine:
             validate_runtime_knowledge_artifact(corpus, max_chars=self.max_corpus_chars)
             decision["kb_sha256"] = hashlib.sha256(corpus_bytes).hexdigest()
             facts = {fact["id"]: fact for fact in corpus["facts"]}
-            criteria = {fact_id: json.dumps({"text": fact["text"], "conditions": fact["conditions"]}, ensure_ascii=False)
-                        for fact_id, fact in facts.items()}
-            criteria["no_answer"] = "Нет факта, релевантного информационной потребности или намерению клиента, и нет подтверждённого факта о подходящем следующем шаге."
             stage = "fact_choice"
-            choice = self.selector.choose(state=state, question="fact", criteria=criteria,
-                instructions="Определи основную информационную потребность или намерение клиента по последней реплике с учётом истории и переданного контекста вложения. Выбери ровно один опубликованный факт, который прямо помогает ответить на эту потребность или сообщает подтверждённый способ дальнейшего действия. Явный вопрос не обязателен; выраженный интерес к конкретной услуге — содержательный запрос. Для составного запроса выбери факт по основной потребности. Не трактуй тематически близкий факт как подтверждение частного условия, которого в нём нет. Выбери no_answer только если ни один факт не помогает по установленной потребности и не даёт подтверждённого следующего шага.")
-            if choice not in criteria:
-                raise ValueError("invalid selected fact")
-            if choice == "no_answer":
-                decision["selected_fact_id"] = None
+            selected_ids = self.selector.choose_many(state=state, facts=list(facts.values()))
+            if not isinstance(selected_ids, list) or len(set(selected_ids)) != len(selected_ids) or any(
+                    not isinstance(fact_id, str) or fact_id not in facts for fact_id in selected_ids):
+                raise ValueError("invalid selected facts")
+            decision["selected_fact_ids"] = selected_ids
+            if not selected_ids:
                 stage = "fallback"
                 text = profile["fallback_policy"]["no_answer"]["evidence"]["text"]
                 if not isinstance(text, str) or not text.strip():
                     raise ValueError("missing no_answer fallback")
                 return self._result("cannot_answer", text.strip(), **decision,
                                     turn_type=turn_type, logical_llm_call_count=0)
-            fact = facts[choice]
-            decision["selected_fact_id"] = choice
-            decision["selected_fact"] = dict(fact)
+            decision["selected_facts"] = [dict(facts[fact_id]) for fact_id in selected_ids]
             stage = "fact_writer"
-            selected = {key: fact[key] for key in ("id", "text", "conditions")}
+            selected = [{key: facts[fact_id][key] for key in ("id", "text", "conditions")}
+                        for fact_id in selected_ids]
             raw = self.writer.generate(system_prompt=self._prompt("JEV_ANSWER_PROMPT.md"),
                 user_prompt=json.dumps({"question": question, "history": projected_history,
-                    "selected_facts": [selected],
-                    "output_contract": {"response_text": "natural grounded reply limited to selected fact"}
-                }, ensure_ascii=False), temperature=0.0, response_format={"type": "json_object"})
-            try:
-                parsed = SimpleAnswerEngine._parse_json_object(raw)
-                content_format = "json"
-            except json.JSONDecodeError:
-                plain = raw.strip()
-                if (not plain or len(plain) > 1200 or "\n" in plain
-                        or plain.startswith(("{", "[", "```", "<think>"))):
-                    raise
-                parsed = {"response_text": plain}
-                content_format = "plain"
-            text = parsed.get("response_text")
-            evidence = parsed.get("evidence")
-            if (not isinstance(text, str) or not text.strip() or
-                    (evidence is not None and (not isinstance(evidence, list) or len(evidence) != 1
-                    or not isinstance(evidence[0], dict) or evidence[0].get("fact_id") != choice))):
-                raise ValueError("unverified selected fact reply")
-            return self._result("grounded_answer", text.strip(), [choice], **decision,
-                                writer_content_format=content_format, turn_type=turn_type, logical_llm_call_count=1)
+                    "selected_facts": selected,
+                }, ensure_ascii=False), temperature=0.0, response_format=None)
+            text = raw.strip()
+            if (not text or len(text) > 1200 or "\n" in text
+                    or text.startswith(("{", "[", "```", "<think>"))):
+                raise ValueError("invalid plain selected facts reply")
+            return self._result("grounded_answer", text, selected_ids, **decision,
+                                writer_content_format="plain", turn_type=turn_type, logical_llm_call_count=1)
         except Exception as exc:
             # Transport and schema errors do not mean that knowledge is absent.
             return self._result("retry_pending", contract_error=f"jev_engine:{stage}:{type(exc).__name__}",

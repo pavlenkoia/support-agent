@@ -86,25 +86,25 @@ def test_jev_no_answer_keeps_exact_text_on_first_reply(tmp_path: Path) -> None:
 def test_jev_selected_fact_snapshot_is_persisted_for_later_review(tmp_path: Path) -> None:
     session_factory = make_session_factory(f"sqlite+pysqlite:///{tmp_path / 'jev-telemetry.db'}")
     Base.metadata.create_all(bind=session_factory.kw["bind"])
-    jev, _, _ = make_jev_engine(tmp_path, ["substantive", "jump.announcement"],
-        [json.dumps({"response_text": "Дата будет подтверждена в анонсе."}, ensure_ascii=False)])
+    jev, _, _ = make_jev_engine(tmp_path, ["substantive", ["jump.announcement", "certificate.validity"]],
+        ["Дата будет подтверждена в анонсе. Сертификат действует один год."])
     routing = RoutingService(session_factory=session_factory, simple_answer_engine=jev, answer_engine_mode="jev_selected_fact")
     result = routing.handle_inbound(InboundMessage(channel="internal_test", external_user_id="igor", external_chat_id="igor", text="Когда прыжки?"))
     with session_factory() as session:
         events = session.scalars(select(WorkflowEvent).where(WorkflowEvent.case_id == result["case"]["case_id"])).all()
     snapshots = [event.payload for event in events if event.event_type == "jev_fact_selected"]
     assert len(snapshots) == 1
-    assert snapshots[0]["selected_fact"] == FACTS[0]
+    assert snapshots[0]["selected_facts"] == FACTS
     assert snapshots[0]["kb_sha256"] == result["audit"]["response_strategy"]["kb_sha256"]
     assert snapshots[0]["trace_id"] == result["audit"]["trace_packet"]["trace_id"]
     assert result["audit"]["response_strategy"]["turn_type"] == "substantive"
-    assert result["audit"]["trace_packet"]["source_refs"] == ["jump.announcement"]
+    assert result["audit"]["trace_packet"]["source_refs"] == ["jump.announcement", "certificate.validity"]
 
 
 def test_jev_fact_snapshot_is_persisted_when_writer_fails(tmp_path: Path) -> None:
     session_factory = make_session_factory(f"sqlite+pysqlite:///{tmp_path / 'jev-error.db'}")
     Base.metadata.create_all(bind=session_factory.kw["bind"])
-    jev, _, _ = make_jev_engine(tmp_path, ["substantive", "jump.announcement"], ['{"response_text": invalid}'])
+    jev, _, _ = make_jev_engine(tmp_path, ["substantive", ["jump.announcement"]], ['{"response_text": invalid}'])
     routing = RoutingService(session_factory=session_factory, simple_answer_engine=jev, answer_engine_mode="jev_selected_fact")
     result = routing.handle_inbound(InboundMessage(channel="internal_test", external_user_id="igor", external_chat_id="igor", text="Когда прыжки?"))
     with session_factory() as session:
@@ -112,7 +112,7 @@ def test_jev_fact_snapshot_is_persisted_when_writer_fails(tmp_path: Path) -> Non
     snapshots = [event.payload for event in events if event.event_type == "jev_fact_selected"]
     assert result["route"]["route"] == "retry_pending"
     assert len(snapshots) == 1
-    assert snapshots[0]["selected_fact"] == FACTS[0]
+    assert snapshots[0]["selected_facts"] == [FACTS[0]]
     assert snapshots[0]["trace_id"] == result["audit"]["trace_packet"]["trace_id"]
     assert result["audit"]["response_strategy"]["contract_error"].startswith("jev_engine:fact_writer:")
 

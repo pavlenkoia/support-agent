@@ -19,6 +19,10 @@ class ChoiceClient:
         self.calls.append({"state": state, "question": question, "criteria": criteria, "instructions": instructions})
         return next(self.choices)
 
+    def choose_many(self, *, state, facts):
+        self.calls.append({"state": state, "facts": facts})
+        return list(next(self.choices))
+
 
 class Writer:
     def __init__(self, outputs):
@@ -46,18 +50,17 @@ def engine(tmp_path, choices, outputs=()):
     return JevAnswerEngine(selector=selector, writer=writer, profile_root=profile(tmp_path)), selector, writer
 
 
-def test_selected_fact_is_only_business_evidence_and_composite_chooses_main(tmp_path):
-    llm, selector, writer = engine(tmp_path, ["substantive", "jump.announcement"], [json.dumps({"response_text": "Дата будет подтверждена в анонсе группы за несколько дней до выходных."}, ensure_ascii=False)])
+def test_selected_fact_is_only_business_evidence(tmp_path):
+    llm, selector, writer = engine(tmp_path, ["substantive", ["jump.announcement"]], ["Дата будет подтверждена в анонсе группы за несколько дней до выходных."])
     result = llm.answer(question="Здравствуйте, будут прыжки 26-го и сколько сертификат действует?", history=[{"role": "user", "content": "Планирую поездку"}],
                         tool_observations=[{"kind": "calendar_weekday", "summary": "Дата 2026-10-26 приходится на понедельник.", "structured": {"year": 2026}}])
     assert result["kind"] == "grounded_answer"
     assert result["source_refs"] == ["jump.announcement"]
-    assert result["telemetry"]["selected_fact_id"] == "jump.announcement"
-    assert result["telemetry"]["selected_fact"] == FACTS[0]
+    assert result["telemetry"]["selected_fact_ids"] == ["jump.announcement"]
+    assert result["telemetry"]["selected_facts"] == [FACTS[0]]
     assert len(result["telemetry"]["kb_sha256"]) == 64
     assert len(selector.calls) == 2
-    assert set(selector.calls[1]["criteria"]) == {"jump.announcement", "certificate.validity", "no_answer"}
-    assert "подтверждённый способ дальнейшего действия" in selector.calls[1]["instructions"]
+    assert [fact["id"] for fact in selector.calls[1]["facts"]] == ["jump.announcement", "certificate.validity"]
     packet = json.loads(writer.calls[0]["user_prompt"])
     assert packet["selected_facts"] == [{k: FACTS[0][k] for k in ("id", "text", "conditions")}]
     assert packet["question"] == "Здравствуйте, будут прыжки 26-го и сколько сертификат действует?"
@@ -67,8 +70,37 @@ def test_selected_fact_is_only_business_evidence_and_composite_chooses_main(tmp_
     assert writer.calls[0]["system_prompt"] == "Ответь естественно только по выбранному факту."
 
 
+def test_composite_selects_all_relevant_facts_in_one_batch_and_writes_plain_text(tmp_path):
+    llm, selector, writer = engine(tmp_path, ["substantive", ["jump.announcement", "certificate.validity"]],
+                                   ["Анонс появится перед выходными. Сертификат действует один год."])
+    result = llm.answer(question="Когда анонс и сколько действует сертификат?", history=[])
+    assert result["kind"] == "grounded_answer"
+    assert result["source_refs"] == ["jump.announcement", "certificate.validity"]
+    assert result["telemetry"]["selected_fact_ids"] == result["source_refs"]
+    assert result["telemetry"]["selected_facts"] == FACTS
+    assert len(selector.calls) == 2
+    assert len(selector.calls[1]["facts"]) == 2
+    assert writer.calls[0]["response_format"] is None
+    packet = json.loads(writer.calls[0]["user_prompt"])
+    assert [f["id"] for f in packet["selected_facts"]] == result["source_refs"]
+    assert "output_contract" not in packet
+
+
+def test_empty_multi_selection_uses_no_answer_without_writer(tmp_path):
+    llm, _, writer = engine(tmp_path, ["substantive", []])
+    result = llm.answer(question="Неизвестная услуга?", history=[])
+    assert result["kind"] == "cannot_answer"
+    assert writer.calls == []
+
+
+def test_plain_writer_rejects_structured_or_multiline_output(tmp_path):
+    for index, output in enumerate(('{"response_text":"текст"}', "строка\nвторая")):
+        llm, _, _ = engine(tmp_path / str(index), ["substantive", ["jump.announcement"]], [output])
+        assert llm.answer(question="Когда анонс?", history=[])["kind"] == "retry_pending"
+
+
 def test_no_answer_uses_configured_fallback_without_writer(tmp_path):
-    llm, selector, writer = engine(tmp_path, ["substantive", "no_answer"])
+    llm, selector, writer = engine(tmp_path, ["substantive", []])
     result = llm.answer(question="Есть ли неизвестная услуга?", history=[])
     assert result["kind"] == "cannot_answer"
     assert result["response_text"] == "Для уточнения вопроса можно позвонить в офис в рабочее время."
@@ -86,19 +118,16 @@ def test_live_profile_no_answer_literal_is_approved_text():
 
 
 def test_expressed_interest_uses_intent_and_attachment_context_for_fact_choice(tmp_path):
-    llm, selector, writer = engine(tmp_path, ["substantive", "jump.announcement"],
-                                  [json.dumps({"response_text": "Условия сообщают в анонсе группы."}, ensure_ascii=False)])
+    llm, selector, writer = engine(tmp_path, ["substantive", ["jump.announcement"]],
+                                  ["Условия сообщают в анонсе группы."])
     question = "Здравствуйте! Меня заинтересовала эта услуга.\nКонтекст VK Market-вложения:\nНазвание: Прыжок"
     result = llm.answer(question=question, history=[])
 
     assert result["kind"] == "grounded_answer"
-    assert result["telemetry"]["selected_fact_id"] == "jump.announcement"
+    assert result["telemetry"]["selected_fact_ids"] == ["jump.announcement"]
     assert "выраженное намерение" in TURN_TYPES["substantive"]
     assert "вопросительная форма не обязательны" in TURN_TYPES["substantive"]
-    assert "информационную потребность или намерение" in selector.calls[1]["instructions"]
-    assert "контекста вложения" in selector.calls[1]["instructions"]
-    assert "выраженный интерес к конкретной услуге" in selector.calls[1]["instructions"]
-    assert "нет подтверждённого факта о подходящем следующем шаге" in selector.calls[1]["criteria"]["no_answer"]
+    assert len(selector.calls[1]["facts"]) == len(FACTS)
     assert selector.calls[1]["state"]["message"] == question
     assert json.loads(writer.calls[0]["user_prompt"])["selected_facts"][0]["id"] == "jump.announcement"
 
@@ -117,6 +146,24 @@ def test_choice_client_rejects_unlisted_and_zero_probability_choices():
         with patch("app.services.jev_answer_engine.urlopen", return_value=BytesIO(raw)):
             with pytest.raises(ValueError, match="invalid Jev choice"):
                 client.choose(state={"message": "test"}, question="fact", criteria=criteria, instructions="Select")
+
+
+def test_choice_client_batch_validates_every_fact_decision():
+    from io import BytesIO
+    from unittest.mock import patch
+    import pytest
+    from app.services.jev_answer_engine import JevChoiceClient
+
+    client = JevChoiceClient("test-secret")
+    answers = {
+        "fact_0": {"choice": "yes", "probabilities": {"yes": 0.8, "no": 0.2}},
+        "fact_1": {"choice": "no", "probabilities": {"yes": 0.1, "no": 0.9}},
+    }
+    with patch("app.services.jev_answer_engine.urlopen", return_value=BytesIO(json.dumps({"answers": answers}).encode())):
+        assert client.choose_many(state={"message": "test"}, facts=FACTS) == ["jump.announcement"]
+    with patch("app.services.jev_answer_engine.urlopen", return_value=BytesIO(json.dumps({"answers": {"fact_0": answers["fact_0"]}}).encode())):
+        with pytest.raises(ValueError, match="incomplete Jev fact decisions"):
+            client.choose_many(state={"message": "test"}, facts=FACTS)
 
 
 def test_social_acknowledgement_is_not_flood_or_fact_selection(tmp_path):
@@ -168,23 +215,22 @@ def test_offtopic_and_flood_stay_distinct_from_no_answer(tmp_path):
         assert len(selector.calls) == 1
 
 
-def test_plain_and_json_content_from_same_selected_fact_are_delivered(tmp_path):
+def test_plain_content_from_selected_fact_is_delivered(tmp_path):
     answer = "Дата прыжков подтверждается в анонсе группы за несколько дней до выходных."
-    for index, output in enumerate((answer, json.dumps({"response_text": answer}, ensure_ascii=False))):
-        llm, _, _ = engine(tmp_path / str(index), ["substantive", "jump.announcement"], [output])
-        result = llm.answer(question="Когда подтвердится дата прыжков?", history=[])
-        assert result["kind"] == "grounded_answer"
-        assert result["response_text"] == answer
-        assert result["source_refs"] == ["jump.announcement"]
+    llm, _, _ = engine(tmp_path, ["substantive", ["jump.announcement"]], [answer])
+    result = llm.answer(question="Когда подтвердится дата прыжков?", history=[])
+    assert result["kind"] == "grounded_answer"
+    assert result["response_text"] == answer
+    assert result["source_refs"] == ["jump.announcement"]
 
 
 def test_invalid_structured_content_or_conflicting_fact_id_is_not_delivered(tmp_path):
     for output in ('{"response_text": invalid}', json.dumps({"response_text": "Звоните по выдуманному номеру.", "evidence": [{"fact_id": "certificate.validity", "quote": "Другое"}]}, ensure_ascii=False)):
-        llm, _, _ = engine(tmp_path / str(len(output)), ["substantive", "jump.announcement"], [output])
+        llm, _, _ = engine(tmp_path / str(len(output)), ["substantive", ["jump.announcement"]], [output])
         result = llm.answer(question="Будут прыжки 26-го?", history=[])
         assert result["kind"] == "retry_pending"
         assert result["response_text"] == ""
-        assert result["telemetry"]["selected_fact"] == FACTS[0]
+        assert result["telemetry"]["selected_facts"] == [FACTS[0]]
 
 
 def test_selector_failure_does_not_use_no_answer_fallback(tmp_path):

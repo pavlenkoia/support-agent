@@ -91,11 +91,11 @@ The normalized application inbound contract is transport-neutral and currently a
 - `outcome`
 - `audit`
 
-For `simple_full_corpus_natural`, per-turn `audit.response_strategy` records one-call telemetry and deterministic tool observations. In `jev_selected_fact`, Jev classifies the turn and selects a single fact; the chosen fact is also stored in a dedicated workflow event.
+For `simple_full_corpus_natural`, per-turn `audit.response_strategy` records one-call telemetry and deterministic tool observations. In `jev_selected_fact`, Jev classifies the turn and evaluates each published fact in one typed batch; the selected fact snapshots are stored together in a dedicated workflow event.
 
 Current fields of interest:
-- `audit.response_strategy.answer_engine` — selected runtime mode. Jev records turn type and selected fact ID, or a stage-specific error on `retry_pending`.
-- `workflow_events` event `jev_fact_selected` — full selected fact (`id`, `text`, `conditions`, `source_refs`), runtime KB SHA-256, outcome and `trace_id` matching `inbound_processed.trace_packet.trace_id`. Persisted even when the writer fails after fact selection; absent when no fact was selected. Jev probabilities are not persisted.
+- `audit.response_strategy.answer_engine` — selected runtime mode. Jev records turn type and selected fact IDs, or a stage-specific error on `retry_pending`.
+- `workflow_events` event `jev_fact_selected` — list `selected_facts` with each fact's `id`, `text`, `conditions`, `source_refs`, runtime KB SHA-256, outcome and `trace_id` matching `inbound_processed.trace_packet.trace_id`. Persisted even when the writer fails after fact selection; absent when no fact was selected. Jev probabilities are not persisted.
 - `audit.response_strategy.logical_llm_call_count` — one answer-provider call for the legacy full-corpus route; in the active Jev mode, zero for `no_answer`, one for writer turns (Jev requests are separate).
 - `audit.response_strategy.history_message_count` — number of bounded prior `user|assistant` messages passed to the provider.
 - `audit.response_strategy.kb_page_count` / `kb_char_count` — the generated runtime-fact KB supplied to the provider.
