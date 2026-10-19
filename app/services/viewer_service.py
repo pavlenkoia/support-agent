@@ -12,12 +12,15 @@ from app.core.db import SessionLocal
 from app.models.case import SupportCase
 from app.models.conversation import Conversation
 from app.models.message import Message
+from app.models.outbound_transport_send import OutboundTransportSend
+from app.models.transport_event import TransportEvent
 from app.models.user import User
 from app.schemas.viewer import (
     ViewerDialogItem,
     ViewerDialogMessagesResponse,
     ViewerMessageItem,
 )
+from app.services.viewer_timeline import vk_timeline
 
 
 @dataclass(slots=True)
@@ -106,6 +109,20 @@ class ViewerService:
             )
             stmt = select(Message).where(Message.case_id.in_(selected_case_ids)).order_by(Message.created_at.asc(), Message.id.asc())
             messages = session.scalars(stmt).all()
+            events = session.scalars(
+                select(TransportEvent).where(
+                    TransportEvent.platform == "vk",
+                    TransportEvent.conversation_external_id == conversation_id,
+                    TransportEvent.event_type.in_(("message_new", "message_reply")),
+                )
+            ).all() if messages else []
+            sends = session.scalars(
+                select(OutboundTransportSend).where(
+                    OutboundTransportSend.platform == "vk",
+                    OutboundTransportSend.case_id.in_({message.case_id for message in messages}),
+                )
+            ).all() if messages else []
+            timeline = vk_timeline(messages, events, sends)
 
         return ViewerDialogMessagesResponse(
             conversation_id=meta.conversation_id,
@@ -114,7 +131,7 @@ class ViewerService:
             messages=[
                 ViewerMessageItem(
                     id=str(message.id),
-                    sent_at=self._normalize_dt(message.created_at),
+                    sent_at=sent_at,
                     direction="inbound" if message.role == "user" else "outbound",
                     author_name=(
                         (meta.display_name or meta.external_chat_id)
@@ -125,7 +142,7 @@ class ViewerService:
                     ),
                     text=message.content,
                 )
-                for message in messages
+                for message, sent_at in timeline
             ],
         )
 

@@ -55,7 +55,9 @@ Behavior rules:
 Ordering contract:
 - dialogs are sorted by the selected day's message time in ascending order (earliest first)
 
-`GET /api/viewer/dialogs/{conversation_id}/messages?day=YYYY-MM-DD` returns the selected dialog scoped to the requested day only.
+`GET /api/viewer/dialogs/{conversation_id}/messages?day=YYYY-MM-DD` selects cases with activity on that day and returns their full persisted message history.
+
+Message chronology is a read-only projection. A uniquely correlated VK transport event supplies `sent_at`; equal VK timestamps are ordered by numeric external message ID, not local record-insertion time. Incoming/operator messages require an exact role/text/source-time match. Bot messages require a unique case/text outbound-ledger match and the corresponding `message_reply` with identical text. Missing or ambiguous transport evidence retains stored time and local ID ordering; repeated text alone never establishes identity. No history rows or customer sends are changed. The frontend preserves API array order.
 
 ## Viewer Web Push contract
 
