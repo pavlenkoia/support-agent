@@ -45,6 +45,14 @@ The command fails when the single tracked/mounted profile tree is empty or incon
 
 The Jev code release `a9e0fa7` used an exceptional image build based on the preceding production image because the normal build could not fetch an unchanged build dependency. No dependencies or migrations changed: the released images include the committed `app/` tree and the same installed environment; the successful receipt is under the external runtime root. This is a historical build note, **not** a blanket replacement for the normal command. Do not use the base-image method if dependencies, migrations or entry points have changed.
 
+## Viewer chronology release
+
+Release `c9e66d0` fixes Viewer ordering when a VK reply and a customer follow-up share the same second. The read-only projection uses uniquely correlated VK timestamps and numeric external IDs; missing or ambiguous evidence retains stored-time fallback. See `docs/api/contracts.md` for correlation rules.
+
+Verification: 247 tests passed against the released application image. The served nginx API rejected anonymous access, accepted the existing login flow, and returned the incident dialogue in VK order. A read-only PostgreSQL check confirmed unchanged history and outbound-send count. No customer replay, model call, prompt change, schema change, or KB promotion was needed. The separate `18d248d` commit only reconciles previously published KB facts into Git; rebuilt core artifacts matched the active profile byte-for-byte.
+
+The successful receipt is `20261019T222504Z-c9e66d02c48e.json` under the external runtime release directory. All five application-plane services run that code release from the canonical `/home/tian/support-agent` Compose checkout; PostgreSQL was not recreated. A later documentation-only landing commit does not require another runtime rollout.
+
 ## Rollback
 
 Use a previous receipt only when its `status` is `success`:
