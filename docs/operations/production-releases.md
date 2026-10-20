@@ -59,6 +59,10 @@ The successful receipt is `20261019T222504Z-c9e66d02c48e.json` under the externa
 
 The approved prompt was checked with 248 passing tests and a nine-turn isolated replay (the incident plus an existing historical scenario set, not a complete maintained questionnaire). The sampled incident answer omitted internal-selection wording but still stated that some requirements were unspecified. A separate greeting/follow-up conflict from a selected KB fact was disclosed and accepted outside this change; KB, selector, social prompt, provider and reasoning settings remain unchanged.
 
+Production release `7745f37` passed the normal five-service release gate, receipt `20261020T160128Z-7745f37bd734.json`. The released application image passed all 248 tests. One closed internal no-send session (`probe_sess_d6f65fdf2e7d`, case 1568) persisted an answer without internal-selection wording; PostgreSQL confirmed `is_test=true` and zero outbound transport sends. Existing telemetry correlates the selected-fact snapshot, processed turn and stored reply, but does not persist the literal writer request. All executor prompt hashes match the approved artifact; KB bytes and writer model/reasoning configuration are unchanged.
+
+For this prompt change, rollback must also restore the previous authored and mounted `JEV_ANSWER_PROMPT.md` before selecting a prior successful image receipt; image rollback alone does not revert the bind-mounted prompt. The previous literal and runtime evidence are retained under the private `checks/case1567-approved-prompt/production-before/` directory beneath the external runtime root. Do not restore a database backup for a prompt rollback.
+
 ## Rollback
 
 Use a previous receipt only when its `status` is `success`:
