@@ -53,6 +53,12 @@ Verification: 247 tests passed against the released application image. The serve
 
 The successful receipt is `20261019T222504Z-c9e66d02c48e.json` under the external runtime release directory. All five application-plane services run that code release from the canonical `/home/tian/support-agent` Compose checkout; PostgreSQL was not recreated. A later documentation-only landing commit does not require another runtime rollout.
 
+## Selected-fact writer: customer/internal boundary
+
+`JEV_ANSWER_PROMPT.md` requires customer-facing wording about the request, not about internal sources, fact selection, system structure or information processing. Missing information is not proof that a condition or restriction does not exist. When a part cannot be answered, the writer must say so briefly without internal explanations or assumptions. These are model instructions, not a deterministic output filter or a new routing branch.
+
+The approved prompt was checked with 248 passing tests and a nine-turn isolated replay (the incident plus an existing historical scenario set, not a complete maintained questionnaire). The sampled incident answer omitted internal-selection wording but still stated that some requirements were unspecified. A separate greeting/follow-up conflict from a selected KB fact was disclosed and accepted outside this change; KB, selector, social prompt, provider and reasoning settings remain unchanged.
+
 ## Rollback
 
 Use a previous receipt only when its `status` is `success`:
