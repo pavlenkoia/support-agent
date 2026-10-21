@@ -17,7 +17,8 @@ from app.services.simple_answer_engine import SimpleAnswerEngine
 JEV_ENDPOINT = "https://openrouter.ai/api/v1/systemone"
 TURN_TYPES = {
     "substantive": "Содержательный запрос по теме поддержки: вопрос, выраженное намерение получить сведения или помощь, либо продолжение такого запроса. Учитывай текст, историю и переданный контекст вложения. Вопросительный знак и вопросительная форма не обязательны.",
-    "social": "Приветствие, благодарность, прощание, подтверждение понимания или эмоциональная реакция на уже полученный ответ без нового запроса. Сожаление и разочарование без вопроса или просьбы относятся сюда.",
+    "social_reply": "Приветствие или эмоциональная реакция, требующая короткого ответа, без нового содержательного запроса.",
+    "social_no_reply": "Только благодарность, подтверждение понимания или завершение разговора без нового запроса и без необходимости отвечать.",
     "off_topic": "Вопрос вне предмета поддержки, без вопроса по теме поддержки.",
     "flood": "Флуд без содержательного запроса; приветствие, благодарность и подтверждение понимания не флуд.",
 }
@@ -138,15 +139,17 @@ class JevAnswerEngine:
                      "role": profile.get("role"), "scope": profile["scope"]}
             stage = "turn_type"
             turn_type = self.selector.choose(state=state, question="turn_type", criteria=TURN_TYPES,
-                instructions="Определи тип последней реплики в контексте истории. Если клиент спрашивает, просит сведения или уточняет прежний ответ, выбери substantive, даже если реплика также выражает эмоцию. Если клиент только реагирует на полученный ответ и не запрашивает новых сведений, выбери social. Благодарность и подтверждение понимания не флуд.")
+                instructions="Определи тип последней реплики в контексте истории. Если клиент спрашивает, просит сведения или уточняет прежний ответ, выбери substantive, даже если реплика также выражает эмоцию. Приветствие или эмоциональная реакция, нуждающаяся в коротком ответе, — social_reply. Только благодарность, подтверждение или завершение без нового запроса — social_no_reply. Благодарность и подтверждение понимания не флуд.")
             if turn_type not in TURN_TYPES:
                 raise ValueError("invalid turn type")
+            if turn_type == "social_no_reply":
+                return self._result("social_no_reply", turn_type=turn_type, logical_llm_call_count=0)
             if turn_type != "substantive":
                 stage = "dialogue_writer"
                 user_fields = {"question": question, "turn_type": turn_type,
                     "role": profile.get("role"), "scope": profile["scope"],
                     "output_contract": {"response_text": "short natural reply without new business facts"}}
-                if turn_type != "social":
+                if turn_type != "social_reply":
                     user_fields["history"] = projected_history
                 raw = self.writer.generate(system_prompt=self._prompt("JEV_DIALOGUE_PROMPT.md"),
                     user_prompt=json.dumps(user_fields, ensure_ascii=False),
@@ -155,12 +158,12 @@ class JevAnswerEngine:
                     text = SimpleAnswerEngine._parse_json_object(raw).get("response_text")
                 except json.JSONDecodeError:
                     plain = raw.strip()
-                    if turn_type != "social" or not plain or len(plain) > 500 or "\n" in plain or plain.startswith(("{", "[", "```")):
+                    if turn_type != "social_reply" or not plain or len(plain) > 500 or "\n" in plain or plain.startswith(("{", "[", "```")):
                         raise
                     text = plain
                 if not isinstance(text, str) or not text.strip():
                     raise ValueError("invalid dialogue reply")
-                return self._result("social_reply" if turn_type == "social" else "out_of_scope", text.strip(),
+                return self._result("social_reply" if turn_type == "social_reply" else "out_of_scope", text.strip(),
                                     turn_type=turn_type, logical_llm_call_count=1)
 
             stage = "knowledge"

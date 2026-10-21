@@ -135,6 +135,9 @@ class TelegramGatewayService:
             return "retry_pending"
         reply_text = self._build_reply_text(result)
         if not reply_text:
+            if (result.get("outcome") or {}).get("outcome_type") == "social_no_reply":
+                self._mark_sources_processed(generation)
+                return "completed_no_reply"
             self._mark_retry_pending(inbound, "empty_reply", generation=generation, now=due_at)
             return "retry_pending"
         case_id = (result.get("case") or {}).get("case_id")

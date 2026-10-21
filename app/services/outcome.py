@@ -11,6 +11,15 @@ class OutcomeService:
         route_name = route["route"]
         reply = route.get("reply", {})
 
+        if route_name == "social_no_reply":
+            case["case_status"] = "resolved"
+            context["case_state"]["case_status"] = "resolved"
+            return {
+                "outcome_type": "social_no_reply",
+                "outcome_status": "completed",
+                "outcome_payload": {},
+            }
+
         if route_name == "answer":
             case["case_status"] = "resolved"
             context["case_state"]["case_status"] = "resolved"

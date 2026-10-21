@@ -2,8 +2,6 @@ import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from sqlalchemy import text
-
 from app.models.transport_event import TransportEvent
 from app.schemas.message import InboundMessage
 from app.services.telegram_gateway import TelegramGatewayService
@@ -264,6 +262,40 @@ def test_telegram_gateway_keeps_provider_failures_retryable_after_multiple_attem
             assert event.status == "retry_pending"
             assert event.retry_attempts == expected_attempts
             due_at = event.available_at
+
+
+def test_telegram_gateway_marks_social_no_reply_processed_without_retry_or_send(tmp_path: Path) -> None:
+    base_routing = make_test_routing_service(tmp_path)
+    sender = RecordingSender()
+
+    class NoReplyRouting(RetryRouting):
+        def handle_inbound(self, payload, *, persist_inbound=True) -> dict:
+            self.calls += 1
+            return {
+                "case": {"case_status": "resolved", "case_id": 1},
+                "route": {"route": "social_no_reply"},
+                "outcome": {
+                    "outcome_type": "social_no_reply",
+                    "outcome_status": "completed",
+                    "outcome_payload": {"response_text": ""},
+                },
+            }
+
+    routing = NoReplyRouting(base_routing.session_factory)
+    service = TelegramGatewayService(routing=routing, sender=sender, allowed_chat_ids=set())
+    result = service.handle_update({"update_id": 901, "message": {
+        "message_id": 901, "text": "Спасибо, понятно", "chat": {"id": 12345}, "from": {"id": 777},
+    }})
+    assert result["queued"] is True
+    service.queue.flush_due(now=datetime.now(UTC) + timedelta(seconds=6), background=False)
+
+    with routing.session_factory() as session:
+        event = session.query(TransportEvent).filter(TransportEvent.dedupe_key == "telegram:message:12345:901").one()
+        assert event.status == "processed"
+        assert event.retry_attempts == 0
+        assert event.error_text is None
+    assert routing.calls == 1
+    assert [call for call in sender.calls if call[0] == "message"] == []
 
 
 

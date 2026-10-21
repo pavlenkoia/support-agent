@@ -154,6 +154,8 @@ class VKGatewayService:
         case_id = case.get("case_id")
         reply_text = self._build_reply_text(result)
         if not reply_text:
+            if (result.get("outcome") or {}).get("outcome_type") == "social_no_reply":
+                return generation.run_if_current(lambda: self._complete_generation_without_reply(generation))
             self._mark_generation_waiting_human(
                 generation,
                 case_id=case_id,
@@ -363,6 +365,25 @@ class VKGatewayService:
         with self.session_factory() as session:
             self._mark_generation_sources(session, generation, status="processed")
             session.commit()
+
+    def _complete_generation_without_reply(self, generation: Generation) -> str:
+        with self.session_factory() as session:
+            events = [event for source in generation.source_messages
+                      if source.external_event_id
+                      and (event := find_transport_event(session, source.external_event_id)) is not None]
+            event_ids = [event.id for event in events]
+            turns = session.scalars(select(VkTurn).where(
+                VkTurn.status == "open", VkTurn.first_event_id.in_(event_ids),
+                VkTurn.last_event_id.in_(event_ids),
+            ).with_for_update()).all()
+            if not turns:
+                return "superseded"
+            for turn in turns:
+                turn.status, turn.reason = "sent", "completed_no_reply"
+                turn.claim_token = turn.claim_until = None
+            self._mark_generation_sources(session, generation, status="processed")
+            session.commit()
+        return "completed_no_reply"
 
     def _process_message_new(
         self,
@@ -605,6 +626,19 @@ class VKGatewayService:
                 continue
             reply_text = self._build_reply_text(result)
             if not reply_text:
+                if (result.get("outcome") or {}).get("outcome_type") == "social_no_reply":
+                    with self.session_factory() as session:
+                        turn = session.get(VkTurn, turn_id)
+                        if turn is not None and turn.status == "claimed" and turn.claim_token == claim_token:
+                            turn.status, turn.reason = "sent", "completed_no_reply"
+                            turn.claim_token = turn.claim_until = None
+                            for event in events:
+                                stored = session.get(TransportEvent, event.id)
+                                if stored is not None:
+                                    mark_transport_event_processed(session, stored, status="processed")
+                            session.commit()
+                    processed += 1
+                    continue
                 self._finish_turn(turn_id, claim_token, status="failed", reason="completed_without_customer_reply")
                 processed += 1
                 continue
@@ -821,6 +855,12 @@ class VKGatewayService:
             if event is None or len(events) != len(claimed_event_ids):
                 return claimed_count
             if not reply_text:
+                if (result.get("outcome") or {}).get("outcome_type") == "social_no_reply":
+                    for source_event in events:
+                        if source_event.status == "processing":
+                            mark_transport_event_processed(session, source_event, status="processed")
+                    session.commit()
+                    return claimed_count
                 for source_event in events:
                     mark_transport_event_failed(session, source_event, "retry_completed_without_customer_reply")
                 session.commit()

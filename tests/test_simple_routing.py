@@ -1,4 +1,3 @@
-import json
 from pathlib import Path
 
 from sqlalchemy import select
@@ -68,6 +67,33 @@ def test_opt_in_jev_route_uses_selected_engine_and_keeps_delivery_isolated(tmp_p
     assert result["outcome"]["outcome_type"] == "cannot_answer"
     assert result["outcome"]["outcome_payload"]["response_text"] == "Для уточнения вопроса можно позвонить в офис в рабочее время."
     assert len(engine.calls) == 1
+
+
+def test_jev_no_reply_persists_completed_without_assistant_and_probe_does_not_echo(tmp_path: Path) -> None:
+    from app.models.case import SupportCase
+    from app.models.message import Message
+    from app.services.probe_service import ProbeService
+
+    session_factory = make_session_factory(f"sqlite+pysqlite:///{tmp_path / 'jev-no-reply.db'}")
+    Base.metadata.create_all(bind=session_factory.kw["bind"])
+    jev, selector, writer = make_jev_engine(tmp_path, ["social_no_reply"])
+    routing = RoutingService(session_factory=session_factory, simple_answer_engine=jev, answer_engine_mode="jev_selected_fact")
+    probe = ProbeService(routing=routing, session_factory=session_factory)
+    created = probe.start_session(scenario_name="social-no-reply", requested_by="test")
+    result = probe.send_message(created["session_id"], "Спасибо")
+    assert result["route"]["route"] == "social_no_reply"
+    assert result["final_answer"] == ""
+    assert result["outcome"]["outcome_status"] == "completed"
+    with session_factory() as session:
+        case = session.get(SupportCase, result["case_id"])
+        messages = session.query(Message).filter_by(case_id=result["case_id"]).all()
+        events = session.scalars(select(WorkflowEvent).where(WorkflowEvent.case_id == result["case_id"])).all()
+    assert case.status == "resolved"
+    assert [message.role for message in messages] == ["user"]
+    processed = next(event for event in events if event.event_type == "inbound_processed")
+    assert processed.payload["trace_packet"]["result"]["route"] == "social_no_reply"
+    assert len(selector.calls) == 1 and writer.calls == []
+    assert probe.close_session(created["session_id"])["case_status"] == "resolved"
 
 
 def test_jev_no_answer_keeps_exact_text_on_first_reply(tmp_path: Path) -> None:
@@ -141,3 +167,25 @@ def test_worker_process_once_invokes_due_retry_without_consuming_fake_gateway_st
     result = process_once(FakeGateway(), FakePoller(), FakeAcker(), offset=10)
 
     assert result == {"processed": 0, "retry_processed": 1, "next_offset": 10}
+
+
+def test_jev_social_no_reply_is_completed_and_persisted_without_assistant_message(tmp_path):
+    from test_jev_answer_engine import engine as make_engine
+
+    from app.models.case import SupportCase
+    from app.models.message import Message
+    session_factory = make_session_factory(f"sqlite+pysqlite:///{tmp_path / 'no-reply.db'}")
+    Base.metadata.create_all(bind=session_factory.kw["bind"])
+    jev, selector, writer = make_engine(tmp_path, ["social_no_reply"])
+    routing = RoutingService(session_factory=session_factory, simple_answer_engine=jev, answer_engine_mode="jev_selected_fact")
+    result = routing.handle_inbound(InboundMessage(channel="internal_test", external_user_id="u", external_chat_id="c", text="Спасибо"))
+    assert result["route"]["route"] == "social_no_reply"
+    assert result["outcome"] == {"outcome_type": "social_no_reply", "outcome_status": "completed", "outcome_payload": {}}
+    with session_factory() as session:
+        case = session.get(SupportCase, result["case"]["case_id"])
+        messages = session.query(Message).filter_by(case_id=case.id).all()
+        events = session.scalars(select(WorkflowEvent).where(WorkflowEvent.case_id == case.id)).all()
+    assert case.status == "resolved" and case.route_mode == "social_no_reply"
+    assert [m.role for m in messages] == ["user"]
+    assert any(e.event_type == "inbound_processed" for e in events)
+    assert len(selector.calls) == 1 and writer.calls == []

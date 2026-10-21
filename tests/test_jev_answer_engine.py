@@ -1,8 +1,7 @@
 import json
 from pathlib import Path
 
-from app.services.jev_answer_engine import JevAnswerEngine, TURN_TYPES
-
+from app.services.jev_answer_engine import TURN_TYPES, JevAnswerEngine
 
 FACTS = [
     {"id": "jump.announcement", "text": "Подтверждение даты прыжков публикуется в анонсе группы за несколько дней до выходных.", "conditions": [], "source_refs": ["schedule:01"]},
@@ -100,7 +99,7 @@ def test_plain_writer_rejects_structured_or_multiline_output(tmp_path):
 
 
 def test_no_answer_uses_configured_fallback_without_writer(tmp_path):
-    llm, selector, writer = engine(tmp_path, ["substantive", []])
+    llm, _selector, writer = engine(tmp_path, ["substantive", []])
     result = llm.answer(question="Есть ли неизвестная услуга?", history=[])
     assert result["kind"] == "cannot_answer"
     assert result["response_text"] == "Для уточнения вопроса можно позвонить в офис в рабочее время."
@@ -133,9 +132,11 @@ def test_expressed_interest_uses_intent_and_attachment_context_for_fact_choice(t
 
 
 def test_choice_client_rejects_unlisted_and_zero_probability_choices():
-    from unittest.mock import patch
     from io import BytesIO
+    from unittest.mock import patch
+
     import pytest
+
     from app.services.jev_answer_engine import JevChoiceClient
 
     client = JevChoiceClient("test-secret")
@@ -151,7 +152,9 @@ def test_choice_client_rejects_unlisted_and_zero_probability_choices():
 def test_choice_client_batch_validates_every_fact_decision():
     from io import BytesIO
     from unittest.mock import patch
+
     import pytest
+
     from app.services.jev_answer_engine import JevChoiceClient
 
     client = JevChoiceClient("test-secret")
@@ -166,29 +169,29 @@ def test_choice_client_batch_validates_every_fact_decision():
             client.choose_many(state={"message": "test"}, facts=FACTS)
 
 
-def test_social_acknowledgement_is_not_flood_or_fact_selection(tmp_path):
-    llm, selector, writer = engine(tmp_path, ["social"], [json.dumps({"response_text": "Пожалуйста!"}, ensure_ascii=False)])
+def test_social_acknowledgement_uses_no_reply_without_writer_or_fact_selection(tmp_path):
+    llm, selector, writer = engine(tmp_path, ["social_no_reply"])
     result = llm.answer(question="Понял, спасибо", history=[])
-    assert result["kind"] == "social_reply"
-    assert result["response_text"] == "Пожалуйста!"
+    assert result["kind"] == "social_no_reply"
+    assert result["response_text"] == ""
     assert len(selector.calls) == 1
-    assert "knowledge_base" not in writer.calls[0]["user_prompt"]
+    assert writer.calls == []
 
 
 def test_emotional_reaction_without_request_is_described_as_social(tmp_path):
-    llm, selector, writer = engine(tmp_path, ["social"], ['{"response_text":"Понимаю, хотелось бы прыгнуть выше самостоятельно."}'])
+    llm, selector, writer = engine(tmp_path, ["social_reply"], ['{"response_text":"Понимаю, хотелось бы прыгнуть выше самостоятельно."}'])
     result = llm.answer(question="блин, жалко, для самостоятельного прыжка нельзя такую высоту 😔",
                         history=[{"role": "assistant", "content": "Высота прыжка в тандеме — 2500 метров."}])
     assert result["kind"] == "social_reply"
     assert len(selector.calls) == 1
-    assert "эмоциональная реакция" in selector.calls[0]["criteria"]["social"]
-    assert "Если клиент только реагирует" in selector.calls[0]["instructions"]
-    assert "если реплика также выражает эмоцию" in selector.calls[0]["instructions"]
+    assert "эмоциональная реакция" in selector.calls[0]["criteria"]["social_reply"]
+    assert "social_reply" in selector.calls[0]["instructions"]
+    assert "social_no_reply" in selector.calls[0]["instructions"]
     assert "history" not in json.loads(writer.calls[0]["user_prompt"])
 
 
 def test_social_writer_uses_latest_turn_without_history_and_accepts_plain_content(tmp_path):
-    llm, selector, writer = engine(tmp_path, ["social"], ["Пожалуйста!"])
+    llm, selector, writer = engine(tmp_path, ["social_reply"], ["Пожалуйста!"])
     result = llm.answer(question="Понял, спасибо", history=[{"role": "user", "content": "Вопрос о сертификате"}])
     assert result["kind"] == "social_reply"
     assert result["response_text"] == "Пожалуйста!"
@@ -199,7 +202,7 @@ def test_social_writer_uses_latest_turn_without_history_and_accepts_plain_conten
 
 def test_social_writer_rejects_empty_or_structured_invalid_content(tmp_path):
     for raw in ("", '{"response_text": invalid}', "размышляю\nа потом отвечу"):
-        llm, _, _ = engine(tmp_path / str(len(raw)), ["social"], [raw])
+        llm, _, _ = engine(tmp_path / str(len(raw)), ["social_reply"], [raw])
         result = llm.answer(question="Спасибо", history=[])
         assert result["kind"] == "retry_pending"
         assert result["response_text"] == ""
@@ -234,7 +237,7 @@ def test_invalid_structured_content_or_conflicting_fact_id_is_not_delivered(tmp_
 
 
 def test_selector_failure_does_not_use_no_answer_fallback(tmp_path):
-    llm, selector, writer = engine(tmp_path, ["bad_type"])
+    llm, _selector, writer = engine(tmp_path, ["bad_type"])
     result = llm.answer(question="Вопрос", history=[])
     assert result["kind"] == "retry_pending"
     assert result["response_text"] == ""
@@ -288,8 +291,33 @@ def test_prompts_do_not_ask_customers_followup_questions():
 def test_dialogue_policies_are_not_selectable_kb_facts(tmp_path):
     from scripts.build_runtime_profile import build_runtime_profile
     source = Path(__file__).resolve().parents[1] / "deploy" / "profile-source"
-    compiled = build_runtime_profile(source, tmp_path / "compiled")
+    build_runtime_profile(source, tmp_path / "compiled")
     facts = json.loads((tmp_path / "compiled" / "kb" / "knowledge-base.v1.json").read_text(encoding="utf-8"))["facts"]
     ids = {fact["id"] for fact in facts}
     assert "communication.generic-interest" not in ids
     assert "communication.unclear-code" not in ids
+
+
+def test_social_greeting_uses_reply_writer(tmp_path):
+    llm, selector, writer = engine(tmp_path, ["social_reply"], [json.dumps({"response_text": "Здравствуйте!"}, ensure_ascii=False)])
+    result = llm.answer(question="Здравствуйте", history=[])
+    assert result["kind"] == "social_reply"
+    assert len(selector.calls) == len(writer.calls) == 1
+
+def test_social_mixed_request_stays_substantive(tmp_path):
+    llm, selector, writer = engine(tmp_path, ["substantive", ["certificate.validity"]], ["Сертификат действует один год."])
+    result = llm.answer(question="Привет! Сколько действует сертификат?", history=[])
+    assert result["kind"] == "grounded_answer"
+    assert len(selector.calls) == 2
+    assert len(writer.calls) == 1
+
+def test_social_no_reply_model_failure_is_not_silenced(tmp_path):
+    class FailingSelector(ChoiceClient):
+        def choose(self, **kwargs):
+            raise RuntimeError("provider failure")
+    llm, _, writer = engine(tmp_path, [], [])
+    llm.selector = FailingSelector([])
+    result = llm.answer(question="Спасибо", history=[])
+    assert result["kind"] == "retry_pending"
+    assert result["response_text"] == ""
+    assert writer.calls == []

@@ -95,8 +95,8 @@ The normalized application inbound contract is transport-neutral and currently a
 
 For `simple_full_corpus_natural`, per-turn `audit.response_strategy` records one-call telemetry and deterministic tool observations. In `jev_selected_fact`, Jev classifies the turn and evaluates each published fact in one typed batch; the selected fact snapshots are stored together in a dedicated workflow event.
 
-Current fields of interest:
-- `audit.response_strategy.answer_engine` — selected runtime mode. Jev records turn type and selected fact IDs, or a stage-specific error on `retry_pending`.
+The Jev turn classifier has five outcomes. `substantive` uses the unchanged selected-fact flow; `social_reply` invokes the dialogue writer for a greeting or emotional reaction; `social_no_reply` is a terminal completed no-send result for acknowledgements/closings and skips both writer and KB selection. `off_topic` and `flood` keep their existing out-of-scope writer path. A classifier/provider error remains `retry_pending`.
+
 - `workflow_events` event `jev_fact_selected` — list `selected_facts` with each fact's `id`, `text`, `conditions`, `source_refs`, runtime KB SHA-256, outcome and `trace_id` matching `inbound_processed.trace_packet.trace_id`. Persisted even when the writer fails after fact selection; absent when no fact was selected. Jev probabilities are not persisted.
 - `audit.response_strategy.logical_llm_call_count` — one answer-provider call for the legacy full-corpus route; in the active Jev mode, zero for `no_answer`, one for writer turns (Jev requests are separate).
 - `audit.response_strategy.history_message_count` — number of bounded prior `user|assistant` messages passed to the provider.
@@ -126,6 +126,7 @@ Expected `route.route` values:
 - `out_of_scope`
 - `clarification_requested`
 - `retry_pending`
+- `social_no_reply` — a successfully processed acknowledgement/closing with empty customer text; it is persisted as completed, creates no assistant message, and triggers no transport send or retry.
 
 Notes:
 - `route_reason` may carry a normal policy reason or `llm_recovery_exhausted` / `final_response_failed_closed`. Model recovery failure is `retry_pending` with an empty payload and no outbound delivery; it never becomes a provider-caused `cannot_answer` or an application-rendered KB answer.

@@ -5,6 +5,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+import pytest
 from sqlalchemy import select, text
 
 from app.core.db import Base, make_session_factory
@@ -232,6 +233,19 @@ class AlwaysRetryRouting(StubRouting):
             "case": {"conversation_id": 1, "case_id": 1, "case_status": "retry_pending"},
             "outcome": {"outcome_type": "retry_pending", "outcome_payload": {"response_text": ""}},
         }
+
+
+class NoReplyThenAnswerRouting(StubRouting):
+    def __init__(self) -> None:
+        super().__init__(response_text="Следующий вопрос обработан")
+        self.calls = 0
+
+    def handle_inbound(self, payload, *, persist_inbound: bool = True) -> dict:
+        self.calls += 1
+        if self.calls == 1:
+            return {"case": {"conversation_id": 1, "case_id": 1, "case_status": "resolved"},
+                    "outcome": {"outcome_type": "social_no_reply", "outcome_payload": {"response_text": ""}}}
+        return super().handle_inbound(payload, persist_inbound=persist_inbound)
 
 
 class DeferredRetryRouting(StubRouting):
@@ -1310,6 +1324,41 @@ def test_vk_gateway_marks_empty_completed_reply_for_human_handling(tmp_path: Pat
         assert event is not None
         assert event.status == "waiting_human"
         assert event.error_text == "completed_without_customer_reply"
+
+
+@pytest.mark.parametrize("durable", [True, False])
+def test_vk_gateway_durably_completes_social_no_reply_and_processes_next_factual_message(tmp_path: Path, durable: bool) -> None:
+    sender = RecordingVKSender()
+    routing = NoReplyThenAnswerRouting()
+    service, session_factory = make_service(tmp_path, routing=routing, sender=sender)
+    if durable:
+        service.queue = None
+    now = datetime.now(UTC)
+    service.handle_event({"type": "message_new", "group_id": 55, "object": {"message": {
+        "id": 700, "peer_id": 2700, "from_id": 3700, "text": "Спасибо, понятно", "date": int(now.timestamp()),
+    }}})
+    if durable:
+        assert service.process_due_turns(now=now + timedelta(seconds=10)) == 1
+    with session_factory() as session:
+        event = session.scalar(select(TransportEvent).where(TransportEvent.external_message_id == "700"))
+        assert event is not None and event.status == "processed"
+        turn = session.execute(text("SELECT status, reason FROM vk_turns ORDER BY id DESC LIMIT 1")).one()
+        assert tuple(turn) == ("sent", "completed_no_reply")
+        assert session.scalars(select(OutboundTransportSend)).all() == []
+    assert sender.calls == []
+    assert routing.calls == 1
+
+    service.handle_event({"type": "message_new", "group_id": 55, "object": {"message": {
+        "id": 701, "peer_id": 2700, "from_id": 3700, "text": "Какова стоимость?", "date": int((now + timedelta(seconds=1)).timestamp()),
+    }}})
+    if durable:
+        assert service.process_due_turns(now=now + timedelta(seconds=11)) == 1
+    assert routing.calls == 2
+    assert sender.calls == [("2700", "Следующий вопрос обработан")]
+    with session_factory() as session:
+        events = list(session.scalars(select(TransportEvent).where(TransportEvent.external_message_id.in_(["700", "701"])).order_by(TransportEvent.external_message_id)))
+        assert [(event.external_message_id, event.status) for event in events] == [("700", "processed"), ("701", "processed")]
+        assert len(session.scalars(select(OutboundTransportSend)).all()) == 1
 
 
 
