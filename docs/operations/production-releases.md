@@ -63,6 +63,12 @@ Production release `7745f37` passed the normal five-service release gate, receip
 
 For this prompt change, rollback must also restore the previous authored and mounted `JEV_ANSWER_PROMPT.md` before selecting a prior successful image receipt; image rollback alone does not revert the bind-mounted prompt. The previous literal and runtime evidence are retained under the private `checks/case1567-approved-prompt/production-before/` directory beneath the external runtime root. Do not restore a database backup for a prompt rollback.
 
+## Intentional silence for acknowledgements
+
+Release `92eb871` splits the existing Jev turn-type choice into `social_reply` and `social_no_reply` without an extra classifier request. Gratitude, acknowledgement and closing without a new request complete without a writer call, assistant message or transport send. Greetings/emotional reactions retain the dialogue writer; mixed factual requests retain fact selection. Technical errors remain retryable. VK marks no-reply turns terminal with reason `completed_no_reply`, without creating an outbound intent; Telegram marks source updates processed.
+
+The released image passed 256 tests. The normal release receipt `20261021T120541Z-92eb8713dde8.json` confirms all five services, matching source manifests, health and both polling markers; PostgreSQL was not recreated. A six-turn production internal no-send session `probe_sess_6c30411b52b7` (case 1572) confirmed greeting, factual reply, silence for thanks and acknowledgement, emotional reply and a factual question after thanks. The closed session is test-marked, with six user messages, four assistant messages and zero outbound transport sends. Literal results and trace are retained under the external runtime root at `checks/social-no-reply-production/`. KB, mounted prompts and model/reasoning settings are unchanged. Roll back code/images with the previous successful `7745f37` receipt; no database or prompt restore is needed for this code-only change.
+
 ## Rollback
 
 Use a previous receipt only when its `status` is `success`:
